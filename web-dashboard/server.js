@@ -73,6 +73,66 @@ class WebServer {
 
 
         // --- API Routes ---
+        this.app.get('/api/skills', async (req, res) => {
+            try {
+                const libPath = path.join(process.cwd(), 'src', 'skills', 'lib');
+                if (!fs.existsSync(libPath)) return res.json([]);
+
+                const files = fs.readdirSync(libPath).filter(f => f.endsWith('.md'));
+
+                const ALL_OPTIONAL_SKILLS = ['git.md', 'image-prompt.md', 'moltbot.md', 'spotify.md', 'youtube.md'];
+                const optionalSkillsConfig = process.env.OPTIONAL_SKILLS || '';
+                const enabledOptionalSkills = optionalSkillsConfig.split(',').map(s => s.trim().toLowerCase()).filter(s => s !== '');
+
+                const skillsData = files.map(file => {
+                    const content = fs.readFileSync(path.join(libPath, file), 'utf8');
+                    const isOptional = ALL_OPTIONAL_SKILLS.includes(file);
+                    const baseName = file.replace('.md', '').toLowerCase();
+                    const isEnabled = !isOptional || enabledOptionalSkills.includes(baseName);
+
+                    // Extract first line or generic title
+                    const firstLineMatch = content.match(/^#+ (.*)|^【(.*)】/m) || content.match(/^([^\n]+)/);
+                    let title = baseName;
+                    if (firstLineMatch) {
+                        title = firstLineMatch[1] || firstLineMatch[2] || firstLineMatch[0];
+                        title = title.replace(/^#+\s*|【|】/g, '').trim();
+                    }
+
+                    return {
+                        id: baseName,
+                        title: title || baseName,
+                        isOptional,
+                        isEnabled,
+                        content: content
+                    };
+                });
+
+                // Sort: Enabled first, then by name
+                skillsData.sort((a, b) => {
+                    if (a.isEnabled && !b.isEnabled) return -1;
+                    if (!a.isEnabled && b.isEnabled) return 1;
+                    return a.id.localeCompare(b.id);
+                });
+
+                return res.json(skillsData);
+            } catch (e) {
+                console.error("Failed to read skills:", e);
+                return res.status(500).json({ error: e.message });
+            }
+        });
+
+        this.app.post('/api/skills/reload', (req, res) => {
+            try {
+                console.log("🔄 [WebServer] Hot-reloading skills... Clearing ProtocolFormatter cache.");
+                const ProtocolFormatter = require('../src/services/ProtocolFormatter');
+                ProtocolFormatter._lastScanTime = 0; // Trigger a fresh scan on next turn
+                return res.json({ success: true, message: "Skills cache cleared" });
+            } catch (e) {
+                console.error("Failed to reload skills cache:", e);
+                return res.status(500).json({ error: e.message });
+            }
+        });
+
         this.app.get('/api/golems', (req, res) => {
             return res.json({ golems: Array.from(this.contexts.keys()) });
         });
