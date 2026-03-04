@@ -27,6 +27,7 @@ show_menu() {
     echo -e "\n  ${BOLD}${YELLOW}🛠️  安裝與維護${NC}"
     echo -e "  ${CYAN}───────────────────────────────────────────────${NC}"
     echo -e "   ${BOLD}[1]${NC}  📦 完整安裝"
+    echo -e "   ${BOLD}[I]${NC}  🧹 完全初始化"
     echo -e "   ${BOLD}[2]${NC}  ⚙️  單體環境配置 (.env)"
     echo -e "   ${BOLD}[G]${NC}  🧙 多機配置精靈 (golems.json)"
     echo -e "   ${BOLD}[3]${NC}  📥 安裝依賴"
@@ -49,6 +50,7 @@ show_menu() {
     case $choice in
         0) launch_system ;;
         1) run_full_install ;;
+        [Ii]) run_clean_init; show_menu ;;
         2) step_check_env; config_wizard; show_menu ;;
         [Gg]) golems_wizard; show_menu ;;
         3) step_install_core; step_install_dashboard; show_menu ;;

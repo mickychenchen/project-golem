@@ -76,6 +76,7 @@ case "${1:-}" in
         launch_system $launch_args
         ;;
     --install)   run_full_install ;;
+    --init)      run_clean_init ;;
     --docker)    launch_docker ;;
     --config)    step_check_env; config_wizard ;;
     --status)    print_status ;;
@@ -95,6 +96,7 @@ case "${1:-}" in
         echo "  --admin       指定驗證模式為 ADMIN (預設)"
         echo "  --chat        指定驗證模式為 CHAT (群組模式)"
         echo "  --install     執行完整安裝流程"
+        echo "  --init        完全初始化 (刪除資料並重新安裝)"
         echo "  --config      啟動配置精靈 (.env)"
         echo "  --dashboard   僅安裝/重建 Web Dashboard"
         echo "  --docker      使用 Docker 啟動系統"
@@ -110,6 +112,7 @@ case "${1:-}" in
         echo "  ./setup.sh --start --bg     # 背景啟動"
         echo "  ./setup.sh --start --bg --single --chat  # 背景模式：單機+群組介面"
         echo "  ./setup.sh --install        # 自動完整安裝"
+        echo "  ./setup.sh --init           # 完全初始化"
         echo "  ./setup.sh --status         # 檢查狀態"
         echo ""
         exit 0

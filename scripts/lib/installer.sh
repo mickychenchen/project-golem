@@ -476,6 +476,53 @@ step_install_dashboard() {
     echo ""
 }
 
+# ─── Clean Init ───
+run_clean_init() {
+    echo ""
+    box_top
+    box_line_colored "  ${BOLD}${RED}⚠️  警告：這將會刪除所有本地資料！${NC}                      "
+    box_line_colored "  ${DIM}即將刪除：node_modules、記憶資料、logs 等目錄${NC}        "
+    box_bottom
+    echo ""
+    if ! confirm_action "確定要執行完全初始化嗎？"; then
+        echo -e "  ${DIM}已取消初始化。${NC}\n"
+        sleep 1
+        return
+    fi
+
+    echo -e "  ${CYAN}🧹 正在清理系統資料...${NC}"
+    log "Running clean init - deleting directories"
+    
+    # 刪除各項目錄
+    rm -rf "$SCRIPT_DIR/node_modules" "$SCRIPT_DIR/package-lock.json"
+    echo -e "    ${GREEN}✔${NC} 刪除主程式依賴 (node_modules)"
+    
+    if [ -d "$SCRIPT_DIR/web-dashboard" ]; then
+        rm -rf "$SCRIPT_DIR/web-dashboard/node_modules" "$SCRIPT_DIR/web-dashboard/package-lock.json" "$SCRIPT_DIR/web-dashboard/.next" "$SCRIPT_DIR/web-dashboard/out"
+        echo -e "    ${GREEN}✔${NC} 刪除 Dashboard 依賴與建置快取"
+    fi
+    
+    local mem_dir="${USER_DATA_DIR:-./golem_memory}"
+    # Resolving if it's relative
+    if [[ "$mem_dir" == ./* ]]; then
+        mem_dir="$SCRIPT_DIR/${mem_dir#./}"
+    elif [[ "$mem_dir" != /* ]]; then
+        mem_dir="$SCRIPT_DIR/$mem_dir"
+    fi
+    rm -rf "$mem_dir"
+    echo -e "    ${GREEN}✔${NC} 刪除 Golem 記憶資料庫"
+    
+    # Logs directory
+    rm -rf "$SCRIPT_DIR/logs"
+    echo -e "    ${GREEN}✔${NC} 刪除系統日誌 (logs)"
+    
+    echo -e "  ${GREEN}✅ 清理完成！請重新啟動或進行手動配置。${NC}"
+    sleep 2
+    
+    # recreate log dir since we just deleted it
+    mkdir -p "$SCRIPT_DIR/logs"
+}
+
 # ─── Full Install ───
 run_full_install() {
     timer_start
