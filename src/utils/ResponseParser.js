@@ -4,7 +4,7 @@
 class ResponseParser {
     static parse(raw) {
         const parsed = { memory: null, actions: [], reply: "" };
-        
+
         if (!raw) return parsed;
 
         // ✨ [升級：穿透 Thinking Mode] 
@@ -25,22 +25,22 @@ class ResponseParser {
         if (actionMatch && actionMatch[1]) {
             // 暴力脫去所有 Markdown 外衣
             let jsonCandidate = actionMatch[1].replace(/```[a-zA-Z]*\s*/gi, '').replace(/```/g, '').trim();
-            
+
             if (jsonCandidate && jsonCandidate !== 'null') {
                 try {
                     const jsonObj = JSON.parse(jsonCandidate);
                     // 如果 AI 忘記寫陣列 []，自動幫它包起來
                     let steps = Array.isArray(jsonObj) ? jsonObj : (jsonObj.steps || [jsonObj]);
-                    
+
                     // ✨ [核心修復：Schema 幻覺矯正器]
                     steps = steps.map(act => {
                         if (!act) return act;
-                        
+
                         // 矯正 action 名稱 (AI 常犯錯寫成 run_command)
                         if (act.action === 'run_command' || act.action === 'execute') {
                             act.action = 'command';
                         }
-                        
+
                         // 矯正 parameter 欄位 (AI 常犯錯把它藏在 params 裡面)
                         if (act.action === 'command' && !act.parameter && !act.cmd && !act.command) {
                             if (act.params && act.params.command) {
@@ -50,7 +50,7 @@ class ResponseParser {
                         }
                         return act;
                     });
-                    
+
                     parsed.actions.push(...steps);
                 } catch (e) {
                     // 如果 JSON 嚴重破裂，啟動絕地救援，嘗試用正則硬挖
@@ -59,7 +59,7 @@ class ResponseParser {
                         try {
                             const fixed = JSON.parse(fallbackMatch[0]);
                             let steps = Array.isArray(fixed) ? fixed : [fixed];
-                            
+
                             steps = steps.map(act => {
                                 if (!act) return act;
                                 if (act.action === 'run_command' || act.action === 'execute') act.action = 'command';
@@ -68,7 +68,7 @@ class ResponseParser {
                                 }
                                 return act;
                             });
-                            
+
                             parsed.actions.push(...steps);
                         } catch (err) { console.error("Fallback 解析失敗:", err); }
                     }
@@ -76,8 +76,8 @@ class ResponseParser {
             }
         }
 
-        // 3. 獨立擷取 REPLY
-        const replyMatch = raw.match(/\[GOLEM_REPLY\]([\s\S]*?)$/i);
+        // 3. 獨立擷取 REPLY (✅ M-1 Fix: 優先匹配 closing tag，防止 AI 尾端雜訊污染)
+        const replyMatch = raw.match(/\[GOLEM_REPLY\]([\s\S]*?)(?:\[\/GOLEM_REPLY\]|$)/i);
         if (replyMatch && replyMatch[1]) {
             parsed.reply = replyMatch[1].trim();
         }
@@ -90,7 +90,7 @@ class ResponseParser {
                 .replace(/Answer now/gi, '')
                 .replace(/Gemini said/gi, '')
                 .trim();
-            
+
             // 避免把空的字串傳給 Telegram 報錯
             if (cleanRaw) {
                 parsed.reply = cleanRaw;

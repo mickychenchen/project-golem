@@ -35,8 +35,13 @@ class AutonomyManager {
         console.log(`🕒 [Autonomy] 定時檢查日誌壓縮狀態 (雙重門檻掃描)...`);
         try {
             const ChatLogManager = require('../managers/ChatLogManager');
-            const logManager = new ChatLogManager();
-            const logDir = logManager.logDir;
+            // ✅ [H-1 Fix] 傳入正確 golemId/logDir/isSingleMode，確保掃描正確目錄
+            const logManager = new ChatLogManager({
+                golemId: this.golemId,
+                logDir: LOG_BASE_DIR,
+                isSingleMode: GOLEM_MODE === 'SINGLE'
+            });
+            const logDir = logManager.dirs.hourly;
 
             const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
             const yesterday = logManager._getYesterdayDateString();
@@ -84,6 +89,9 @@ class AutonomyManager {
             : path.join(LOG_BASE_DIR, this.golemId);
 
         const scheduleFile = path.join(logDir, 'schedules.json');
+
+        // M-5 Fix: 寫入前先確保目錄存在，防止拍程觸發在首次對話之前導致寫入失敗
+        fs.mkdirSync(path.dirname(scheduleFile), { recursive: true });
 
         // 1. 讀取並檢查檔案資料庫 (New Path: logs/schedules.json)
         if (fs.existsSync(scheduleFile)) {
@@ -180,8 +188,19 @@ class AutonomyManager {
         const patches = ResponseParser.extractJson(raw);
         if (patches.length > 0) {
             const patch = patches[0];
-            const targetName = patch.file === 'skills.js' ? 'skills.js' : 'index.js';
-            const targetPath = targetName === 'skills.js' ? path.join(process.cwd(), 'skills.js') : path.join(process.cwd(), 'index.js');
+            // ✅ [M-3 Fix] 移除 hardcoded skills.js，改為支援 src/ 下的合法相對路徑
+            // 防止目錄穿越攻擊（不允許 .. 層級）
+            const patchFile = patch.file || '';
+            if (!patchFile || patchFile.includes('..') || patchFile.startsWith('/')) {
+                console.error(`⛔ [Autonomy] 非法补丁路徑被拒: ${patchFile}`);
+                return;
+            }
+            const targetPath = path.join(process.cwd(), patchFile);
+            const targetName = path.basename(targetPath);
+            if (!require('fs').existsSync(targetPath)) {
+                console.error(`❌ [Autonomy] 目標檔案不存在: ${targetPath}`);
+                return;
+            }
             const testFile = PatchManager.createTestClone(targetPath, patches);
             this.pendingPatch = { path: testFile, target: targetPath, name: targetName, description: patch.description };
             const msgText = `💡 **自主進化提案 (${this.golemId})**\n目標：${targetName}\n內容：${patch.description}`;

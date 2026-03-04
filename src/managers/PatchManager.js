@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
+const { spawnSync } = require('child_process');
 
 // ============================================================
 // 🩹 Patch Manager (神經補丁 - Fix Edition)
@@ -45,9 +45,21 @@ class PatchManager {
         try {
             if (!isStandardExt) fs.copyFileSync(filePath, verifyPath);
 
-            execSync(`node -c "${verifyPath}"`);
+            // ✅ [H-3 Fix] 使用 spawnSync 陣列語法，避免 Shell 注入
+            const checkResult = spawnSync('node', ['-c', verifyPath], { stdio: 'pipe' });
+            if (checkResult.status !== 0) {
+                throw new Error(checkResult.stderr ? checkResult.stderr.toString() : '語法驗證失敗');
+            }
+
             if (verifyPath.includes('index.test.js')) {
-                execSync(`node "${verifyPath}"`, { env: { ...process.env, GOLEM_TEST_MODE: 'true' }, timeout: 5000, stdio: 'pipe' });
+                const runResult = spawnSync('node', [verifyPath], {
+                    env: { ...process.env, GOLEM_TEST_MODE: 'true' },
+                    timeout: 5000,
+                    stdio: 'pipe'
+                });
+                if (runResult.status !== 0) {
+                    throw new Error(runResult.stderr ? runResult.stderr.toString() : '測試執行失敗');
+                }
             }
             console.log(`✅ [PatchManager] ${filePath} 驗證通過`);
             return true;

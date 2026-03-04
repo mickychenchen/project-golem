@@ -106,7 +106,8 @@ class ConversationManager {
             await this.NeuroShunter.dispatch(task.ctx, raw, this.brain, this.controller, { suppressReply: shouldSuppressReply });
         } catch (e) {
             console.error("❌ [Queue] 處理失敗:", e);
-            await task.ctx.reply(`⚠️ 處理錯誤: ${e.message}`);
+            // ✅ [M-4 Fix] 對外只顯示友善錯誤，避免洩露路徑/Selector 等內部資訊
+            await task.ctx.reply(`⚠️ 系統暫時無法回應，請稍後再試。`);
         } finally {
             this.isProcessing = false;
             setTimeout(() => this._processQueue(), 500);
