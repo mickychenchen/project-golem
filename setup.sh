@@ -77,6 +77,7 @@ case "${1:-}" in
         ;;
     --install)   run_full_install ;;
     --init)      run_clean_init ;;
+    --stop)      stop_system ;;
     --docker)    launch_docker ;;
     --config)    step_check_env; config_wizard ;;
     --status)    print_status ;;
@@ -97,6 +98,7 @@ case "${1:-}" in
         echo "  --chat        指定驗證模式為 CHAT (群組模式)"
         echo "  --install     執行完整安裝流程"
         echo "  --init        完全初始化 (刪除資料並重新安裝)"
+        echo "  --stop        停止 Golem 與 Web Dashboard"
         echo "  --config      啟動配置精靈 (.env)"
         echo "  --dashboard   僅安裝/重建 Web Dashboard"
         echo "  --docker      使用 Docker 啟動系統"

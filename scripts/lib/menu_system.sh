@@ -41,6 +41,7 @@ show_menu() {
     echo -e "   ${BOLD}[S]${NC}  🏥 系統健康檢查"
     echo -e "   ${BOLD}[D]${NC}  🔄 切換 Dashboard"
     echo -e "   ${BOLD}[L]${NC}  📋 查看安裝日誌"
+    echo -e "   ${BOLD}[K]${NC}  🛑 停止 Golem 與 Dashboard"
     echo -e "\n   ${BOLD}[Q]${NC}  🚪 退出\n"
 
     read -r -p "  👉 請輸入選項: " raw_choice
@@ -60,6 +61,7 @@ show_menu() {
         [Ss]) check_status; run_health_check; read -r -p " 按 Enter 返回..."; show_menu ;;
         [Dd]) toggle_dashboard ;;
         [Ll]) view_logs ;;
+        [Kk]) stop_system; show_menu ;;
         [Qq]) echo -e "  ${GREEN}👋 再見！${NC}"; exit 0 ;;
         *) 
             # 防護性顯示：只有當輸入是真的安全字元時才印出，否則顯示通用錯誤
@@ -107,6 +109,54 @@ view_logs() {
     echo ""
     read -r -p "  按 Enter 返回主選單..."
     show_menu
+}
+
+stop_system() {
+    echo ""
+    echo -e "  ${YELLOW}🛑 正在停止 Golem 與 Web Dashboard...${NC}"
+    local killed=0
+
+    # 1. Kill via .golem.pid
+    local pid_file="$SCRIPT_DIR/.golem.pid"
+    if [ -f "$pid_file" ]; then
+        local gpid
+        gpid=$(cat "$pid_file")
+        if kill -0 "$gpid" 2>/dev/null; then
+            kill "$gpid" 2>/dev/null
+            echo -e "  ${GREEN}✅ Golem 主程序已停止 (PID: $gpid)${NC}"
+            killed=1
+        else
+            echo -e "  ${DIM}   PID $gpid 已不存在${NC}"
+        fi
+        rm -f "$pid_file"
+    fi
+
+    # 2. Kill anything on Dashboard port (default 3000)
+    local dash_port="${DASHBOARD_PORT:-3000}"
+    local dash_pids
+    dash_pids=$(lsof -ti tcp:"$dash_port" 2>/dev/null)
+    if [ -n "$dash_pids" ]; then
+        echo "$dash_pids" | xargs kill 2>/dev/null
+        echo -e "  ${GREEN}✅ Dashboard (port $dash_port) 已停止${NC}"
+        killed=1
+    fi
+
+    # 3. Also kill any lingering 'node index.js' / 'npm start' spawned by setup
+    local golem_pids
+    golem_pids=$(pgrep -f 'node.*index\.js' 2>/dev/null)
+    if [ -n "$golem_pids" ]; then
+        echo "$golem_pids" | xargs kill 2>/dev/null
+        echo -e "  ${GREEN}✅ 殘留 Node.js 程序已終止${NC}"
+        killed=1
+    fi
+
+    if [ "$killed" -eq 0 ]; then
+        echo -e "  ${DIM}   找不到正在執行的 Golem 程序${NC}"
+    fi
+
+    log "System stopped via stop_system"
+    echo ""
+    read -r -p "  按 Enter 返回主選單..."
 }
 
 launch_system() {
