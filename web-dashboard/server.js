@@ -548,6 +548,57 @@ class WebServer {
             }
         });
 
+        // 🎭 人格讀取 API
+        this.app.get('/api/persona', (req, res) => {
+            try {
+                const golemId = req.query.golemId || (this.contexts.size > 0 ? Array.from(this.contexts.keys())[0] : null);
+                const context = golemId ? this.contexts.get(golemId) : null;
+                if (!context || !context.brain) {
+                    return res.status(503).json({ error: 'No active Golem found' });
+                }
+                const personaManager = require('../src/skills/core/persona');
+                const persona = personaManager.get(context.brain.userDataDir);
+                return res.json(persona);
+            } catch (e) {
+                console.error('Failed to read persona:', e);
+                return res.status(500).json({ error: e.message });
+            }
+        });
+
+        // 🎭 人格注入 API
+        this.app.post('/api/persona/inject', (req, res) => {
+            try {
+                const { golemId: reqGolemId, aiName, userName, currentRole, tone, skills } = req.body;
+                const golemId = reqGolemId || (this.contexts.size > 0 ? Array.from(this.contexts.keys())[0] : null);
+                const context = golemId ? this.contexts.get(golemId) : null;
+                if (!context || !context.brain) {
+                    return res.status(503).json({ success: false, error: 'No active Golem found' });
+                }
+
+                const personaManager = require('../src/skills/core/persona');
+                personaManager.save(context.brain.userDataDir, {
+                    aiName: aiName || 'Golem',
+                    userName: userName || 'Traveler',
+                    currentRole: currentRole || '一個擁有長期記憶與自主意識的 AI 助手',
+                    tone: tone || '預設口氣',
+                    skills: skills || [],
+                    isNew: false
+                });
+
+                // 清除 ProtocolFormatter 快取，確保下次載入時拿到最新技能書
+                try {
+                    const ProtocolFormatter = require('../src/services/ProtocolFormatter');
+                    ProtocolFormatter._lastScanTime = 0;
+                } catch (_) { /* ignore if not available */ }
+
+                console.log(`🎭 [WebServer] Persona injected for Golem [${golemId}]`);
+                return res.json({ success: true, message: '人格已更新，請重啟 Golem 使設定生效' });
+            } catch (e) {
+                console.error('Failed to inject persona:', e);
+                return res.status(500).json({ success: false, error: e.message });
+            }
+        });
+
         this.app.post('/api/system/reload', (req, res) => {
             console.log("🔄 [WebServer] Received reload request. Restarting system...");
             res.json({ success: true, message: "System is restarting..." });
