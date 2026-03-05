@@ -25,8 +25,10 @@ import {
     RefreshCcw,
     TriangleAlert,
     Plus,
-    CheckCircle2,
     AlertCircle,
+    Pencil,
+    Check,
+    RotateCcw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -43,7 +45,7 @@ interface Preset {
     skills: string[];
 }
 
-interface CurrentPersona {
+interface PersonaData {
     aiName: string;
     userName: string;
     currentRole: string;
@@ -53,22 +55,13 @@ interface CurrentPersona {
 }
 
 const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
-    BrainCircuit,
-    Cpu,
-    Palette,
-    Sparkles,
-    User,
-    Settings2,
+    BrainCircuit, Cpu, Palette, Sparkles, User, Settings2,
 };
-
 const ICON_OPTIONS = ["BrainCircuit", "Cpu", "Palette", "Sparkles", "User", "Settings2"];
 
-// ── Inject Confirm Dialog ────────────────────────────────────────────────────
-function InjectPersonaConfirmDialog({
-    open,
-    onOpenChange,
-    onConfirm,
-    isLoading,
+// ── Confirm Restart Dialog ───────────────────────────────────────────────────
+function RestartConfirmDialog({
+    open, onOpenChange, onConfirm, isLoading,
 }: {
     open: boolean;
     onOpenChange: (v: boolean) => void;
@@ -80,17 +73,17 @@ function InjectPersonaConfirmDialog({
             <DialogContent showCloseButton={!isLoading} className="bg-gray-900 border-gray-700 text-white max-w-sm">
                 <DialogHeader>
                     <div className="w-12 h-12 rounded-xl border bg-purple-500/10 border-purple-500/20 flex items-center justify-center mb-2">
-                        <User className="w-5 h-5 text-purple-400" />
+                        <Zap className="w-5 h-5 text-purple-400" />
                     </div>
-                    <DialogTitle className="text-white text-base">注入人格並重啟 Golem？</DialogTitle>
+                    <DialogTitle className="text-white text-base">儲存人格並重啟 Golem？</DialogTitle>
                     <DialogDescription className="text-gray-400 text-sm leading-relaxed">
-                        系統將儲存目前的人格設定，並完整重啟 Golem，使人格變更正確載入。
+                        人格設定將寫入檔案，Golem 重啟後新設定正式生效。
                     </DialogDescription>
                 </DialogHeader>
                 <div className="space-y-2">
                     <div className="flex items-start gap-2 rounded-lg bg-gray-800/60 border border-gray-700/50 px-3 py-2.5">
                         <TriangleAlert className="w-3.5 h-3.5 text-gray-500 mt-0.5 flex-shrink-0" />
-                        <p className="text-xs text-gray-500">進行中的對話將被中斷，前端會短暫斷線後自動重連。</p>
+                        <p className="text-xs text-gray-500">進行中的對話將被中斷，前端短暫斷線後自動重連。</p>
                     </div>
                     <div className="rounded-lg bg-gray-800/40 border border-gray-700/30 px-3 py-2">
                         <p className="text-[11px] text-gray-500 mb-1 font-medium">確認後將自動執行：</p>
@@ -107,9 +100,7 @@ function InjectPersonaConfirmDialog({
                         className="flex-1 bg-transparent border-gray-800 text-gray-500 hover:bg-gray-800 hover:text-gray-300"
                         onClick={() => onOpenChange(false)}
                         disabled={isLoading}
-                    >
-                        取消
-                    </Button>
+                    >取消</Button>
                     <Button
                         className="flex-1 bg-purple-700 hover:bg-purple-600 text-white"
                         onClick={onConfirm}
@@ -117,13 +108,11 @@ function InjectPersonaConfirmDialog({
                     >
                         {isLoading ? (
                             <span className="flex items-center gap-1.5">
-                                <RefreshCcw className="w-3.5 h-3.5 animate-spin" />
-                                注入中...
+                                <RefreshCcw className="w-3.5 h-3.5 animate-spin" />儲存並重啟中...
                             </span>
                         ) : (
                             <span className="flex items-center gap-1.5">
-                                <Zap className="w-3.5 h-3.5" />
-                                確認注入
+                                <Zap className="w-3.5 h-3.5" />確認重啟
                             </span>
                         )}
                     </Button>
@@ -133,10 +122,10 @@ function InjectPersonaConfirmDialog({
     );
 }
 
-// ── Inject Done Dialog ───────────────────────────────────────────────────────
-function InjectPersonaDoneDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
+// ── Restarting Dialog ────────────────────────────────────────────────────────
+function RestartingDialog({ open }: { open: boolean }) {
     return (
-        <Dialog open={open} onOpenChange={onOpenChange}>
+        <Dialog open={open} onOpenChange={() => { }}>
             <DialogContent className="bg-gray-900 border-gray-700 text-white max-w-sm" showCloseButton={false}>
                 <DialogHeader>
                     <div className="w-12 h-12 rounded-xl border bg-green-500/10 border-green-500/20 flex items-center justify-center mb-2">
@@ -154,9 +143,7 @@ function InjectPersonaDoneDialog({ open, onOpenChange }: { open: boolean; onOpen
 
 // ── Create Persona Dialog ────────────────────────────────────────────────────
 function CreatePersonaDialog({
-    open,
-    onOpenChange,
-    onCreated,
+    open, onOpenChange, onCreated,
 }: {
     open: boolean;
     onOpenChange: (v: boolean) => void;
@@ -180,15 +167,11 @@ function CreatePersonaDialog({
         setError(null);
     };
 
-    const handleClose = (v: boolean) => {
-        if (!v) reset();
-        onOpenChange(v);
-    };
+    const handleClose = (v: boolean) => { if (!v) reset(); onOpenChange(v); };
 
     const handleSubmit = async () => {
         if (!id.trim() || !name.trim()) { setError("請填寫 ID 與名稱"); return; }
-        setIsLoading(true);
-        setError(null);
+        setIsLoading(true); setError(null);
         try {
             const res = await fetch("/api/persona/create", {
                 method: "POST",
@@ -196,18 +179,10 @@ function CreatePersonaDialog({
                 body: JSON.stringify({ id: id.trim(), name: name.trim(), description, icon, aiName, userName, role, tone, tags }),
             });
             const data = await res.json();
-            if (res.ok && data.success) {
-                reset();
-                onOpenChange(false);
-                onCreated();
-            } else {
-                setError(data.error || "建立失敗");
-            }
-        } catch {
-            setError("請求發送失敗");
-        } finally {
-            setIsLoading(false);
-        }
+            if (res.ok && data.success) { reset(); onOpenChange(false); onCreated(); }
+            else setError(data.error || "建立失敗");
+        } catch { setError("請求發送失敗"); }
+        finally { setIsLoading(false); }
     };
 
     const fieldCls = "w-full bg-gray-950 border border-gray-800 rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-purple-500/30 focus:border-purple-500 transition-all placeholder:text-gray-600";
@@ -220,13 +195,10 @@ function CreatePersonaDialog({
                         <Plus className="w-5 h-5 text-purple-400" />
                     </div>
                     <DialogTitle className="text-white text-base">新增人格樣板</DialogTitle>
-                    <DialogDescription className="text-gray-400 text-sm">
-                        建立新的 persona .md 樣板，建立後即可在此頁面套用。
-                    </DialogDescription>
+                    <DialogDescription className="text-gray-400 text-sm">建立新的 persona .md 樣板。</DialogDescription>
                 </DialogHeader>
 
                 <div className="space-y-4 py-2">
-                    {/* ID & Name */}
                     <div className="grid grid-cols-2 gap-3">
                         <div>
                             <label className="block text-xs font-medium text-gray-400 mb-1.5">檔案 ID <span className="text-red-400">*</span></label>
@@ -238,39 +210,24 @@ function CreatePersonaDialog({
                             <input value={name} onChange={e => setName(e.target.value)} placeholder="我的人格" className={fieldCls} />
                         </div>
                     </div>
-
-                    {/* Description */}
                     <div>
                         <label className="block text-xs font-medium text-gray-400 mb-1.5">簡短描述</label>
                         <input value={description} onChange={e => setDescription(e.target.value)} placeholder="一句話描述這個人格的特色" className={fieldCls} />
                     </div>
-
-                    {/* Icon */}
                     <div>
                         <label className="block text-xs font-medium text-gray-400 mb-1.5">圖示</label>
                         <div className="flex flex-wrap gap-2">
                             {ICON_OPTIONS.map(opt => {
                                 const Ico = ICON_MAP[opt];
                                 return (
-                                    <button
-                                        key={opt}
-                                        onClick={() => setIcon(opt)}
-                                        className={cn(
-                                            "p-2.5 rounded-xl border transition-all",
-                                            icon === opt
-                                                ? "bg-purple-500/20 border-purple-500/50 text-purple-300"
-                                                : "bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-600"
-                                        )}
-                                        title={opt}
-                                    >
-                                        <Ico className="w-4 h-4" />
-                                    </button>
+                                    <button key={opt} onClick={() => setIcon(opt)}
+                                        className={cn("p-2.5 rounded-xl border transition-all",
+                                            icon === opt ? "bg-purple-500/20 border-purple-500/50 text-purple-300" : "bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-600")}
+                                        title={opt}><Ico className="w-4 h-4" /></button>
                                 );
                             })}
                         </div>
                     </div>
-
-                    {/* AI Name & User Name */}
                     <div className="grid grid-cols-2 gap-3">
                         <div>
                             <label className="block text-xs font-medium text-gray-400 mb-1.5">AI 名稱</label>
@@ -281,63 +238,34 @@ function CreatePersonaDialog({
                             <input value={userName} onChange={e => setUserName(e.target.value)} placeholder="Traveler" className={fieldCls} />
                         </div>
                     </div>
-
-                    {/* Role */}
                     <div>
                         <label className="block text-xs font-medium text-gray-400 mb-1.5">任務定位 &amp; 人設背景</label>
-                        <textarea
-                            value={role}
-                            onChange={e => setRole(e.target.value)}
+                        <textarea value={role} onChange={e => setRole(e.target.value)}
                             placeholder="描述這個人格的身份背景、任務與個性..."
-                            className={`${fieldCls} resize-y min-h-[90px]`}
-                        />
+                            className={`${fieldCls} resize-y min-h-[90px]`} />
                     </div>
-
-                    {/* Tone */}
                     <div>
                         <label className="block text-xs font-medium text-gray-400 mb-1.5">語言風格 &amp; 語氣</label>
                         <input value={tone} onChange={e => setTone(e.target.value)} placeholder="例如：活潑幽默、直接果斷" className={fieldCls} />
                     </div>
-
-                    {/* Tags */}
                     <div>
                         <label className="block text-xs font-medium text-gray-400 mb-1.5">標籤（逗號分隔）</label>
                         <input value={tags} onChange={e => setTags(e.target.value)} placeholder="生產力, 助手, 專業" className={fieldCls} />
                     </div>
-
                     {error && (
                         <div className="flex items-center gap-2 text-red-400 text-sm bg-red-950/20 border border-red-900/30 rounded-lg px-3 py-2">
-                            <AlertCircle className="w-4 h-4 flex-shrink-0" />
-                            {error}
+                            <AlertCircle className="w-4 h-4 flex-shrink-0" />{error}
                         </div>
                     )}
                 </div>
 
                 <DialogFooter className="gap-2 sm:gap-2 pt-2">
-                    <Button
-                        variant="outline"
-                        className="flex-1 bg-transparent border-gray-800 text-gray-500 hover:bg-gray-800 hover:text-gray-300"
-                        onClick={() => handleClose(false)}
-                        disabled={isLoading}
-                    >
-                        取消
-                    </Button>
-                    <Button
-                        className="flex-1 bg-purple-700 hover:bg-purple-600 text-white"
-                        onClick={handleSubmit}
-                        disabled={isLoading}
-                    >
-                        {isLoading ? (
-                            <span className="flex items-center gap-1.5">
-                                <RefreshCcw className="w-3.5 h-3.5 animate-spin" />
-                                建立中...
-                            </span>
-                        ) : (
-                            <span className="flex items-center gap-1.5">
-                                <Plus className="w-3.5 h-3.5" />
-                                建立人格
-                            </span>
-                        )}
+                    <Button variant="outline" className="flex-1 bg-transparent border-gray-800 text-gray-500 hover:bg-gray-800 hover:text-gray-300"
+                        onClick={() => handleClose(false)} disabled={isLoading}>取消</Button>
+                    <Button className="flex-1 bg-purple-700 hover:bg-purple-600 text-white" onClick={handleSubmit} disabled={isLoading}>
+                        {isLoading
+                            ? <span className="flex items-center gap-1.5"><RefreshCcw className="w-3.5 h-3.5 animate-spin" />建立中...</span>
+                            : <span className="flex items-center gap-1.5"><Plus className="w-3.5 h-3.5" />建立人格</span>}
                     </Button>
                 </DialogFooter>
             </DialogContent>
@@ -345,69 +273,94 @@ function CreatePersonaDialog({
     );
 }
 
-export default function PersonaPage() {
-    const [currentPersona, setCurrentPersona] = useState<CurrentPersona | null>(null);
-    const [templates, setTemplates] = useState<Preset[]>([]);
-    const [searchTerm, setSearchTerm] = useState("");
-    const [selectedTag, setSelectedTag] = useState<string | null>(null);
-    const [activePresetId, setActivePresetId] = useState<string>("");
+// ── Inline field component ───────────────────────────────────────────────────
+function EditField({
+    label, value, onChange, multiline = false, placeholder = "",
+}: {
+    label: string;
+    value: string;
+    onChange: (v: string) => void;
+    multiline?: boolean;
+    placeholder?: string;
+}) {
+    const base = "w-full bg-gray-950 border border-gray-700 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/40 focus:border-purple-500 transition-all placeholder:text-gray-600";
+    return (
+        <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1.5">{label}</label>
+            {multiline
+                ? <textarea value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
+                    className={`${base} resize-y min-h-[100px]`} />
+                : <input value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
+                    className={base} />}
+        </div>
+    );
+}
 
+// ── Main Page ────────────────────────────────────────────────────────────────
+export default function PersonaPage() {
+    const [saved, setSaved] = useState<PersonaData | null>(null);  // last-saved state
     const [aiName, setAiName] = useState("Golem");
     const [userName, setUserName] = useState("Traveler");
-    const [role, setRole] = useState("一個擁有長期記憶與自主意識的 AI 助手");
-    const [tone, setTone] = useState("預設口氣，自然且友善");
+    const [role, setRole] = useState("");
+    const [tone, setTone] = useState("");
 
+    const [isEditing, setIsEditing] = useState(false);
+    const [isDirty, setIsDirty] = useState(false);
     const [isInjecting, setIsInjecting] = useState(false);
     const [showConfirm, setShowConfirm] = useState(false);
     const [showDone, setShowDone] = useState(false);
     const [showCreate, setShowCreate] = useState(false);
-    const [hasUnsyncedChanges, setHasUnsyncedChanges] = useState(false);
-    const [statusMsg, setStatusMsg] = useState<{ type: "success" | "error" | "info"; text: string } | null>(null);
 
-    const loadTemplates = useCallback(() => {
-        fetch("/api/golems/templates")
-            .then((r) => r.json())
-            .then((data) => { if (data.templates) setTemplates(data.templates); })
-            .catch(() => { });
-    }, []);
+    const [templates, setTemplates] = useState<Preset[]>([]);
+    const [searchTerm, setSearchTerm] = useState("");
+    const [selectedTag, setSelectedTag] = useState<string | null>(null);
+    const [activePresetId, setActivePresetId] = useState("");
 
-    // Load current persona on mount
+    const [statusMsg, setStatusMsg] = useState<{ type: "error" | "info"; text: string } | null>(null);
+
+    const applyToForm = (data: PersonaData) => {
+        setAiName(data.aiName || "Golem");
+        setUserName(data.userName || "Traveler");
+        setRole(data.currentRole || "");
+        setTone(data.tone || "");
+    };
+
+    // Load current persona
     useEffect(() => {
         fetch("/api/persona")
-            .then((r) => r.json())
-            .then((data) => {
+            .then(r => r.json())
+            .then(data => {
                 if (data && !data.error) {
-                    setCurrentPersona(data);
-                    setAiName(data.aiName || "Golem");
-                    setUserName(data.userName || "Traveler");
-                    setRole(data.currentRole || "一個擁有長期記憶與自主意識的 AI 助手");
-                    setTone(data.tone || "預設口氣，自然且友善");
+                    setSaved(data);
+                    applyToForm(data);
                 }
             })
             .catch(() => { });
     }, []);
 
+    const loadTemplates = useCallback(() => {
+        fetch("/api/golems/templates")
+            .then(r => r.json())
+            .then(d => { if (d.templates) setTemplates(d.templates); })
+            .catch(() => { });
+    }, []);
+
     useEffect(() => { loadTemplates(); }, [loadTemplates]);
 
-    const allTags = Array.from(new Set(templates.flatMap((t) => t.tags || [])));
+    // Detect dirty state
+    useEffect(() => {
+        if (!saved) return;
+        const changed = aiName !== saved.aiName || userName !== saved.userName
+            || role !== saved.currentRole || tone !== saved.tone;
+        setIsDirty(changed);
+    }, [aiName, userName, role, tone, saved]);
 
-    const filteredTemplates = templates.filter((t) => {
-        const matchesSearch =
-            t.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            t.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            t.role.toLowerCase().includes(searchTerm.toLowerCase());
-        const matchesTag = !selectedTag || (t.tags && t.tags.includes(selectedTag));
-        return matchesSearch && matchesTag;
-    });
-
-    const applyPreset = (preset: Preset) => {
-        setActivePresetId(preset.id);
-        setAiName(preset.aiName);
-        setUserName(preset.userName);
-        setRole(preset.role);
-        setTone(preset.tone);
-        setHasUnsyncedChanges(true);
-        setStatusMsg({ type: "info", text: `已套用樣板「${preset.name}」，點擊「注入人格」使設定生效。` });
+    const handleDiscard = () => {
+        if (saved) applyToForm(saved);
+        setIsEditing(false);
+        setIsDirty(false);
+        setActivePresetId("");
+        setStatusMsg(null);
     };
 
     const handleInject = async () => {
@@ -422,7 +375,8 @@ export default function PersonaPage() {
             const data = await res.json();
             if (res.ok && data.success) {
                 setShowConfirm(false);
-                setHasUnsyncedChanges(false);
+                setIsEditing(false);
+                setIsDirty(false);
                 setShowDone(true);
                 setTimeout(() => {
                     fetch("/api/system/reload", { method: "POST" }).catch(() => { });
@@ -440,314 +394,260 @@ export default function PersonaPage() {
         }
     };
 
-    const markChanged = () => setHasUnsyncedChanges(true);
+    const applyPreset = (preset: Preset) => {
+        setActivePresetId(preset.id);
+        setAiName(preset.aiName);
+        setUserName(preset.userName);
+        setRole(preset.role);
+        setTone(preset.tone);
+        setIsEditing(true);
+        setStatusMsg({ type: "info", text: `已套用樣板「${preset.name}」，確認後請點擊「儲存並重啟」。` });
+    };
+
+    const allTags = Array.from(new Set(templates.flatMap(t => t.tags || [])));
+    const filteredTemplates = templates.filter(t => {
+        const s = t.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            t.description.toLowerCase().includes(searchTerm.toLowerCase());
+        const tg = !selectedTag || (t.tags && t.tags.includes(selectedTag));
+        return s && tg;
+    });
+
+    const inputCls = "w-full bg-gray-950 border border-gray-700 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/40 focus:border-purple-500 transition-all placeholder:text-gray-600";
 
     return (
         <>
-            <div className="flex-1 overflow-auto bg-gray-950 p-6 flex flex-col text-white">
-                <div className="max-w-6xl w-full mx-auto pb-12 pt-4 space-y-8">
+            <div className="flex-1 overflow-auto bg-gray-950 p-6 text-white">
+                <div className="max-w-5xl w-full mx-auto pb-12 pt-4 space-y-6">
 
-                    {/* ── Header ─────────────────────────────────────────── */}
-                    <div className="flex items-center justify-between animate-in fade-in slide-in-from-top-4 duration-500">
-                        <div className="flex items-center gap-4">
-                            <div className="inline-flex items-center justify-center p-3 bg-purple-950/50 border border-purple-800/50 rounded-xl shadow-[0_0_20px_-5px_rgba(168,85,247,0.4)]">
-                                <User className="w-6 h-6 text-purple-400" />
-                            </div>
-                            <div>
-                                <h1 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white via-purple-100 to-purple-400 tracking-tight">
-                                    人格設定 (Persona)
-                                </h1>
-                                <p className="text-sm text-gray-500 mt-0.5">管理 Golem 的身份、人設與語言風格</p>
-                            </div>
+                    {/* ── Page Header ─────────────────────────────────── */}
+                    <div className="flex items-center gap-4 animate-in fade-in slide-in-from-top-4 duration-500">
+                        <div className="inline-flex items-center justify-center p-3 bg-purple-950/50 border border-purple-800/50 rounded-xl shadow-[0_0_20px_-5px_rgba(168,85,247,0.4)]">
+                            <User className="w-6 h-6 text-purple-400" />
                         </div>
-                        <button
-                            onClick={() => setShowConfirm(true)}
-                            disabled={isInjecting}
-                            className={`px-4 py-2 text-sm font-medium rounded-lg flex items-center gap-2 transition-all ${hasUnsyncedChanges
-                                ? "bg-amber-500/20 text-amber-300 border border-amber-500/50 hover:bg-amber-500/30 animate-pulse"
-                                : "bg-purple-500/10 text-purple-400 border border-purple-500/30 hover:bg-purple-500/20"
-                                } ${isInjecting ? "opacity-60 cursor-not-allowed" : ""}`}
-                        >
-                            <Zap className={`w-4 h-4 ${isInjecting ? "animate-pulse" : ""}`} />
-                            {isInjecting ? "注入中..." : "注入人格"}
-                        </button>
+                        <div>
+                            <h1 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white via-purple-100 to-purple-400 tracking-tight">
+                                人格設定 (Persona)
+                            </h1>
+                            <p className="text-sm text-gray-500 mt-0.5">管理 Golem 的身份、人設與語言風格</p>
+                        </div>
                     </div>
 
-                    {/* ── Current Persona Card ────────────────────────────── */}
-                    {currentPersona && (
-                        <div className="animate-in fade-in slide-in-from-top-2 duration-500 delay-100">
-                            <div className="bg-gray-900/60 backdrop-blur-sm border border-purple-900/30 rounded-2xl p-5 relative overflow-hidden">
-                                <div className="absolute inset-x-0 top-0 h-[2px] bg-gradient-to-r from-purple-600 via-blue-500 to-cyan-400" />
-                                <div className="flex flex-col sm:flex-row sm:items-start gap-4">
-                                    {/* Avatar area */}
-                                    <div className="flex-shrink-0 flex items-center gap-4">
-                                        <div className="w-14 h-14 rounded-2xl bg-purple-900/40 border border-purple-700/30 flex items-center justify-center shadow-lg">
-                                            <User className="w-7 h-7 text-purple-300" />
-                                        </div>
-                                        <div className="sm:hidden">
-                                            <p className="text-xs text-purple-400/70 font-mono uppercase tracking-widest mb-0.5">目前人格</p>
-                                            <p className="text-xl font-bold text-white">{currentPersona.aiName}</p>
-                                            <p className="text-sm text-gray-500">稱呼你為「{currentPersona.userName}」</p>
-                                        </div>
+                    {/* ── Current Persona Edit Card ────────────────────── */}
+                    <div className="animate-in fade-in slide-in-from-top-2 duration-500 delay-100">
+                        <div className={cn(
+                            "bg-gray-900/70 backdrop-blur-sm border rounded-2xl relative overflow-hidden transition-all duration-300",
+                            isEditing ? "border-purple-600/50 shadow-[0_0_30px_-8px_rgba(168,85,247,0.35)]" : "border-gray-800"
+                        )}>
+                            {/* Top accent bar */}
+                            <div className={cn("absolute inset-x-0 top-0 h-[2px] transition-all duration-300",
+                                isEditing
+                                    ? "bg-gradient-to-r from-purple-600 via-blue-500 to-cyan-400"
+                                    : "bg-gradient-to-r from-gray-700 via-gray-600 to-gray-700")} />
+
+                            {/* Card Header */}
+                            <div className="flex items-center justify-between px-6 pt-6 pb-4">
+                                <div className="flex items-center gap-3">
+                                    <div className={cn(
+                                        "w-10 h-10 rounded-xl flex items-center justify-center transition-colors",
+                                        isEditing ? "bg-purple-900/50 border border-purple-700/40" : "bg-gray-800 border border-gray-700"
+                                    )}>
+                                        <User className={cn("w-5 h-5 transition-colors", isEditing ? "text-purple-300" : "text-gray-400")} />
                                     </div>
-                                    {/* Info */}
-                                    <div className="flex-1 min-w-0">
-                                        <div className="hidden sm:block mb-3">
-                                            <p className="text-xs text-purple-400/70 font-mono uppercase tracking-widest mb-0.5">目前人格</p>
-                                            <p className="text-xl font-bold text-white">{currentPersona.aiName} <span className="text-sm font-normal text-gray-500">· 稱呼你為「{currentPersona.userName}」</span></p>
-                                        </div>
-                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                            <div className="bg-gray-950/50 border border-gray-800/50 rounded-xl px-4 py-3">
-                                                <p className="text-[10px] text-gray-500 font-medium uppercase tracking-wider mb-1">語言風格</p>
-                                                <p className="text-sm text-gray-300 line-clamp-2">{currentPersona.tone || "—"}</p>
-                                            </div>
-                                            <div className="bg-gray-950/50 border border-gray-800/50 rounded-xl px-4 py-3 sm:col-span-1">
-                                                <p className="text-[10px] text-gray-500 font-medium uppercase tracking-wider mb-1">任務定位</p>
-                                                <p className="text-sm text-gray-300 line-clamp-2">{currentPersona.currentRole || "—"}</p>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    {/* Status badge */}
-                                    <div className="flex-shrink-0">
-                                        <div className="flex items-center gap-1.5 px-3 py-1.5 bg-green-900/20 border border-green-800/30 rounded-full">
-                                            <CheckCircle2 className="w-3.5 h-3.5 text-green-400" />
-                                            <span className="text-xs text-green-400 font-medium">運行中</span>
-                                        </div>
+                                    <div>
+                                        <p className="text-[10px] text-gray-500 font-mono uppercase tracking-widest">目前人格</p>
+                                        <p className="text-lg font-bold text-white leading-tight">{aiName}</p>
                                     </div>
                                 </div>
+                                <div className="flex items-center gap-2">
+                                    {isDirty && !isEditing && (
+                                        <span className="text-xs text-amber-400 bg-amber-900/20 border border-amber-700/30 rounded-full px-2.5 py-1">
+                                            未儲存的變更
+                                        </span>
+                                    )}
+                                    {isEditing ? (
+                                        <button onClick={handleDiscard}
+                                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-gray-400 hover:text-white bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg transition-all">
+                                            <RotateCcw className="w-3.5 h-3.5" />捨棄變更
+                                        </button>
+                                    ) : (
+                                        <button onClick={() => setIsEditing(true)}
+                                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-purple-300 hover:text-white bg-purple-900/20 hover:bg-purple-900/40 border border-purple-700/40 rounded-lg transition-all">
+                                            <Pencil className="w-3.5 h-3.5" />編輯人格
+                                        </button>
+                                    )}
+                                </div>
                             </div>
+
+                            {/* View Mode */}
+                            {!isEditing && (
+                                <div className="px-6 pb-6 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    <div className="bg-gray-950/60 border border-gray-800/60 rounded-xl px-4 py-3">
+                                        <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1 font-medium">稱呼你為</p>
+                                        <p className="text-sm text-gray-200">「{userName}」</p>
+                                    </div>
+                                    <div className="bg-gray-950/60 border border-gray-800/60 rounded-xl px-4 py-3">
+                                        <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1 font-medium">語言風格</p>
+                                        <p className="text-sm text-gray-200 line-clamp-1">{tone || "—"}</p>
+                                    </div>
+                                    <div className="bg-gray-950/60 border border-gray-800/60 rounded-xl px-4 py-3 sm:col-span-2">
+                                        <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1 font-medium">任務定位 &amp; 人設背景</p>
+                                        <p className="text-sm text-gray-200 line-clamp-3">{role || "—"}</p>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Edit Mode */}
+                            {isEditing && (
+                                <div className="px-6 pb-6 space-y-4">
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                        <EditField label="AI 名稱" value={aiName} onChange={setAiName} placeholder="例如：Friday, Golem" />
+                                        <EditField label="你的稱呼" value={userName} onChange={setUserName} placeholder="例如：Boss, Commander" />
+                                    </div>
+                                    <EditField label="語言風格 & 語氣" value={tone} onChange={setTone}
+                                        placeholder="例如：活潑幽默、直接果斷" />
+                                    <EditField label="任務定位 & 人設背景" value={role} onChange={setRole} multiline
+                                        placeholder="描述這個人格的身份背景、任務與個性..." />
+
+                                    {/* Status msg inside edit card */}
+                                    {statusMsg && (
+                                        <div className={cn("flex items-start gap-2 text-sm rounded-lg px-3 py-2.5 border",
+                                            statusMsg.type === "info"
+                                                ? "bg-blue-950/30 border-blue-900/40 text-blue-300"
+                                                : "bg-red-950/30 border-red-900/40 text-red-400")}>
+                                            <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                                            <p>{statusMsg.text}</p>
+                                        </div>
+                                    )}
+
+                                    {/* Save & Restart CTA */}
+                                    <div className="pt-1">
+                                        <Button
+                                            onClick={() => setShowConfirm(true)}
+                                            disabled={isInjecting}
+                                            className="w-full h-12 font-bold bg-gradient-to-r from-purple-600 to-blue-500 hover:from-purple-500 hover:to-blue-400 border-none shadow-xl shadow-purple-900/20 transition-all hover:scale-[1.01] active:scale-95 rounded-2xl text-base"
+                                        >
+                                            <span className="flex items-center gap-2">
+                                                <Zap className="w-5 h-5" />
+                                                儲存人格並重啟 Golem
+                                            </span>
+                                        </Button>
+                                        <p className="text-center text-xs text-gray-600 mt-2">
+                                            重啟後新設定正式生效，前端將自動重新整理
+                                        </p>
+                                    </div>
+                                </div>
+                            )}
                         </div>
-                    )}
+                    </div>
 
-                    {/* Status Message */}
-                    {statusMsg && (
-                        <div className={`px-4 py-3 rounded-lg flex items-start gap-2 text-sm border ${statusMsg.type === "success"
-                            ? "bg-green-950/30 border-green-900/50 text-green-400"
-                            : statusMsg.type === "info"
-                                ? "bg-blue-950/30 border-blue-900/50 text-blue-400"
-                                : "bg-red-950/30 border-red-900/50 text-red-400"
-                            }`}>
-                            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-                            <p>{statusMsg.text}</p>
-                        </div>
-                    )}
-
-                    {/* ── Main Grid ──────────────────────────────────────── */}
-                    <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-                        {/* Left: Form */}
-                        <div className="lg:col-span-5 space-y-5 lg:sticky lg:top-8 animate-in fade-in slide-in-from-left-8 duration-700 delay-150">
-                            <div className="flex items-center gap-2 px-1">
-                                <Settings2 className="w-5 h-5 text-purple-400" />
-                                <h2 className="text-base font-semibold text-white">參數定義 (Parameters)</h2>
-                            </div>
-
-                            {/* Basic Info */}
-                            <div className="bg-gray-900/80 backdrop-blur-sm border border-gray-800 rounded-2xl p-5 relative overflow-hidden">
-                                <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-blue-600 to-cyan-400" />
-                                <div className="space-y-4">
-                                    <div>
-                                        <label htmlFor="aiName" className="block text-xs font-medium text-gray-400 mb-1.5">AI 名稱</label>
-                                        <input
-                                            id="aiName"
-                                            value={aiName}
-                                            onChange={(e) => { setAiName(e.target.value); markChanged(); }}
-                                            className="w-full bg-gray-950 border border-gray-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-cyan-500/30 focus:border-cyan-500 transition-all"
-                                            placeholder="例如：Friday, Golem"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label htmlFor="userName" className="block text-xs font-medium text-gray-400 mb-1.5">你的稱呼</label>
-                                        <input
-                                            id="userName"
-                                            value={userName}
-                                            onChange={(e) => { setUserName(e.target.value); markChanged(); }}
-                                            className="w-full bg-gray-950 border border-gray-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-cyan-500/30 focus:border-cyan-500 transition-all"
-                                            placeholder="例如：Boss, Commander"
-                                        />
-                                    </div>
-                                </div>
-                            </div>
-
-                            {/* Core Persona */}
-                            <div className="bg-gray-900/80 backdrop-blur-sm border border-gray-800 rounded-2xl p-5 relative overflow-hidden">
-                                <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-purple-500 to-blue-500" />
-                                <div className="space-y-4">
-                                    <div>
-                                        <label htmlFor="role" className="block text-xs font-medium text-gray-400 mb-1.5">任務定位 &amp; 人設背景</label>
-                                        <textarea
-                                            id="role"
-                                            value={role}
-                                            onChange={(e) => { setRole(e.target.value); markChanged(); }}
-                                            className="w-full bg-gray-950 border border-gray-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-purple-500/30 focus:border-purple-500 transition-all resize-y min-h-[120px] text-sm"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label htmlFor="tone" className="block text-xs font-medium text-gray-400 mb-1.5">語言風格 &amp; 語氣</label>
-                                        <input
-                                            id="tone"
-                                            value={tone}
-                                            onChange={(e) => { setTone(e.target.value); markChanged(); }}
-                                            className="w-full bg-gray-950 border border-gray-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-purple-500/30 focus:border-purple-500 transition-all"
-                                        />
-                                    </div>
-                                </div>
-                            </div>
-
-                            {/* Inject Button */}
-                            <Button
-                                onClick={() => setShowConfirm(true)}
-                                disabled={isInjecting}
-                                className="w-full h-12 font-bold bg-gradient-to-r from-purple-600 to-blue-500 hover:from-purple-500 hover:to-blue-400 border-none shadow-xl transition-all hover:scale-[1.02] active:scale-95 rounded-2xl"
+                    {/* ── Templates Section ────────────────────────────── */}
+                    <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 delay-200 space-y-4">
+                        <div className="flex items-center justify-between">
+                            <h2 className="text-base font-semibold text-gray-300 flex items-center gap-2">
+                                <Sparkles className="w-4 h-4 text-purple-400" />
+                                人格樣板庫
+                            </h2>
+                            <button
+                                onClick={() => setShowCreate(true)}
+                                className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-900/30 border border-purple-700/40 text-purple-300 hover:bg-purple-900/50 text-xs font-medium rounded-lg transition-all"
                             >
-                                {isInjecting ? (
-                                    <span className="flex items-center gap-2">
-                                        <RefreshCcw className="w-4 h-4 animate-spin" />
-                                        注入中...
-                                    </span>
-                                ) : (
-                                    <span className="flex items-center gap-2">
-                                        <Zap className="w-5 h-5" />
-                                        注入人格並重啟 Golem
-                                    </span>
-                                )}
-                            </Button>
+                                <Plus className="w-3.5 h-3.5" />新增人格
+                            </button>
                         </div>
 
-                        {/* Right: Templates */}
-                        <div className="lg:col-span-7 space-y-5 animate-in fade-in slide-in-from-right-8 duration-700 delay-300">
-                            {/* Search & Tags */}
-                            <div className="bg-gray-900/50 border border-gray-800 rounded-2xl p-5">
-                                <div className="flex flex-col md:flex-row gap-3 mb-4">
-                                    <div className="relative flex-1">
-                                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
-                                        <input
-                                            type="text"
-                                            placeholder="搜尋樣板名稱、關鍵字..."
-                                            value={searchTerm}
-                                            onChange={(e) => setSearchTerm(e.target.value)}
-                                            className="w-full bg-gray-950 border border-gray-800 rounded-xl pl-10 pr-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/30 transition-all"
-                                        />
-                                        {searchTerm && (
-                                            <button onClick={() => setSearchTerm("")} className="absolute right-3 top-1/2 -translate-y-1/2 p-0.5 hover:bg-gray-800 rounded-md">
-                                                <X className="w-3 h-3 text-gray-500" />
-                                            </button>
-                                        )}
-                                    </div>
-                                    <button
-                                        onClick={() => setShowCreate(true)}
-                                        className="flex items-center gap-1.5 px-3 py-2 bg-purple-900/30 border border-purple-700/40 text-purple-300 hover:bg-purple-900/50 text-sm font-medium rounded-xl transition-all flex-shrink-0"
-                                    >
-                                        <Plus className="w-4 h-4" />
-                                        新增人格
-                                    </button>
-                                    <div className="flex items-center gap-1.5 text-sm text-gray-500">
-                                        <Filter className="w-4 h-4" />
-                                    </div>
-                                </div>
-                                <div className="flex flex-wrap gap-2">
-                                    <button
-                                        onClick={() => setSelectedTag(null)}
-                                        className={cn("px-3 py-1.5 rounded-lg text-xs font-medium transition-all",
-                                            selectedTag === null
-                                                ? "bg-purple-500 text-white shadow-lg"
-                                                : "bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white")}
-                                    >全部</button>
-                                    {allTags.map(tag => (
-                                        <button
-                                            key={tag}
-                                            onClick={() => setSelectedTag(selectedTag === tag ? null : tag)}
-                                            className={cn("px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1",
-                                                selectedTag === tag
-                                                    ? "bg-blue-500 text-white shadow-lg"
-                                                    : "bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white")}
-                                        >
-                                            <Tag className="w-3 h-3" />{tag}
+                        {/* Search + Tags */}
+                        <div className="bg-gray-900/40 border border-gray-800 rounded-2xl p-4">
+                            <div className="flex gap-3 mb-4">
+                                <div className="relative flex-1">
+                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-600" />
+                                    <input
+                                        type="text"
+                                        placeholder="搜尋樣板..."
+                                        value={searchTerm}
+                                        onChange={e => setSearchTerm(e.target.value)}
+                                        className="w-full bg-gray-950 border border-gray-800 rounded-xl pl-9 pr-4 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-purple-500/30 transition-all placeholder:text-gray-600"
+                                    />
+                                    {searchTerm && (
+                                        <button onClick={() => setSearchTerm("")} className="absolute right-3 top-1/2 -translate-y-1/2">
+                                            <X className="w-3 h-3 text-gray-500" />
                                         </button>
-                                    ))}
+                                    )}
+                                </div>
+                                <div className="flex items-center gap-1.5 text-xs text-gray-500">
+                                    <Filter className="w-3.5 h-3.5" />
                                 </div>
                             </div>
+                            <div className="flex flex-wrap gap-2">
+                                <button onClick={() => setSelectedTag(null)}
+                                    className={cn("px-3 py-1 rounded-lg text-xs font-medium transition-all",
+                                        selectedTag === null ? "bg-purple-500 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white")}>
+                                    全部
+                                </button>
+                                {allTags.map(tag => (
+                                    <button key={tag} onClick={() => setSelectedTag(selectedTag === tag ? null : tag)}
+                                        className={cn("px-3 py-1 rounded-lg text-xs font-medium transition-all flex items-center gap-1",
+                                            selectedTag === tag ? "bg-blue-500 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white")}>
+                                        <Tag className="w-3 h-3" />{tag}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
 
-                            {/* Templates Grid */}
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                {filteredTemplates.length > 0 ? filteredTemplates.map((preset) => (
-                                    <button
-                                        key={preset.id}
-                                        onClick={() => applyPreset(preset)}
-                                        className={cn(
-                                            "text-left p-5 rounded-2xl border transition-all duration-300 group relative overflow-hidden flex flex-col h-full",
+                        {/* Grid */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                            {filteredTemplates.length > 0 ? filteredTemplates.map(preset => (
+                                <button
+                                    key={preset.id}
+                                    onClick={() => applyPreset(preset)}
+                                    className={cn(
+                                        "text-left p-4 rounded-2xl border transition-all duration-300 group relative overflow-hidden flex flex-col",
+                                        activePresetId === preset.id
+                                            ? "bg-purple-950/25 border-purple-500/50 ring-1 ring-purple-500/30"
+                                            : "bg-gray-900 border-gray-800 hover:border-gray-700 hover:bg-gray-800/70"
+                                    )}
+                                >
+                                    <div className="flex items-start justify-between mb-3">
+                                        <div className={cn("p-2.5 rounded-xl transition-colors",
                                             activePresetId === preset.id
-                                                ? "bg-purple-950/20 border-purple-500/50 ring-1 ring-purple-500/30 shadow-[0_0_25px_-5px_rgba(168,85,247,0.2)]"
-                                                : "bg-gray-900 border-gray-800 hover:border-gray-700 hover:bg-gray-800/80"
-                                        )}
-                                    >
-                                        <div className="flex items-start justify-between mb-4">
-                                            <div className={cn(
-                                                "p-3 rounded-xl transition-colors",
-                                                activePresetId === preset.id
-                                                    ? "bg-purple-500 text-white shadow-lg shadow-purple-900/40"
-                                                    : "bg-gray-800 text-gray-400 group-hover:text-purple-400"
-                                            )}>
-                                                {(() => {
-                                                    const Ico = ICON_MAP[preset.icon] || ICON_MAP.BrainCircuit;
-                                                    return <Ico className="w-6 h-6" />;
-                                                })()}
+                                                ? "bg-purple-500 text-white"
+                                                : "bg-gray-800 text-gray-400 group-hover:text-purple-400")}>
+                                            {(() => { const I = ICON_MAP[preset.icon] || ICON_MAP.BrainCircuit; return <I className="w-5 h-5" />; })()}
+                                        </div>
+                                        {activePresetId === preset.id && (
+                                            <div className="flex items-center gap-1 bg-purple-500/20 border border-purple-500/30 text-purple-300 text-[9px] font-bold px-2 py-0.5 rounded-full">
+                                                <Check className="w-2.5 h-2.5" />套用中
                                             </div>
-                                            {activePresetId === preset.id && (
-                                                <div className="bg-purple-500/20 border border-purple-500/30 text-purple-400 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
-                                                    Selected
-                                                </div>
-                                            )}
-                                        </div>
-
-                                        <h4 className={cn("text-base font-bold mb-1.5 transition-colors",
-                                            activePresetId === preset.id ? "text-white" : "text-gray-200 group-hover:text-white")}>
-                                            {preset.name}
-                                        </h4>
-                                        <p className="text-sm text-gray-400 leading-relaxed mb-4 flex-1">{preset.description}</p>
-
-                                        <div className="flex flex-wrap gap-1.5 mt-auto">
-                                            {preset.tags?.map(tag => (
-                                                <span key={tag} className="px-2 py-0.5 bg-gray-950/50 border border-gray-800 text-[10px] text-gray-500 rounded-md">
-                                                    #{tag}
-                                                </span>
-                                            ))}
-                                        </div>
-
-                                        <div className={cn("absolute -right-4 -bottom-4 opacity-[0.03] transition-opacity",
-                                            activePresetId === preset.id ? "opacity-[0.08]" : "")}>
-                                            {(() => { const Ico = ICON_MAP[preset.icon] || ICON_MAP.BrainCircuit; return <Ico className="w-24 h-24" />; })()}
-                                        </div>
-                                    </button>
-                                )) : (
-                                    <div className="col-span-full py-20 text-center bg-gray-900/20 border border-dashed border-gray-800 rounded-2xl flex flex-col items-center">
-                                        <Search className="w-10 h-10 text-gray-700 mb-3" />
-                                        <p className="text-gray-500">找不到符合條件的樣板</p>
-                                        <button
-                                            onClick={() => { setSearchTerm(""); setSelectedTag(null); }}
-                                            className="text-purple-500 text-sm mt-2 hover:underline"
-                                        >
-                                            清除所有過濾條件
-                                        </button>
+                                        )}
                                     </div>
-                                )}
-                            </div>
+                                    <h4 className={cn("font-bold mb-1 text-sm transition-colors",
+                                        activePresetId === preset.id ? "text-white" : "text-gray-200 group-hover:text-white")}>
+                                        {preset.name}
+                                    </h4>
+                                    <p className="text-xs text-gray-500 leading-relaxed flex-1">{preset.description}</p>
+                                    <div className="flex flex-wrap gap-1 mt-3">
+                                        {preset.tags?.map(t => (
+                                            <span key={t} className="px-1.5 py-0.5 bg-gray-950/50 border border-gray-800 text-[9px] text-gray-600 rounded">
+                                                #{t}
+                                            </span>
+                                        ))}
+                                    </div>
+                                </button>
+                            )) : (
+                                <div className="col-span-full py-16 text-center bg-gray-900/20 border border-dashed border-gray-800 rounded-2xl flex flex-col items-center">
+                                    <Search className="w-8 h-8 text-gray-700 mb-2" />
+                                    <p className="text-gray-500 text-sm">找不到符合條件的樣板</p>
+                                    <button onClick={() => { setSearchTerm(""); setSelectedTag(null); }}
+                                        className="text-purple-500 text-xs mt-2 hover:underline">清除過濾條件</button>
+                                </div>
+                            )}
                         </div>
                     </div>
                 </div>
             </div>
 
-            <InjectPersonaConfirmDialog
-                open={showConfirm}
-                onOpenChange={setShowConfirm}
-                onConfirm={handleInject}
-                isLoading={isInjecting}
-            />
-            <InjectPersonaDoneDialog open={showDone} onOpenChange={setShowDone} />
-            <CreatePersonaDialog
-                open={showCreate}
-                onOpenChange={setShowCreate}
-                onCreated={loadTemplates}
-            />
+            <RestartConfirmDialog open={showConfirm} onOpenChange={setShowConfirm} onConfirm={handleInject} isLoading={isInjecting} />
+            <RestartingDialog open={showDone} />
+            <CreatePersonaDialog open={showCreate} onOpenChange={setShowCreate} onCreated={loadTemplates} />
         </>
     );
 }
