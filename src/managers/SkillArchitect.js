@@ -5,7 +5,6 @@ const path = require('path');
 class SkillArchitect {
     constructor(skillsDir) {
         this.skillsDir = skillsDir || path.join(process.cwd(), 'src', 'skills', 'user');
-        this.skillsDir = skillsDir || path.join(process.cwd(), 'src', 'skills', 'user');
     }
 
     /**
