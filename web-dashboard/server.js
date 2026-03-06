@@ -118,10 +118,12 @@ class WebServer {
 
             try {
                 const ConfigManager = require('../src/config/index');
-                const isConfigured = ConfigManager.CONFIG.API_KEYS.length > 0 && !ConfigManager.CONFIG.API_KEYS.some(ConfigManager.isPlaceholder);
+                // V9.0.9 修正：強制檢查初始化標記
+                // 只有在 SYSTEM_CONFIGURED 為 'true' 時才允許通行
+                const isConfigured = process.env.SYSTEM_CONFIGURED === 'true';
 
                 if (!isConfigured) {
-                    console.log(`🚩 [WebServer] System not configured. Redirecting ${req.path} to /dashboard/system-setup`);
+                    console.log(`🚩 [WebServer] System NOT initialized. Redirecting ${req.path} to /dashboard/system-setup`);
                     return res.redirect('/dashboard/system-setup');
                 }
             } catch (e) {
@@ -553,7 +555,7 @@ class WebServer {
                 const activeIds = Array.from(this.contexts.keys());
 
                 // 3. 合併狀態
-                const golemsData = allConfigs.map(config => {
+                let golemsData = allConfigs.map(config => {
                     const id = config.id;
                     const context = this.contexts.get(id);
                     let status = 'not_started';
@@ -564,6 +566,29 @@ class WebServer {
 
                     return { id, status };
                 });
+
+                // 3.5 單機模式特化處理：如果沒在清單中但環境變數有 Token，強制加入 golem_A
+                if (isSingleNode) {
+                    const hasToken = envVars.TELEGRAM_TOKEN || envVars.DISCORD_TOKEN;
+                    if (hasToken && !golemsData.find(g => g.id === 'golem_A')) {
+                        const id = 'golem_A';
+                        const context = this.contexts.get(id);
+                        let status = 'not_started';
+
+                        if (context && context.brain) {
+                            status = context.brain.status || 'running';
+                        } else {
+                            // 檢查是否需要執行初始化設定 (Persona 是否存在)
+                            const personaManager = require('../src/skills/core/persona');
+                            const userDataDir = envVars.USER_DATA_DIR || './golem_memory';
+                            const personaPath = path.resolve(process.cwd(), userDataDir, 'persona.json');
+                            if (!fs.existsSync(personaPath)) {
+                                status = 'pending_setup';
+                            }
+                        }
+                        golemsData.push({ id, status });
+                    }
+                }
 
                 // 4. 對於不在 golems.json 但在 contexts 中的 (可能是動態建立未存檔的)，也補上去
                 this.contexts.forEach((ctx, id) => {
@@ -596,10 +621,8 @@ class WebServer {
                 const EnvManager = require('../src/utils/EnvManager');
                 const envVars = EnvManager.readEnv();
 
-                // 系統是否已設定：檢查是否有有效的 API Keys 且非預設預留字串
-                const isSystemConfigured = !!(envVars.GEMINI_API_KEYS &&
-                    envVars.GEMINI_API_KEYS.trim() &&
-                    !envVars.GEMINI_API_KEYS.includes('你的'));
+                // 系統是否已設定：優先檢查 SYSTEM_CONFIGURED 標記
+                const isSystemConfigured = envVars.SYSTEM_CONFIGURED === 'true';
 
                 const isSingleNode = (envVars.GOLEM_MODE || 'MULTI').trim().toUpperCase() === 'SINGLE';
 
@@ -640,14 +663,18 @@ class WebServer {
                 const ConfigManager = require('../src/config/index');
 
                 const updates = {};
-                if (geminiApiKeys) updates.GEMINI_API_KEYS = geminiApiKeys;
+                // Allow empty string to clear keys
+                if (geminiApiKeys !== undefined) updates.GEMINI_API_KEYS = geminiApiKeys;
                 if (userDataDir) updates.USER_DATA_DIR = userDataDir;
                 if (golemMemoryMode) updates.GOLEM_MEMORY_MODE = golemMemoryMode;
                 if (golemMode) updates.GOLEM_MODE = golemMode;
 
                 if (Object.keys(updates).length > 0) {
+                    // 標記系統已完成初始化
+                    updates.SYSTEM_CONFIGURED = 'true';
+
                     EnvManager.updateEnv(updates);
-                    console.log('📝 [System] System configuration updated via web dashboard.');
+                    console.log('📝 [System] System configuration updated via web dashboard. Flag: SYSTEM_CONFIGURED=true');
 
                     // 觸發熱重載
                     ConfigManager.reloadConfig();
@@ -679,7 +706,36 @@ class WebServer {
                     return res.status(400).json({ error: 'Invalid Golem ID: only alphanumeric, _ and - allowed' });
                 }
 
-                // Check for duplicate
+                // --- Mode-aware Logic ---
+                const EnvManager = require('../src/utils/EnvManager');
+                const envVars = EnvManager.readEnv();
+                const isSingleNode = (envVars.GOLEM_MODE || 'MULTI').trim().toUpperCase() === 'SINGLE';
+
+                if (isSingleNode) {
+                    console.log('📝 [API] System in SINGLE mode. Writing Golem config to .env');
+                    const updates = {};
+                    if (tgToken) {
+                        updates.TELEGRAM_TOKEN = tgToken;
+                        updates.TG_AUTH_MODE = tgAuthMode || 'ADMIN';
+                        if (tgAuthMode === 'CHAT' && tgChatId) updates.TG_CHAT_ID = tgChatId;
+                        if ((!tgAuthMode || tgAuthMode === 'ADMIN') && tgAdminId) updates.ADMIN_ID = tgAdminId;
+                    }
+                    if (dcToken) {
+                        updates.DISCORD_TOKEN = dcToken;
+                        updates.DISCORD_ADMIN_ID = dcAdminId;
+                    }
+
+                    EnvManager.updateEnv(updates);
+                    console.log(`✅ [WebServer] Single Mode config updated in .env. Triggering reload...`);
+
+                    // 關鍵修正：寫入 .env 後必須熱重載，否則後續 Setup API 會找不到設定
+                    const ConfigManager = require('../src/config/index');
+                    ConfigManager.reloadConfig();
+
+                    return res.json({ success: true, mode: 'SINGLE', id: 'golem_A', message: 'Single Mode configuration updated successfully.' });
+                }
+
+                // --- Multi Mode (Default) ---
                 const golemsPath = path.resolve(process.cwd(), 'golems.json');
                 let existingGolems = [];
                 if (fs.existsSync(golemsPath)) {
@@ -793,8 +849,27 @@ class WebServer {
             const { golemId, aiName, userName, currentRole, tone, skills } = req.body;
             if (!golemId) return res.status(400).json({ error: "Missing golemId" });
 
-            const context = this.contexts.get(golemId);
-            if (!context || !context.brain) return res.status(404).json({ error: "Golem not found" });
+            let context = this.contexts.get(golemId);
+
+            // 如果 context 不存在，試著手動初始化一個臨時 context
+            if (!context || !context.brain) {
+                console.log(`🏗️ [WebServer] Golem context [${golemId}] not found for setup. Attempting on-demand initialization...`);
+                const ConfigManager = require('../src/config/index');
+                const golemConfig = ConfigManager.GOLEMS_CONFIG.find(g => g.id === golemId);
+
+                if (golemConfig) {
+                    const GolemBrain = require('../src/core/GolemBrain');
+                    const AutonomyManager = require('../src/managers/AutonomyManager');
+
+                    const brain = new GolemBrain(golemConfig);
+                    const autonomy = new AutonomyManager(brain);
+                    this.contexts.set(golemId, { brain, autonomy });
+                    context = this.contexts.get(golemId);
+                    console.log(`✅ [WebServer] Temporary context created for [${golemId}].`);
+                } else {
+                    return res.status(404).json({ error: "Golem configuration not found" });
+                }
+            }
 
             try {
                 const personaManager = require('../src/skills/core/persona');
@@ -949,13 +1024,14 @@ class WebServer {
         // 🎭 人格讀取 API
         this.app.get('/api/persona', (req, res) => {
             try {
+                const personaManager = require('../src/skills/core/persona');
+                const ConfigManager = require('../src/config/index');
+
                 const golemId = req.query.golemId || (this.contexts.size > 0 ? Array.from(this.contexts.keys())[0] : null);
                 const context = golemId ? this.contexts.get(golemId) : null;
-                if (!context || !context.brain) {
-                    return res.status(503).json({ error: 'No active Golem found' });
-                }
-                const personaManager = require('../src/skills/core/persona');
-                const persona = personaManager.get(context.brain.userDataDir);
+                const userDataDir = (context && context.brain) ? context.brain.userDataDir : ConfigManager.CONFIG.USER_DATA_DIR;
+
+                const persona = personaManager.get(userDataDir);
                 return res.json(persona);
             } catch (e) {
                 console.error('Failed to read persona:', e);
@@ -967,14 +1043,14 @@ class WebServer {
         this.app.post('/api/persona/inject', (req, res) => {
             try {
                 const { golemId: reqGolemId, aiName, userName, currentRole, tone, skills } = req.body;
+                const personaManager = require('../src/skills/core/persona');
+                const ConfigManager = require('../src/config/index');
+
                 const golemId = reqGolemId || (this.contexts.size > 0 ? Array.from(this.contexts.keys())[0] : null);
                 const context = golemId ? this.contexts.get(golemId) : null;
-                if (!context || !context.brain) {
-                    return res.status(503).json({ success: false, error: 'No active Golem found' });
-                }
+                const userDataDir = (context && context.brain) ? context.brain.userDataDir : ConfigManager.CONFIG.USER_DATA_DIR;
 
-                const personaManager = require('../src/skills/core/persona');
-                personaManager.save(context.brain.userDataDir, {
+                personaManager.save(userDataDir, {
                     aiName: aiName || 'Golem',
                     userName: userName || 'Traveler',
                     currentRole: currentRole || '一個擁有長期記憶與自主意識的 AI 助手',

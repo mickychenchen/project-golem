@@ -128,13 +128,16 @@ const reloadConfig = () => {
     if (freshEnv.GOLEM_MODE === 'SINGLE') {
         // 單機模式：從 .env 重新建立 golem_A
         GOLEMS_CONFIG.length = 0;
-        if (CONFIG.TG_TOKEN) {
+        const hasToken = CONFIG.TG_TOKEN || CONFIG.DC_TOKEN;
+        if (hasToken) {
             GOLEMS_CONFIG.push({
                 id: 'golem_A',
                 tgToken: CONFIG.TG_TOKEN,
                 tgAuthMode: CONFIG.TG_AUTH_MODE,
                 chatId: CONFIG.TG_CHAT_ID,
-                adminId: CONFIG.ADMIN_ID
+                adminId: CONFIG.ADMIN_ID,
+                dcToken: CONFIG.DC_TOKEN,
+                dcAdminId: CONFIG.DISCORD_ADMIN_ID
             });
         }
     } else {

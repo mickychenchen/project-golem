@@ -14,13 +14,16 @@ type AuthMode = "ADMIN" | "CHAT";
 
 export default function CreateGolemPage() {
     const router = useRouter();
-    const { refreshGolems } = useGolem();
-
     const [step, setStep] = useState(1);
+    const { refreshGolems, isSingleNode } = useGolem();
 
     // Step 1: Identity
-    const [id, setId] = useState("");
+    const [id, setId] = React.useState(isSingleNode ? "golem_A" : "");
     const [role, setRole] = useState("");
+
+    React.useEffect(() => {
+        if (isSingleNode) setId("golem_A");
+    }, [isSingleNode]);
 
     // Step 2: Platforms
     const [platforms, setPlatforms] = useState({ telegram: false, discord: false });
@@ -122,7 +125,7 @@ export default function CreateGolemPage() {
                 throw new Error(data.error || "建立失敗，請稍後再試");
             }
 
-            window.location.href = "/dashboard";
+            window.location.href = "/dashboard/setup";
         } catch (err: any) {
             setError(err.message);
         } finally {
@@ -192,12 +195,13 @@ export default function CreateGolemPage() {
                                     id="golemId"
                                     value={id}
                                     onChange={e => setId(e.target.value)}
-                                    onFocus={suggestId}
-                                    className="w-full bg-gray-950 border border-gray-800 rounded-xl px-4 py-3 text-white font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 transition-all"
+                                    onFocus={!isSingleNode ? suggestId : undefined}
+                                    disabled={isSingleNode}
+                                    className={`w-full bg-gray-950 border ${isSingleNode ? 'border-amber-800/30 opacity-60' : 'border-gray-800 focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500'} rounded-xl px-4 py-3 text-white font-mono focus:outline-none transition-all`}
                                     placeholder="例如：golem_A、golem_customer_service"
                                     pattern="[a-zA-Z0-9_-]+"
                                     title="只允許英文字母、數字、底線和連字號"
-                                    autoFocus
+                                    autoFocus={!isSingleNode}
                                 />
                                 <p className="text-xs text-gray-600 mt-2">只允許英數字、底線 (_)、連字號 (-)。點擊欄位可自動建議。</p>
                             </div>

@@ -43,9 +43,10 @@ export default function SystemSetupPage() {
         e.preventDefault();
         setError(null);
 
-        if (!geminiKeys.trim()) {
-            return setError("請填寫 Gemini API Keys");
-        }
+        // Gemini API Key 改為選填，移除強制檢查
+        // if (!geminiKeys.trim()) {
+        //     return setError("請填寫 Gemini API Keys");
+        // }
 
         setIsLoading(true);
         try {
@@ -63,8 +64,8 @@ export default function SystemSetupPage() {
             if (!res.ok || !data.success) {
                 throw new Error(data.error || "儲存失敗，請稍後再試");
             }
-            // 系統設定完成後，引導使用者建立第一個 Golem (若為單機模式則直接回首頁)
-            window.location.href = golemMode === "SINGLE" ? "/dashboard" : "/dashboard/agents/create";
+            // 系統設定完成後，引導使用者建立第一個 Golem
+            window.location.href = "/dashboard/agents/create";
         } catch (err: any) {
             setError(err.message);
         } finally {
@@ -115,7 +116,7 @@ export default function SystemSetupPage() {
                             <div className="flex items-center gap-2">
                                 <Key className="w-5 h-5 text-emerald-400" />
                                 <h2 className="text-base font-semibold text-white">Gemini API Keys</h2>
-                                <span className="text-red-400 text-xs font-medium">必填</span>
+                                <span className="text-gray-500 text-xs font-medium border border-gray-800 px-1.5 py-0.5 rounded">選填</span>
                             </div>
                             <a
                                 href="https://aistudio.google.com/app/apikey"
@@ -148,6 +149,15 @@ export default function SystemSetupPage() {
                         <p className="text-xs text-gray-600 mt-2">
                             支援多組 Key 輪替（KeyChain），建議填入 2 組以上以防超過配額。
                         </p>
+
+                        {!geminiKeys.trim() && (
+                            <div className="mt-4 flex items-start gap-2 p-3 bg-amber-950/20 border border-amber-900/30 rounded-xl text-amber-200/60 animate-in fade-in slide-in-from-top-2">
+                                <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                                <p className="text-[11px] leading-relaxed">
+                                    注意：若不填寫 API Key，系統將失去<strong>多模態功能</strong>（如圖片解析、語音識別及視覺分析等）。
+                                </p>
+                            </div>
+                        )}
                     </div>
 
                     {/* Golem Mode Selection */}

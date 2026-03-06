@@ -267,17 +267,15 @@ export default function DashboardPage() {
                             目前尚未部署任何 Golem 實體。<br />請建立你的第一個 AI 代理人來開始使用。
                         </p>
                     </div>
-                    {!isSingleNode ? (
-                        <Link href="/dashboard/agents/create" className="inline-block w-full pt-4">
-                            <Button className="w-full h-14 bg-indigo-600 hover:bg-indigo-500 text-white text-base font-semibold border-0 shadow-lg shadow-indigo-900/20 transition-all hover:scale-[1.02] hover:shadow-indigo-500/25">
-                                <UserPlus className="w-5 h-5 mr-2" />
-                                建立第一個 Golem
-                            </Button>
-                        </Link>
-                    ) : (
-                        <div className="pt-4 p-4 rounded-xl bg-amber-950/20 border border-amber-900/30 text-amber-200/70 text-sm">
-                            <p>偵測到您目前處於<strong>單機模式 (SINGLE)</strong>。</p>
-                            <p className="mt-1">請在 <code>.env</code> 中設定 <code>TELEGRAM_TOKEN</code> 即可自動啟動 Golem。</p>
+                    <Link href="/dashboard/agents/create" className="inline-block w-full pt-4">
+                        <Button className="w-full h-14 bg-indigo-600 hover:bg-indigo-500 text-white text-base font-semibold border-0 shadow-lg shadow-indigo-900/20 transition-all hover:scale-[1.02] hover:shadow-indigo-500/25">
+                            <UserPlus className="w-5 h-5 mr-2" />
+                            建立第一個 Golem
+                        </Button>
+                    </Link>
+                    {isSingleNode && (
+                        <div className="pt-2 p-3 rounded-xl bg-amber-950/10 border border-amber-900/20 text-amber-200/50 text-[10px] text-left">
+                            <p>💡 偵測到<strong>單機模式</strong>：向導將協助您快速設定 <code>.env</code> 文件。</p>
                         </div>
                     )}
                 </div>
