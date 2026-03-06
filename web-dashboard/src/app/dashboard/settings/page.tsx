@@ -96,6 +96,10 @@ export default function SettingsPage() {
                     </div>
                     <div className="space-y-3">
                         <div className="flex justify-between text-xs">
+                            <span className="text-gray-500">OS</span>
+                            <span className="text-indigo-400 font-medium">{(systemStatus as any)?.runtime?.osName || 'Unknown'}</span>
+                        </div>
+                        <div className="flex justify-between text-xs">
                             <span className="text-gray-500">Node.js</span>
                             <span className="text-gray-300 font-mono">{runtime?.node || 'Unknown'}</span>
                         </div>

@@ -635,9 +635,30 @@ class WebServer {
                     npm: 'N/A',
                     platform: process.platform,
                     arch: process.arch,
-                    uptime: Math.floor(process.uptime())
+                    uptime: Math.floor(process.uptime()),
+                    osName: 'Unknown'
                 };
                 try { runtime.npm = 'v' + execSync('npm -v').toString().trim(); } catch (e) { }
+
+                // 獲取詳細 OS 名稱
+                try {
+                    if (process.platform === 'darwin') {
+                        const name = execSync('sw_vers -productName').toString().trim();
+                        const ver = execSync('sw_vers -productVersion').toString().trim();
+                        runtime.osName = `${name} ${ver}`;
+                    } else if (process.platform === 'linux') {
+                        // 嘗試讀取 os-release
+                        if (fs.existsSync('/etc/os-release')) {
+                            const content = fs.readFileSync('/etc/os-release', 'utf8');
+                            const match = content.match(/PRETTY_NAME="([^"]+)"/);
+                            if (match) runtime.osName = match[1];
+                        }
+                    } else {
+                        runtime.osName = `${os.type()} ${os.release()}`;
+                    }
+                } catch (e) {
+                    runtime.osName = `${os.type()} ${os.release()}`;
+                }
 
                 // 健康檢查
                 const DOT_ENV_PATH = path.join(process.cwd(), '.env');
