@@ -125,7 +125,9 @@ export default function CreateGolemPage() {
                 throw new Error(data.error || "建立失敗，請稍後再試");
             }
 
-            window.location.href = "/dashboard/setup";
+            // ✅ 改用軟路由加上預先刷新背景快取，避免重複閃屏
+            await refreshGolems();
+            router.push("/dashboard/setup");
         } catch (err: any) {
             setError(err.message);
         } finally {

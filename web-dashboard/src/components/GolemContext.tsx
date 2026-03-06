@@ -15,7 +15,7 @@ interface GolemContextType {
     golems: GolemInfo[];
     hasGolems: boolean;
     isLoadingGolems: boolean;
-    refreshGolems: () => void;
+    refreshGolems: () => Promise<void>;
     startGolem: (id: string) => Promise<boolean>;
     isSystemConfigured: boolean;
     isLoadingSystem: boolean;
@@ -29,7 +29,7 @@ const GolemContext = createContext<GolemContextType>({
     golems: [],
     hasGolems: false,
     isLoadingGolems: true,
-    refreshGolems: () => { },
+    refreshGolems: async () => { },
     startGolem: async () => false,
     isSystemConfigured: true,
     isLoadingSystem: true,
@@ -46,31 +46,33 @@ export function GolemProvider({ children }: { children: React.ReactNode }) {
     const [isLoadingSystem, setIsLoadingSystem] = useState(true);
     const [isSingleNode, setIsSingleNode] = useState(false);
 
-    const fetchGolems = () => {
+    const fetchGolems = async () => {
         setIsLoadingGolems(true);
-        fetch("/api/golems")
-            .then(res => res.json())
-            .then(data => {
-                if (data.golems && data.golems.length > 0) {
-                    setGolems(data.golems);
-                    setActiveGolem((currentActive) => {
-                        const ids = data.golems.map((g: GolemInfo) => g.id);
-                        if (!currentActive || !ids.includes(currentActive)) {
-                            const saved = localStorage.getItem("golem_active_id");
-                            if (saved && ids.includes(saved)) {
-                                return saved;
-                            }
-                            return data.golems[0].id;
+        try {
+            const res = await fetch("/api/golems");
+            const data = await res.json();
+            if (data.golems && data.golems.length > 0) {
+                setGolems(data.golems);
+                setActiveGolem((currentActive) => {
+                    const ids = data.golems.map((g: GolemInfo) => g.id);
+                    if (!currentActive || !ids.includes(currentActive)) {
+                        const saved = localStorage.getItem("golem_active_id");
+                        if (saved && ids.includes(saved)) {
+                            return saved;
                         }
-                        return currentActive;
-                    });
-                } else {
-                    setGolems([]);
-                    setActiveGolem("");
-                }
-            })
-            .catch(err => console.error("Failed to fetch golems", err))
-            .finally(() => setIsLoadingGolems(false));
+                        return data.golems[0].id;
+                    }
+                    return currentActive;
+                });
+            } else {
+                setGolems([]);
+                setActiveGolem("");
+            }
+        } catch (err) {
+            console.error("Failed to fetch golems", err);
+        } finally {
+            setIsLoadingGolems(false);
+        }
     };
 
     const fetchSystemStatus = () => {

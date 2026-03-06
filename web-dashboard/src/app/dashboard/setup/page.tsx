@@ -31,7 +31,7 @@ const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
 
 export default function GolemSetupPage() {
     const router = useRouter();
-    const { activeGolem, activeGolemStatus, isLoadingGolems } = useGolem();
+    const { activeGolem, activeGolemStatus, isLoadingGolems, refreshGolems } = useGolem();
 
     const [templates, setTemplates] = useState<Preset[]>([]);
     const [searchTerm, setSearchTerm] = useState("");
@@ -117,7 +117,8 @@ export default function GolemSetupPage() {
 
             const data = await res.json();
             if (data.success) {
-                window.location.href = "/dashboard";
+                await refreshGolems();
+                router.push("/dashboard");
             } else {
                 alert("建立失敗：" + data.error);
                 setIsLoading(false);
