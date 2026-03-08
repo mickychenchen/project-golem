@@ -24,6 +24,12 @@ services:
     # TTY and Stdin are useful for maintaining the process if it expects interaction
     stdin_open: true
     tty: true
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
     logging:
       driver: "json-file"
       options:
