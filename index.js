@@ -655,35 +655,6 @@ async function handleUnifiedCallback(ctx, actionData, forceTargetId = null) {
             return;
         }
 
-        // ✨ [v9.1] 處理【行動產線】插隊系統的 Callback (QUEUE_APPROVAL)
-        if (task.type === 'QUEUE_APPROVAL') {
-            pendingTasks.delete(taskId);
-
-            try {
-                // 自動消除 InlineKeyboard
-                if (ctx.platform === 'telegram' && ctx.event.message) {
-                    await ctx.instance.editMessageText(
-                        `🚨 **產線壅塞中**\n目前行動佇列繁忙。\n\n*(使用者已選擇：${action === 'PRIORITY' ? '⬆️ 插隊優先' : '⬇️ 正常排隊'})*`,
-                        {
-                            chat_id: ctx.chatId,
-                            message_id: ctx.event.message.message_id,
-                            parse_mode: 'Markdown',
-                            reply_markup: { inline_keyboard: [] }
-                        }
-                    ).catch(() => { });
-                }
-            } catch (e) {
-                console.warn("無法更新插隊詢問訊息:", e.message);
-            }
-
-            const actionQueue = getOrCreateGolem(targetId).actionQueue;
-            const isPriority = action === 'PRIORITY';
-
-            // 將原本被掛起的 runLogic 重新投入 queue 中
-            actionQueue.enqueue(task.ctx, task.runLogic, { isPriority });
-            return;
-        }
-
         if (action === 'DENY') {
             pendingTasks.delete(taskId);
             await ctx.reply('🛡️ 操作駁回');
