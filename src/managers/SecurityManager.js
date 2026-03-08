@@ -4,7 +4,7 @@
 // ==================== [KERNEL PROTECTED START] ====================
 class SecurityManager {
     constructor() {
-        this.SAFE_COMMANDS = ['ls', 'dir', 'pwd', 'date', 'echo', 'cat', 'grep', 'find', 'whoami', 'tail', 'head', 'df', 'free', 'Get-ChildItem', 'Select-String', 'golem-check'];
+        this.SAFE_COMMANDS = ['dir', 'pwd', 'date', 'echo', 'cat', 'grep', 'find', 'whoami', 'tail', 'head', 'df', 'free', 'Get-ChildItem', 'Select-String', 'golem-check'];
         this.BLOCK_PATTERNS = [/rm\s+-rf\s+\//, /rd\s+\/s\s+\/q\s+[c-zC-Z]:\\$/, />\s*\/dev\/sd/, /:(){:|:&};:/, /mkfs/, /Format-Volume/, /dd\s+if=/, /chmod\s+[-]x\s+/];
     }
     assess(cmd) {
@@ -24,9 +24,13 @@ class SecurityManager {
             .map(cmd => cmd.trim())
             .filter(cmd => cmd.length > 0);
 
-        if (this.SAFE_COMMANDS.includes(baseCmd) || userWhitelist.includes(baseCmd)) return { level: 'SAFE' };
+        // 原本的 SAFE_COMMANDS 不再預設放行，只看 userWhitelist
+        if (userWhitelist.includes(baseCmd)) return { level: 'SAFE' };
+
+        // 這些危險指令會直接進 DANGER
         const dangerousOps = ['rm', 'mv', 'chmod', 'chown', 'sudo', 'su', 'reboot', 'shutdown', 'npm uninstall', 'Remove-Item', 'Stop-Computer'];
         if (dangerousOps.includes(baseCmd)) return { level: 'DANGER', reason: '高風險操作' };
+
         return { level: 'WARNING', reason: '需確認' };
     }
 }

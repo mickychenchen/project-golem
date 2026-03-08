@@ -651,7 +651,7 @@ export default function SettingsPage() {
                                 預設的安全指令不可移除。您可以新增自訂指令，並在「備選池」與「允許清單」之間拖曳以啟用/停用免審批功能。
                             </p>
 
-                            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                            <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
                                 {/* 🔴 危險指令 */}
                                 <div className="bg-red-950/20 border border-red-900/40 rounded-xl p-4 flex flex-col h-full">
                                     <h4 className="text-sm font-semibold text-red-500 flex items-center gap-2 mb-3">
@@ -663,6 +663,34 @@ export default function SettingsPage() {
                                                 {cmd}
                                             </div>
                                         ))}
+                                    </div>
+                                </div>
+
+                                {/* 🛡️ 系統安全庫 (預設) */}
+                                <div
+                                    className="bg-gray-950/20 border border-gray-800/80 rounded-xl p-4 flex flex-col h-full transition-colors relative"
+                                >
+                                    <h4 className="text-sm font-semibold text-gray-400 flex items-center gap-2 mb-3">
+                                        🛡️ 系統安全庫 (預設)
+                                    </h4>
+                                    <p className="text-[10px] text-gray-500 mb-3">系統內建的安全指令，必須拖出至允許清單才會免審批。</p>
+                                    <div className="flex-1 overflow-y-auto space-y-2 pr-2 custom-scrollbar min-h-[16rem]">
+                                        {['dir', 'pwd', 'date', 'echo', 'cat', 'grep', 'find', 'whoami', 'tail', 'head', 'df', 'free', 'Get-ChildItem', 'Select-String', 'golem-check']
+                                            .filter(cmd => !(config.env.COMMAND_WHITELIST || "").split(',').map(s => s.trim()).includes(cmd))
+                                            .map((cmd, idx) => (
+                                                <div
+                                                    key={`safe-drv-${idx}`}
+                                                    draggable
+                                                    onDragStart={(e) => {
+                                                        e.dataTransfer.setData("text/plain", cmd);
+                                                        e.dataTransfer.effectAllowed = "move";
+                                                    }}
+                                                    className="px-3 py-2 bg-gray-800 border border-gray-700 text-gray-400 text-xs font-mono rounded cursor-grab active:cursor-grabbing hover:border-emerald-500 shadow-sm relative group flex items-center justify-between"
+                                                >
+                                                    <span>{cmd}</span>
+                                                    <span className="text-[10px] text-emerald-400 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">拖曳啟用</span>
+                                                </div>
+                                            ))}
                                     </div>
                                 </div>
 
@@ -700,16 +728,8 @@ export default function SettingsPage() {
                                         <CheckCircle2 className="w-4 h-4" /> 允許清單 (免審批)
                                     </h4>
                                     <div className="flex-1 overflow-y-auto space-y-2 pr-2 custom-scrollbar min-h-[16rem]">
-                                        {/* Built-in Safe Commands */}
-                                        <div className="text-xs text-gray-500 mb-2 mt-2 font-medium">系統預設 (無法移除)</div>
-                                        {['dir', 'pwd', 'date', 'echo', 'cat', 'grep', 'find', 'whoami', 'tail', 'head', 'df', 'free', 'Get-ChildItem', 'Select-String', 'golem-check'].map((cmd, idx) => (
-                                            <div key={`safe-${idx}`} className="px-3 py-2 bg-emerald-950/20 border border-emerald-900/30 text-emerald-400/80 text-xs font-mono rounded cursor-not-allowed">
-                                                {cmd}
-                                            </div>
-                                        ))}
-
                                         {/* User Whitelist */}
-                                        <div className="text-xs text-emerald-600/80 mb-2 mt-4 font-medium">自訂啟用中</div>
+                                        <div className="text-xs text-emerald-600/80 mb-2 mt-2 font-medium">免審批生效中</div>
                                         {(config.env.COMMAND_WHITELIST || "")
                                             .split(',')
                                             .map(s => s.trim())
@@ -722,10 +742,34 @@ export default function SettingsPage() {
                                                         e.dataTransfer.setData("text/plain", cmd);
                                                         e.dataTransfer.effectAllowed = "move";
                                                     }}
-                                                    className="px-3 py-2 bg-gray-800 border border-emerald-600/50 text-emerald-300 text-xs font-mono rounded cursor-grab active:cursor-grabbing hover:border-emerald-400 shadow-sm relative group flex items-center justify-between"
+                                                    className="px-3 py-2 bg-emerald-950/20 border border-emerald-600/50 text-emerald-300 text-xs font-mono rounded cursor-grab active:cursor-grabbing hover:border-red-400 shadow-sm relative group flex items-center justify-between"
                                                 >
                                                     <span>{cmd}</span>
-                                                    <span className="text-[10px] text-gray-500 opacity-0 group-hover:opacity-100 transition-opacity">拖曳移出</span>
+                                                    <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                        <span className="text-[10px] text-gray-500 mr-1">拖出停用</span>
+                                                        <button
+                                                            onClick={() => {
+                                                                const poolStr = config.env.COMMAND_WHITELIST || "";
+                                                                const currentPool = poolStr.split(',').map(s => s.trim()).filter(Boolean);
+                                                                const newWhitelist = currentPool.filter(c => c !== cmd);
+                                                                handleChangeEnv("COMMAND_WHITELIST", newWhitelist.join(','));
+
+                                                                // 如果不是系統預設的指令，就丟回自訂備選池
+                                                                const defaultSafe = ['dir', 'pwd', 'date', 'echo', 'cat', 'grep', 'find', 'whoami', 'tail', 'head', 'df', 'free', 'Get-ChildItem', 'Select-String', 'golem-check'];
+                                                                if (!defaultSafe.includes(cmd)) {
+                                                                    const customPoolStr = config.env.CUSTOM_COMMANDS || "";
+                                                                    const currentCustomPool = customPoolStr.split(',').map(s => s.trim()).filter(Boolean);
+                                                                    if (!currentCustomPool.includes(cmd)) {
+                                                                        handleChangeEnv("CUSTOM_COMMANDS", [...currentCustomPool, cmd].join(','));
+                                                                    }
+                                                                }
+                                                            }}
+                                                            className="text-gray-500 hover:text-red-400 p-0.5"
+                                                            title="移除"
+                                                        >
+                                                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
+                                                        </button>
+                                                    </div>
                                                 </div>
                                             ))
                                         }
