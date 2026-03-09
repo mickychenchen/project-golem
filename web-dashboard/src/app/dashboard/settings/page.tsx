@@ -404,8 +404,15 @@ const SystemUpdateSection = () => {
                                 </div>
 
                                 <div className="flex gap-3 justify-end pt-2">
-                                    <button onClick={() => setShowModal(false)} className="px-4 py-2 hover:bg-gray-800 text-gray-400 rounded-lg text-sm">取消</button>
-                                    <button onClick={handleStartUpdate} className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-medium">開始更新</button>
+                                    <button onClick={() => setShowModal(false)} className="px-4 py-2 hover:bg-gray-800 text-gray-400 rounded-lg text-sm transition-colors">取消</button>
+                                    <button
+                                        onClick={handleStartUpdate}
+                                        disabled={
+                                            (updateInfo.installMode === 'git' && updateInfo.gitInfo && updateInfo.gitInfo.behindCount === 0) ||
+                                            (updateInfo.installMode === 'zip' && !updateInfo.isOutdated)
+                                        }
+                                        className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-900/50 disabled:text-gray-500 disabled:cursor-not-allowed text-white rounded-lg text-sm font-medium transition-colors"
+                                    >開始更新</button>
                                 </div>
                             </div>
                         ) : (
