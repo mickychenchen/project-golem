@@ -13,6 +13,7 @@ const ProtocolFormatter = require('../services/ProtocolFormatter');
 const PageInteractor = require('./PageInteractor');
 const ChatLogManager = require('../managers/ChatLogManager');
 const SkillIndexManager = require('../managers/SkillIndexManager');
+const NodeRouter = require('./NodeRouter');
 const { URLS } = require('./constants');
 
 // ============================================================
@@ -240,6 +241,16 @@ class GolemBrain {
         if (!this.browser) await this.init();
         try { await this.page.bringToFront(); } catch (e) { }
         await this.setupCDP();
+
+        // ── [v9.1] Slash Command Interception ──
+        if (text.startsWith('/') || text.startsWith('GOLEM_SKILL::')) {
+            const commandResult = await NodeRouter.handle({ text, isAdmin: true }, this);
+            if (commandResult) {
+                console.log(`⚡ [Brain] 指令攔截器已處理: ${text}`);
+                // 模擬 AI 回應格式返回 (若有需要可以包裝成更複雜的格式)
+                return commandResult;
+            }
+        }
 
         const reqId = ProtocolFormatter.generateReqId();
         const startTag = ProtocolFormatter.buildStartTag(reqId);

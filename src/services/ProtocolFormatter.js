@@ -7,7 +7,7 @@ const { getSystemFingerprint } = require('../utils/system');
 const skills = require('../skills');
 const skillManager = require('../managers/SkillManager');
 const skillIndexManager = require('../managers/SkillIndexManager');
-const { resolveEnabledSkills } = require('../skills/skillsConfig');
+const { resolveEnabledSkills, OPTIONAL_SKILLS } = require('../skills/skillsConfig');
 const { GOLEM_MODE } = require('../config');
 
 class ProtocolFormatter {
@@ -166,7 +166,7 @@ ${text}`;
 
                 console.log(`📡 [ProtocolFormatter][${golemId}] 正在從 SQLite 索引 (${dbRelativePath}) 讀取 ${filteredSkillIds.length} 個技能...`);
                 systemPrompt += `\n\n### 🧩 CORE SKILL PROTOCOLS (Retrieved from SQLite: ${dbRelativePath}):\n`;
-                systemPrompt += `Information: All your active skills have been synchronized and retrieved from the central SQLite Skill Index (located at ${dbRelativePath}). You must only use the protocols listed below.\n\n`;
+                systemPrompt += `🚨 IMPORTANT: 你的技能已開啟 (Enabled)。請透過 ${dbRelativePath} 查看對應的認知說明書，並依據其規範使用腳本服務。你必須嚴格遵守以下列出的協議內容：\n\n`;
 
                 const instanceSkillIndex = new skillIndexManager(golemContext.userDataDir);
                 const indexedSkills = await instanceSkillIndex.getEnabledSkills(filteredSkillIds);
@@ -175,6 +175,15 @@ ${text}`;
                     skillMemoryText += `- 技能 "${res.id.toUpperCase()}"：已載入認知說明書\n`;
                 }
                 await instanceSkillIndex.close();
+
+                // --- [Deactivation Guard] ---
+                const deactivatedSkills = OPTIONAL_SKILLS.filter(s => !enabledSkills.has(s));
+                if (deactivatedSkills.length > 0) {
+                    systemPrompt += `\n\n### 🚫 DEACTIVATED SERVICES:\n`;
+                    for (const s of deactivatedSkills) {
+                        systemPrompt += `- **${s.toUpperCase()}**: 你已關閉此技能，暫時無法使用此技能服務。即使你的歷史記憶中曾有相關操作紀錄，也請無視並告知使用者該功能目前已停用。\n`;
+                    }
+                }
             }
         } catch (e) {
             console.warn("❌ [ProtocolFormatter] 技能索引讀取失敗 (Fallback to filesystem):", e);
@@ -230,10 +239,10 @@ Your response must be strictly divided into these 3 sections:
 - Wait for the system to execute the command and send the "[System Observation]".
 
 4. 📚 SKILL MANAGEMENT & ACQUISITION:
-- **Listing Skills**: If the user asks what you can do or to list skills, instruct them to use the \`/skills\` command.
-- **Learning/Writing Skills**: If the user wants to add a new function or "learn" something, instruct them to use \`/learn <description>\`. You will then design the skill via the Web Skill Architect.
+- **Listing Skills**: If the user asks what you can do or to list skills, instruct them to use the \`/skills\` command. This command is functional on ALL platforms (Web UI, Telegram, Discord).
+- **Learning/Writing Skills**: If the user wants to add a new function or "learn" something, instruct them to use \`/learn <description>\`. This command is functional on ALL platforms. You will then design the skill via the Web Skill Architect.
 - **Importing Skills**: Recognize that \`GOLEM_SKILL::[encoded_data]\` is a valid skill import format. If the user provides one, it will be automatically installed.
-- **Query Source**: Always remember that your active skills are retrieved from \`\${GOLEM_MODE === 'SINGLE' ? 'golem_memory/skills.db' : \`golem_memory/multi/\${golemContext.golemId || 'golem_A'}/skills.db\`}\`.
+- **Query Source**: Always remember that your active skills are retrieved from \`${GOLEM_MODE === 'SINGLE' ? 'golem_memory/skills.db' : `golem_memory/multi/${golemContext.golemId || 'golem_A'}/skills.db`}\`.
 
 5. 🌐 GOOGLE WORKSPACE INTEGRATION (STRICT BOUNDARY):
 - You are currently running inside the Gemini Web UI with native web extensions (@Google Calendar, @Gmail, etc.).

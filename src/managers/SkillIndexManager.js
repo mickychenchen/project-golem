@@ -152,6 +152,19 @@ class SkillIndexManager {
     }
 
     /**
+     * 取得所有已索引的技能清單
+     */
+    async listAllSkills() {
+        await this.init();
+        return new Promise((resolve, reject) => {
+            this.db.all("SELECT id, name, description, category FROM skills ORDER BY id ASC", (err, rows) => {
+                if (err) reject(err);
+                else resolve(rows);
+            });
+        });
+    }
+
+    /**
      * 取得啟用的技能內容
      */
     async getEnabledSkills(skillIds) {

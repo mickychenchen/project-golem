@@ -68,6 +68,7 @@ class SkillManager {
      * 獲取技能執行函數
      */
     getSkill(name) {
+        if (this.skills.size === 0) this.refresh();
         return this.skills.get(name);
     }
 
@@ -141,6 +142,7 @@ class SkillManager {
     }
 
     listSkills() {
+        if (this.skills.size === 0) this.refresh();
         return Array.from(this.skills.values()).map(s => ({
             name: s.name,
             description: s.description,

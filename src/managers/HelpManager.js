@@ -7,20 +7,20 @@ const skillManager = require('./SkillManager');
 // 📖 Help Manager (動態說明書) - v9.0 Enhanced
 // ============================================================
 class HelpManager {
-    static getManual() {
-        const source = Introspection.readSelf();
+    static async getManual() {
+        const source = await Introspection.readSelf();
         const routerPattern = /text\.(?:startsWith|match)\(['"]\/?([a-zA-Z0-9_|]+)['"]\)/g;
         const foundCmds = new Set(['help', 'callme', 'patch', 'update', 'donate']);
         let match;
         while ((match = routerPattern.exec(source)) !== null) foundCmds.add(match[1].replace(/\|/g, '/').replace(/[\^\(\)]/g, ''));
         let skillList = "基礎系統操作";
-        // ✨ [v9.0] 從 SkillManager 動態獲取技能列表
         try {
-            const dynamicSkills = skillManager.listSkills().map(s => s.name);
-            if (dynamicSkills.length > 0) skillList = dynamicSkills.join(', ');
-            else {
-                // 回退到舊版 skills.js 檢查
-                try { skillList = Object.keys(skills).filter(k => k !== 'persona' && k !== 'getSystemPrompt').join(', '); } catch (e) { }
+            const SkillIndexManager = require('./SkillIndexManager');
+            const index = new SkillIndexManager();
+            const allSkills = await index.listAllSkills();
+            await index.close();
+            if (allSkills.length > 0) {
+                skillList = allSkills.map(s => s.id).join(', ');
             }
         } catch (e) { }
 
