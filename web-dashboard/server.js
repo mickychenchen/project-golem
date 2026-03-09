@@ -369,10 +369,18 @@ class WebServer {
 
                 // 4. Update SQLite Index
                 const SkillIndexManager = require('../src/managers/SkillIndexManager');
-                if (enabled) {
-                    SkillIndexManager.addSkill(id).catch(e => console.error(`[SkillIndex] Toggle-Add Error for ${id}:`, e.message));
-                } else {
-                    SkillIndexManager.removeSkill(id).catch(e => console.error(`[SkillIndex] Toggle-Remove Error for ${id}:`, e.message));
+                const { GOLEMS_CONFIG, MEMORY_BASE_DIR, GOLEM_MODE } = require('../src/config');
+                const targetDirs = GOLEM_MODE === 'SINGLE'
+                    ? [MEMORY_BASE_DIR]
+                    : GOLEMS_CONFIG.map(g => path.join(MEMORY_BASE_DIR, g.id));
+
+                for (const dir of targetDirs) {
+                    const idx = new SkillIndexManager(dir);
+                    if (enabled) {
+                        idx.addSkill(id).catch(e => console.error(`[SkillIndex][${path.basename(dir)}] Toggle-Add Error for ${id}:`, e.message));
+                    } else {
+                        idx.removeSkill(id).catch(e => console.error(`[SkillIndex][${path.basename(dir)}] Toggle-Remove Error for ${id}:`, e.message));
+                    }
                 }
 
                 return res.json({ success: true, enabled, skillsStr: newSkillsStr });
@@ -408,7 +416,15 @@ class WebServer {
                 const enabledSkills = resolveEnabledSkills(process.env.OPTIONAL_SKILLS || '', []);
                 if (MANDATORY_SKILLS.includes(safeId) || enabledSkills.has(safeId)) {
                     const SkillIndexManager = require('../src/managers/SkillIndexManager');
-                    SkillIndexManager.addSkill(safeId).catch(e => console.error(`[SkillIndex] Create-Add Error for ${safeId}:`, e.message));
+                    const { GOLEMS_CONFIG, MEMORY_BASE_DIR, GOLEM_MODE } = require('../src/config');
+                    const targetDirs = GOLEM_MODE === 'SINGLE'
+                        ? [MEMORY_BASE_DIR]
+                        : GOLEMS_CONFIG.map(g => path.join(MEMORY_BASE_DIR, g.id));
+
+                    for (const dir of targetDirs) {
+                        const idx = new SkillIndexManager(dir);
+                        idx.addSkill(safeId).catch(e => console.error(`[SkillIndex][${path.basename(dir)}] Create-Add Error for ${safeId}:`, e.message));
+                    }
                 }
 
                 return res.json({ success: true, id: safeId });
@@ -444,7 +460,15 @@ class WebServer {
                 const enabledSkills = resolveEnabledSkills(process.env.OPTIONAL_SKILLS || '', []);
                 if (MANDATORY_SKILLS.includes(safeId) || enabledSkills.has(safeId)) {
                     const SkillIndexManager = require('../src/managers/SkillIndexManager');
-                    SkillIndexManager.addSkill(safeId).catch(e => console.error(`[SkillIndex] Update-Add Error for ${safeId}:`, e.message));
+                    const { GOLEMS_CONFIG, MEMORY_BASE_DIR, GOLEM_MODE } = require('../src/config');
+                    const targetDirs = GOLEM_MODE === 'SINGLE'
+                        ? [MEMORY_BASE_DIR]
+                        : GOLEMS_CONFIG.map(g => path.join(MEMORY_BASE_DIR, g.id));
+
+                    for (const dir of targetDirs) {
+                        const idx = new SkillIndexManager(dir);
+                        idx.addSkill(safeId).catch(e => console.error(`[SkillIndex][${path.basename(dir)}] Update-Add Error for ${safeId}:`, e.message));
+                    }
                 }
 
                 return res.json({ success: true, id: safeId });

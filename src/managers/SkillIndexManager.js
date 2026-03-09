@@ -1,11 +1,14 @@
 const sqlite3 = require('sqlite3').verbose();
 const fs = require('fs').promises;
 const path = require('path');
-const { MEMORY_BASE_DIR } = require('../config');
 
 class SkillIndexManager {
-    constructor() {
-        this.dbPath = path.join(MEMORY_BASE_DIR, 'skills.db');
+    constructor(userDataDir) {
+        if (!userDataDir) {
+            const { MEMORY_BASE_DIR } = require('../config');
+            userDataDir = MEMORY_BASE_DIR;
+        }
+        this.dbPath = path.join(userDataDir, 'skills.db');
         this.db = null;
         this.libPath = path.join(process.cwd(), 'src', 'skills', 'lib');
     }
@@ -57,7 +60,7 @@ class SkillIndexManager {
             ...enabledIds
         ]);
 
-        console.log(`📡 [SkillIndex] 開始同步技能說明書... (目標數量: ${effectiveIds.size})`);
+        console.log(`📡 [SkillIndex][${path.basename(path.dirname(this.dbPath))}] 開始同步技能說明書... (目標數量: ${effectiveIds.size})`);
 
         try {
             const files = await fs.readdir(this.libPath);
@@ -73,7 +76,7 @@ class SkillIndexManager {
                     await this.removeSkill(skillId);
                 }
             }
-            console.log('🏁 [SkillIndex] 同步完成。');
+            console.log(`🏁 [SkillIndex][${path.basename(path.dirname(this.dbPath))}] 同步完成。`);
         } catch (e) {
             console.error('❌ [SkillIndex] 同步失敗:', e.message);
         }
@@ -168,6 +171,20 @@ class SkillIndexManager {
         });
     }
 
+    /**
+     * 關閉連線
+     */
+    async close() {
+        if (this.db) {
+            return new Promise((resolve) => {
+                this.db.close(() => {
+                    this.db = null;
+                    resolve();
+                });
+            });
+        }
+    }
+
     // --- Private Helpers ---
 
     async _checkNeedsUpdate(id, lastModified) {
@@ -210,4 +227,4 @@ class SkillIndexManager {
     }
 }
 
-module.exports = new SkillIndexManager();
+module.exports = SkillIndexManager;

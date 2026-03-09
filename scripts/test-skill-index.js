@@ -1,6 +1,9 @@
-const skillIndexManager = require('../src/managers/SkillIndexManager');
+const SkillIndexManager = require('../src/managers/SkillIndexManager');
 const path = require('path');
 const fs = require('fs');
+const { MEMORY_BASE_DIR } = require('../src/config');
+
+const skillIndexManager = new SkillIndexManager(MEMORY_BASE_DIR);
 
 async function testIndex() {
     console.log('🧪 Starting Skill Index Test...');

@@ -12,6 +12,7 @@ const BrowserLauncher = require('./BrowserLauncher');
 const ProtocolFormatter = require('../services/ProtocolFormatter');
 const PageInteractor = require('./PageInteractor');
 const ChatLogManager = require('../managers/ChatLogManager');
+const SkillIndexManager = require('../managers/SkillIndexManager');
 const { URLS } = require('./constants');
 
 // ============================================================
@@ -22,6 +23,7 @@ class GolemBrain {
         // ── 實體識別與設定 ──
         this.golemId = options.golemId || 'default';
         this.userDataDir = options.userDataDir || path.resolve(CONFIG.USER_DATA_DIR || './golem_memory');
+        this.skillIndex = new SkillIndexManager(this.userDataDir);
 
         // ── 瀏覽器狀態 ──
         this.browser = null;
@@ -84,15 +86,13 @@ class GolemBrain {
         try {
             const personaManager = require('../skills/core/persona');
             if (personaManager.exists(this.userDataDir)) {
-                const SkillIndexManager = require('../managers/SkillIndexManager');
-                const { resolveEnabledSkills } = require('../skills/skillsConfig');
-
                 // 獲取目前啟用的技能清單
                 const personaData = personaManager.get(this.userDataDir);
                 const personaSkills = personaData.skills || [];
+                const { resolveEnabledSkills } = require('../skills/skillsConfig');
 
                 const enabledSet = resolveEnabledSkills(process.env.OPTIONAL_SKILLS || '', personaSkills);
-                await SkillIndexManager.sync(Array.from(enabledSet));
+                await this.skillIndex.sync(Array.from(enabledSet));
             } else {
                 console.log(`⏸️ [Brain][${this.golemId}] 尚未完成設定 (Missing persona.json)，跳過技能索引同步。`);
             }
@@ -357,7 +357,10 @@ class GolemBrain {
      * @param {boolean} [forceRefresh=false]
      */
     async _injectSystemPrompt(forceRefresh = false) {
-        let { systemPrompt, skillMemoryText } = await ProtocolFormatter.buildSystemPrompt(forceRefresh, { userDataDir: this.userDataDir });
+        let { systemPrompt, skillMemoryText } = await ProtocolFormatter.buildSystemPrompt(forceRefresh, {
+            userDataDir: this.userDataDir,
+            golemId: this.golemId
+        });
 
         if (skillMemoryText) {
             await this.memorize(skillMemoryText, { type: 'system_skills', source: 'boot_init' });
