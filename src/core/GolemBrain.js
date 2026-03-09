@@ -12,6 +12,8 @@ const BrowserLauncher = require('./BrowserLauncher');
 const ProtocolFormatter = require('../services/ProtocolFormatter');
 const PageInteractor = require('./PageInteractor');
 const ChatLogManager = require('../managers/ChatLogManager');
+const SkillIndexManager = require('../managers/SkillIndexManager');
+const NodeRouter = require('./NodeRouter');
 const { URLS } = require('./constants');
 
 // ============================================================
@@ -22,6 +24,7 @@ class GolemBrain {
         // ── 實體識別與設定 ──
         this.golemId = options.golemId || 'default';
         this.userDataDir = options.userDataDir || path.resolve(CONFIG.USER_DATA_DIR || './golem_memory');
+        this.skillIndex = new SkillIndexManager(this.userDataDir);
 
         // ── 瀏覽器狀態 ──
         this.browser = null;
@@ -79,6 +82,24 @@ class GolemBrain {
 
         // 2.5 初始化日誌管理員 (建立目錄)
         await this.chatLogManager.init();
+
+        // 2.6 同步技能索引到 SQLite (僅在完成建立/設定後才啟動)
+        try {
+            const personaManager = require('../skills/core/persona');
+            if (personaManager.exists(this.userDataDir)) {
+                // 獲取目前啟用的技能清單
+                const personaData = personaManager.get(this.userDataDir);
+                const personaSkills = personaData.skills || [];
+                const { resolveEnabledSkills } = require('../skills/skillsConfig');
+
+                const enabledSet = resolveEnabledSkills(process.env.OPTIONAL_SKILLS || '', personaSkills);
+                await this.skillIndex.sync(Array.from(enabledSet));
+            } else {
+                console.log(`⏸️ [Brain][${this.golemId}] 尚未完成設定 (Missing persona.json)，跳過技能索引同步。`);
+            }
+        } catch (e) {
+            console.warn('⚠️ [Brain] 技能索引同步失敗:', e.message);
+        }
 
         // 3. 初始化記憶引擎 (含降級策略)
         await this._initMemoryDriver();
@@ -221,6 +242,16 @@ class GolemBrain {
         try { await this.page.bringToFront(); } catch (e) { }
         await this.setupCDP();
 
+        // ── [v9.1] Slash Command Interception ──
+        if (text.startsWith('/') || text.startsWith('GOLEM_SKILL::')) {
+            const commandResult = await NodeRouter.handle({ text, isAdmin: true }, this);
+            if (commandResult) {
+                console.log(`⚡ [Brain] 指令攔截器已處理: ${text}`);
+                // 模擬 AI 回應格式返回 (若有需要可以包裝成更複雜的格式)
+                return commandResult;
+            }
+        }
+
         const reqId = ProtocolFormatter.generateReqId();
         const startTag = ProtocolFormatter.buildStartTag(reqId);
         const endTag = ProtocolFormatter.buildEndTag(reqId);
@@ -337,7 +368,10 @@ class GolemBrain {
      * @param {boolean} [forceRefresh=false]
      */
     async _injectSystemPrompt(forceRefresh = false) {
-        let { systemPrompt, skillMemoryText } = await ProtocolFormatter.buildSystemPrompt(forceRefresh, { userDataDir: this.userDataDir });
+        let { systemPrompt, skillMemoryText } = await ProtocolFormatter.buildSystemPrompt(forceRefresh, {
+            userDataDir: this.userDataDir,
+            golemId: this.golemId
+        });
 
         if (skillMemoryText) {
             await this.memorize(skillMemoryText, { type: 'system_skills', source: 'boot_init' });

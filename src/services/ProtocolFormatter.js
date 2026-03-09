@@ -6,7 +6,9 @@ const path = require('path');
 const { getSystemFingerprint } = require('../utils/system');
 const skills = require('../skills');
 const skillManager = require('../managers/SkillManager');
-const { resolveEnabledSkills } = require('../skills/skillsConfig');
+const skillIndexManager = require('../managers/SkillIndexManager');
+const { resolveEnabledSkills, OPTIONAL_SKILLS } = require('../skills/skillsConfig');
+const { GOLEM_MODE } = require('../config');
 
 class ProtocolFormatter {
     /**
@@ -92,7 +94,7 @@ ${selectedPrompt}
 5. FEASIBILITY: ZERO TRIAL-AND-ERROR. Provide the most stable, one-shot successful command.
 6. STRICT JSON: ESCAPE ALL DOUBLE QUOTES (\\") inside string values!
 7. ReAct: If you use [GOLEM_ACTION], DO NOT guess the result in [GOLEM_REPLY]. Wait for Observation.
-8. SKILL BOUNDARY: You are NOT allowed to autonomously inspect or load skill files. Only injected skills are available to you.
+8. SKILL BOUNDARY: You are STRICTLY FORBIDDEN from autonomously inspecting, scanning, or loading any files in 'src/skills/'. You DO NOT HAVE A PHYSICAL BODY or FILESYSTEM presence; you only exist within this conversation. Use ONLY the skills provided in the 'CORE SKILL PROTOCOLS' section below. If a skill is not listed there, you DO NOT have it.
 9. WORKSPACE: If you cannot access Google Workspace (@Google Drive/Keep/etc.), explicitly tell the user to enable the extension.
 ${observerPrompt}
 [USER INPUT / SYSTEM MESSAGE]
@@ -154,28 +156,38 @@ ${text}`;
 
                 const enabledSkills = resolveEnabledSkills(process.env.OPTIONAL_SKILLS || '', personaSkills);
 
-                const filteredMdFiles = mdFiles.filter(file => {
+                const filteredSkillIds = mdFiles.filter(file => {
                     const baseName = file.replace('.md', '').toLowerCase();
                     return enabledSkills.has(baseName);
-                });
+                }).map(file => file.replace('.md', '').toLowerCase());
 
-                console.log(`📡 [ProtocolFormatter] 正在平行讀取 ${filteredMdFiles.length} 個技能說明書...`);
-                systemPrompt += `\n\n### 🧩 CORE SKILL PROTOCOLS (Cognitive Layer):\n`;
+                const golemId = golemContext.golemId || 'golem_A';
+                const dbRelativePath = GOLEM_MODE === 'SINGLE' ? 'golem_memory/skills.db' : `golem_memory/multi/${golemId}/skills.db`;
 
-                const readTasks = filteredMdFiles.map(async (file) => {
-                    const content = await fs.readFile(path.join(libPath, file), 'utf-8');
-                    const skillName = path.basename(file, '.md').toUpperCase();
-                    return { skillName, content };
-                });
+                console.log(`📡 [ProtocolFormatter][${golemId}] 正在從 SQLite 索引 (${dbRelativePath}) 讀取 ${filteredSkillIds.length} 個技能...`);
+                systemPrompt += `\n\n### 🧩 CORE SKILL PROTOCOLS (Retrieved from SQLite: ${dbRelativePath}):\n`;
+                systemPrompt += `🚨 IMPORTANT: 你的技能已開啟 (Enabled)。請透過 ${dbRelativePath} 查看對應的認知說明書，並依據其規範使用腳本服務。你必須嚴格遵守以下列出的協議內容：\n\n`;
 
-                const results = await Promise.all(readTasks);
-                for (const res of results) {
-                    systemPrompt += `#### SKILL: ${res.skillName}\n${res.content}\n\n`;
-                    skillMemoryText += `- 技能 "${res.skillName}"：已載入認知說明書\n`;
+                const instanceSkillIndex = new skillIndexManager(golemContext.userDataDir);
+                const indexedSkills = await instanceSkillIndex.getEnabledSkills(filteredSkillIds);
+                for (const res of indexedSkills) {
+                    systemPrompt += `#### SKILL: ${res.id.toUpperCase()}\n${res.content}\n\n`;
+                    skillMemoryText += `- 技能 "${res.id.toUpperCase()}"：已載入認知說明書\n`;
+                }
+                await instanceSkillIndex.close();
+
+                // --- [Deactivation Guard] ---
+                const deactivatedSkills = OPTIONAL_SKILLS.filter(s => !enabledSkills.has(s));
+                if (deactivatedSkills.length > 0) {
+                    systemPrompt += `\n\n### 🚫 DEACTIVATED SERVICES:\n`;
+                    for (const s of deactivatedSkills) {
+                        systemPrompt += `- **${s.toUpperCase()}**: 你已關閉此技能，暫時無法使用此技能服務。即使你的歷史記憶中曾有相關操作紀錄，也請無視並告知使用者該功能目前已停用。\n`;
+                    }
                 }
             }
         } catch (e) {
-            console.warn("❌ [ProtocolFormatter] 說明書掃描失敗:", e);
+            console.warn("❌ [ProtocolFormatter] 技能索引讀取失敗 (Fallback to filesystem):", e);
+            // Fallback 邏輯可以保留或交給 SkillIndexManager 處理
         }
 
         const superProtocol = `
@@ -189,7 +201,7 @@ Your response must be strictly divided into these 3 sections:
 [[BEGIN:reqId]]
 [GOLEM_MEMORY]
 - Manage long-term state, project context, and user preferences.
-- 🧠 **HIPPOCAMPUS**: If you inspect new skill files in \`src/skills/lib\`, you MUST memorize how to use them here.
+- 🧠 **HIPPOCAMPUS**: Memory consolidation layer. Do NOT attempt to read external skill files.
 - If no update is needed, output "null".
 [GOLEM_ACTION]
 - 🚨 **MANDATORY**: YOU MUST USE MARKDOWN JSON CODE BLOCKS!
@@ -197,15 +209,24 @@ Your response must be strictly divided into these 3 sections:
 - **PRECISION**: Use stable, native commands (e.g., 'dir' for Windows, 'ls' for Linux).
 - **ONE-SHOT SUCCESS**: No guessing. Provide the most feasible, error-free command possible.
 - **Execution Layer**: Skills are now separated from prompts. Execute via action name.
+- ⚡ **ACTION: command**: Execute Native BASH/Shell commands.
+- 🛠️ **System Skills**: Authorized JS scripts in \`src/skills/core/*.js\` are invoked via their specific action names.
+- 🚫 **WARNING**: Do NOT use hallucinated scripts like 'shell-executor.js'. Use only native commands or authorized actions.
+- **Example**:
 \`\`\`json
 [
+  {"action": "command", "parameter": "ls -la"},
+  {"action": "moltbot", "task": "..."},
   {"action": "command", "parameter": "SPECIFIC_STABLE_COMMAND_FOR_${systemFingerprint}"}
 ]
 \`\`\`
 
 [GOLEM_REPLY]
 - Pure text response to the user.
+- 🚫 **ANTI-NARRATION**: DO NOT explain *how* or *via what file* you run commands.
 - If an action is pending, use: "正在執行 [${systemFingerprint}] 相容指令，請稍候...".
+- Language: Follow user's choice or current system default.
+- Tone: Professional, direct, and concise. Avoid unnecessary roleplay unless requested.
 - 📝 **MENTION RULE**: 當需要提及 (@mention) 或詢問群組中的使用者時，請直接在文字回覆中使用 @userid。
 - 🚫 **BOUNDARY**: 嚴禁將當前平台通訊（Telegram/Discord）視為外部 \`moltbot\` 任務處理。
 
@@ -217,7 +238,13 @@ Your response must be strictly divided into these 3 sections:
 - If you trigger [GOLEM_ACTION], DO NOT guess the result in [GOLEM_REPLY].
 - Wait for the system to execute the command and send the "[System Observation]".
 
-4. 🌐 GOOGLE WORKSPACE INTEGRATION (STRICT BOUNDARY):
+4. 📚 SKILL MANAGEMENT & ACQUISITION:
+- **Listing Skills**: If the user asks what you can do or to list skills, instruct them to use the \`/skills\` command. This command is functional on ALL platforms (Web UI, Telegram, Discord).
+- **Learning/Writing Skills**: If the user wants to add a new function or "learn" something, instruct them to use \`/learn <description>\`. This command is functional on ALL platforms. You will then design the skill via the Web Skill Architect.
+- **Importing Skills**: Recognize that \`GOLEM_SKILL::[encoded_data]\` is a valid skill import format. If the user provides one, it will be automatically installed.
+- **Query Source**: Always remember that your active skills are retrieved from \`${GOLEM_MODE === 'SINGLE' ? 'golem_memory/skills.db' : `golem_memory/multi/${golemContext.golemId || 'golem_A'}/skills.db`}\`.
+
+5. 🌐 GOOGLE WORKSPACE INTEGRATION (STRICT BOUNDARY):
 - You are currently running inside the Gemini Web UI with native web extensions (@Google Calendar, @Gmail, etc.).
 - 🚨 READ/WRITE FATAL RULE: The host OS (Windows/Linux) does NOT have access to the user's Google accounts.
 - You are STRICTLY FORBIDDEN from using [GOLEM_ACTION] (no terminal commands, no cron jobs, no scripts) to read, send, or create any Google Workspace data (Emails, Calendar events, Docs).
