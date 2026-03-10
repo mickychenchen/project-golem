@@ -79,6 +79,7 @@ case "${1:-}" in
     --init)      run_clean_init ;;
     --stop)      stop_system ;;
     --docker)    launch_docker ;;
+    --doctor)    npm run doctor ;;
     --config)    step_check_env; config_wizard ;;
     --status)    print_status ;;
     --version)   echo "Project Golem v${GOLEM_VERSION} (Titan Chronos)" ;;
@@ -97,6 +98,7 @@ case "${1:-}" in
         echo "  --stop        停止 Golem 與 Web Dashboard"
         echo "  --config      啟動配置精靈 (Gemini Key / 系統選項)"
         echo "  --docker      使用 Docker 啟動系統"
+        echo "  --doctor      執行系統環境自我診斷"
         echo "  --status      顯示系統狀態 (非互動)"
         echo "  --version     顯示版本號"
         echo "  --help, -h    顯示此說明"
@@ -118,5 +120,15 @@ case "${1:-}" in
         echo ""
         exit 0
         ;;
-    *)           show_menu ;;
+    *)
+        if [ ! -f "$DOT_ENV_PATH" ] && [ ! -d "$SCRIPT_DIR/node_modules" ]; then
+            echo ""
+            echo -e "${CYAN}✨ 偵測到首次執行，即將開始自動一鍵安裝...${NC}"
+            echo -e "${DIM}(5 秒後自動繼續... 按 Ctrl+C 取消)${NC}"
+            sleep 5
+            run_full_install
+        else
+            show_menu
+        fi
+        ;;
 esac

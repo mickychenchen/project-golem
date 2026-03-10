@@ -54,11 +54,13 @@ check_multi_golems() {
 check_status() {
     # Node Version
     NODE_VER=$(node -v 2>/dev/null || echo "N/A")
-    if [[ "$NODE_VER" == v20* ]]; then
+    NODE_MAJ=$(echo "$NODE_VER" | grep -oE '^v[0-9]+' | tr -d 'v')
+    
+    if [ -n "$NODE_MAJ" ] && [ "$NODE_MAJ" -ge 20 ]; then
         STATUS_NODE="${GREEN}✅ $NODE_VER${NC}"
         NODE_OK=true
     else
-        STATUS_NODE="${RED}❌ $NODE_VER (需 v20)${NC}"
+        STATUS_NODE="${RED}❌ $NODE_VER (需 v20 或以上)${NC}"
         NODE_OK=false
     fi
 
@@ -210,7 +212,7 @@ run_health_check() {
     if [ "$NODE_OK" = true ]; then
         box_line_colored "  ${GREEN}✔${NC}  Node.js          ${GREEN}$NODE_VER${NC}"
     else
-        box_line_colored "  ${RED}✖${NC}  Node.js          ${RED}$NODE_VER (需 v20)${NC}"
+        box_line_colored "  ${RED}✖${NC}  Node.js          ${RED}$NODE_VER (需 v20 或以上)${NC}"
         all_pass=false
     fi
 

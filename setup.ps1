@@ -87,7 +87,7 @@ function Step-CheckNode {
         Write-Host '   [WARN] 未檢測到 Node.js，嘗試使用 Winget 自動安裝...' -ForegroundColor Yellow
         winget install -e --id OpenJS.NodeJS.LTS --silent --accept-source-agreements --accept-package-agreements
         if ($LASTEXITCODE -ne 0) {
-            Write-Host '   [ERROR] 自動安裝失敗。請手動下載安裝 Node.js。' -ForegroundColor Red
+            Write-Host '   [ERROR] 自動安裝失敗。請手動下載安裝 Node.js (需 v20 或以上)。' -ForegroundColor Red
             Read-Host '按 Enter 離開'
             return $false
         }
@@ -95,6 +95,19 @@ function Step-CheckNode {
         Read-Host '按 Enter 離開'
         return $false
     }
+    
+    $node_maj = 0
+    if ($node_ver -match '^v(\d+)') {
+        $node_maj = [int]$Matches[1]
+    }
+    
+    if ($node_maj -lt 20) {
+        Write-Host "   [ERROR] 目前版本為 $node_ver，但需要 Node.js v20 或以上版本。" -ForegroundColor Red
+        Write-Host '   請更新 Node.js 後再試。' -ForegroundColor Red
+        Read-Host '按 Enter 離開'
+        return $false
+    }
+
     Write-Host "   [OK] Node.js 環境已就緒。($node_ver)" -ForegroundColor Green
     return $true
 }
@@ -293,6 +306,22 @@ function Run-FullInstall {
 # 主程式入口
 # =======================================================
 Show-Title
+
+if ($args -contains '--doctor') {
+    npm run doctor
+    exit $LASTEXITCODE
+}
+
+$isFirstRun = -not (Test-Path '.env') -and -not (Test-Path 'node_modules')
+if ($args.Count -eq 0 -and $isFirstRun) {
+    Write-Host ''
+    Write-Host '✨ 偵測到首次執行，即將開始自動一鍵安裝...' -ForegroundColor Cyan
+    Write-Host '(5 秒後自動繼續... 按 Ctrl+C 取消)' -ForegroundColor DarkGray
+    Start-Sleep -Seconds 5
+    Run-FullInstall
+    exit
+}
+
 while ($true) {
     $choice = Show-MainMenu
     switch ($choice) {
