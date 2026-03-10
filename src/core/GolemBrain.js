@@ -2,7 +2,7 @@
 // 🧠 Golem Brain (Web Gemini) - Clean Architecture Facade
 // ============================================================
 const path = require('path');
-const { CONFIG, cleanEnv, LOG_BASE_DIR, GOLEM_MODE } = require('../config');
+const ConfigManager = require('../config');
 const DOMDoctor = require('../services/DOMDoctor');
 const BrowserMemoryDriver = require('../memory/BrowserMemoryDriver');
 const SystemQmdDriver = require('../memory/SystemQmdDriver');
@@ -23,7 +23,7 @@ class GolemBrain {
     constructor(options = {}) {
         // ── 實體識別與設定 ──
         this.golemId = options.golemId || 'default';
-        this.userDataDir = options.userDataDir || path.resolve(CONFIG.USER_DATA_DIR || './golem_memory');
+        this.userDataDir = options.userDataDir || path.resolve(ConfigManager.CONFIG.USER_DATA_DIR || './golem_memory');
         this.skillIndex = new SkillIndexManager(this.userDataDir);
 
         // ── 瀏覽器狀態 ──
@@ -37,7 +37,7 @@ class GolemBrain {
         this.selectors = this.doctor.loadSelectors();
 
         // ── 記憶引擎 ──
-        const mode = cleanEnv(process.env.GOLEM_MEMORY_MODE || 'browser').toLowerCase();
+        const mode = ConfigManager.cleanEnv(process.env.GOLEM_MEMORY_MODE || 'browser').toLowerCase();
         console.log(`⚙️ [System] 記憶引擎模式: ${mode.toUpperCase()} (Golem: ${this.golemId})`);
         if (mode === 'qmd') this.memoryDriver = new SystemQmdDriver();
         else if (mode === 'native' || mode === 'system') this.memoryDriver = new SystemNativeDriver();
@@ -46,8 +46,8 @@ class GolemBrain {
         // ── 對話日誌 ──
         this.chatLogManager = new ChatLogManager({
             golemId: this.golemId,
-            logDir: options.logDir || LOG_BASE_DIR,
-            isSingleMode: options.isSingleMode !== undefined ? options.isSingleMode : (GOLEM_MODE === 'SINGLE')
+            logDir: options.logDir || ConfigManager.LOG_BASE_DIR,
+            isSingleMode: options.isSingleMode !== undefined ? options.isSingleMode : (ConfigManager.GOLEM_MODE === 'SINGLE')
         });
     }
 

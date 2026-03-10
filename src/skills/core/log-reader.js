@@ -13,10 +13,10 @@ async function run(ctx) {
         logManager = ctx.brain.chatLogManager;
     } else {
         const ChatLogManager = require('../../managers/ChatLogManager');
-        const { LOG_BASE_DIR, GOLEM_MODE } = require('../../config');
+        const ConfigManager = require('../../config');
         logManager = new ChatLogManager({
-            logDir: LOG_BASE_DIR,
-            isSingleMode: GOLEM_MODE === 'SINGLE'
+            logDir: ConfigManager.LOG_BASE_DIR,
+            isSingleMode: ConfigManager.GOLEM_MODE === 'SINGLE'
         });
     }
     // 每日摘要存放於 daily/ 子目錄（金字塔記憶架構 Tier 1）

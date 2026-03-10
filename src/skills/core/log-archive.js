@@ -1,7 +1,7 @@
 // src/skills/core/log-archiver.js
 // 負責調用 ChatLogManager 進行日誌壓縮與摘要
 
-const { LOG_BASE_DIR, GOLEM_MODE } = require('../../config');
+const ConfigManager = require('../../config');
 
 async function run(ctx) {
     const args = ctx.args || {};
@@ -24,8 +24,8 @@ async function run(ctx) {
     const ChatLogManager = require('../../managers/ChatLogManager');
     const logManager = new ChatLogManager({
         golemId: actualBrain.golemId || args.golemId || 'default',
-        logDir: LOG_BASE_DIR,
-        isSingleMode: GOLEM_MODE === 'SINGLE'
+        logDir: ConfigManager.LOG_BASE_DIR,
+        isSingleMode: ConfigManager.GOLEM_MODE === 'SINGLE'
     });
 
     try {

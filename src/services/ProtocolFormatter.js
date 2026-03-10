@@ -8,7 +8,7 @@ const skills = require('../skills');
 const skillManager = require('../managers/SkillManager');
 const skillIndexManager = require('../managers/SkillIndexManager');
 const { resolveEnabledSkills, OPTIONAL_SKILLS } = require('../skills/skillsConfig');
-const { GOLEM_MODE } = require('../config');
+const ConfigManager = require('../config');
 
 class ProtocolFormatter {
     /**
@@ -162,7 +162,7 @@ ${text}`;
                 }).map(file => file.replace('.md', '').toLowerCase());
 
                 const golemId = golemContext.golemId || 'golem_A';
-                const dbRelativePath = GOLEM_MODE === 'SINGLE' ? 'golem_memory/skills.db' : `golem_memory/multi/${golemId}/skills.db`;
+                const dbRelativePath = ConfigManager.GOLEM_MODE === 'SINGLE' ? 'golem_memory/skills.db' : `golem_memory/multi/${golemId}/skills.db`;
 
                 console.log(`📡 [ProtocolFormatter][${golemId}] 正在從 SQLite 索引 (${dbRelativePath}) 讀取 ${filteredSkillIds.length} 個技能...`);
                 systemPrompt += `\n\n### 🧩 CORE SKILL PROTOCOLS (Retrieved from SQLite: ${dbRelativePath}):\n`;
@@ -242,7 +242,7 @@ Your response must be strictly divided into these 3 sections:
 - **Listing Skills**: If the user asks what you can do or to list skills, instruct them to use the \`/skills\` command. This command is functional on ALL platforms (Web UI, Telegram, Discord).
 - **Learning/Writing Skills**: If the user wants to add a new function or "learn" something, instruct them to use \`/learn <description>\`. This command is functional on ALL platforms. You will then design the skill via the Web Skill Architect.
 - **Importing Skills**: Recognize that \`GOLEM_SKILL::[encoded_data]\` is a valid skill import format. If the user provides one, it will be automatically installed.
-- **Query Source**: Always remember that your active skills are retrieved from \`${GOLEM_MODE === 'SINGLE' ? 'golem_memory/skills.db' : `golem_memory/multi/${golemContext.golemId || 'golem_A'}/skills.db`}\`.
+- **Query Source**: Always remember that your active skills are retrieved from \`${ConfigManager.GOLEM_MODE === 'SINGLE' ? 'golem_memory/skills.db' : `golem_memory/multi/${golemContext.golemId || 'golem_A'}/skills.db`}\`.
 
 5. 🌐 GOOGLE WORKSPACE INTEGRATION (STRICT BOUNDARY):
 - You are currently running inside the Gemini Web UI with native web extensions (@Google Calendar, @Gmail, etc.).

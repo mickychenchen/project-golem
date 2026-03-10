@@ -60,7 +60,7 @@ const { spawn } = require('child_process');
 const TelegramBot = require('node-telegram-bot-api');
 const { Client, GatewayIntentBits, Partials } = require('discord.js');
 
-const { CONFIG, GOLEMS_CONFIG, MEMORY_BASE_DIR, LOG_BASE_DIR, GOLEM_MODE } = require('./src/config');
+const ConfigManager = require('./src/config');
 const SystemLogger = require('./src/utils/SystemLogger');
 
 // 🚀 初始化系統日誌持久化已移至 ensureCoreServices (按需啟動)
@@ -87,7 +87,7 @@ const activeGolems = new Map();
 // ✅ [Bug #6 修復] 啟動時間戳記，用於過濾重啟前的舊訊息
 const BOOT_TIME = Date.now();
 
-const dcClient = CONFIG.DC_TOKEN ? new Client({
+const dcClient = ConfigManager.CONFIG.DC_TOKEN ? new Client({
     intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
@@ -109,16 +109,16 @@ function getOrCreateGolem(golemId) {
 
     const brain = new GolemBrain({
         golemId,
-        userDataDir: GOLEM_MODE === 'SINGLE' ? MEMORY_BASE_DIR : path.join(MEMORY_BASE_DIR, golemId),
-        logDir: LOG_BASE_DIR,
-        isSingleMode: GOLEM_MODE === 'SINGLE'
+        userDataDir: ConfigManager.GOLEM_MODE === 'SINGLE' ? ConfigManager.MEMORY_BASE_DIR : path.join(ConfigManager.MEMORY_BASE_DIR, golemId),
+        logDir: ConfigManager.LOG_BASE_DIR,
+        isSingleMode: ConfigManager.GOLEM_MODE === 'SINGLE'
     });
     const controller = new TaskController({ golemId });
     const autonomy = new AutonomyManager(brain, controller, brain.memoryDriver, { golemId });
 
     // 獲取該實體的配置 (用於自定義介入等級等)
-    const config = GOLEMS_CONFIG.find(g => g.id === golemId) || {};
-    const interventionLevel = config.interventionLevel || CONFIG.INTERVENTION_LEVEL;
+    const config = ConfigManager.GOLEMS_CONFIG.find(g => g.id === golemId) || {};
+    const interventionLevel = config.interventionLevel || ConfigManager.CONFIG.INTERVENTION_LEVEL;
 
     const convoManager = new ConversationManager(brain, NeuroShunter, controller, {
         golemId,
@@ -149,11 +149,11 @@ function getOrCreateGolem(golemId) {
         if (_isCoreInitialized) return;
 
         // 🚀 初始化系統日誌持久化 (按需啟動)
-        SystemLogger.init(LOG_BASE_DIR);
-        if (GOLEM_MODE === 'SINGLE') {
+        SystemLogger.init(ConfigManager.LOG_BASE_DIR);
+        if (ConfigManager.GOLEM_MODE === 'SINGLE') {
             console.log('📡 [Config] 運行模式: 單機 (GOLEM_MODE=SINGLE)');
         } else {
-            console.log(`📡 [Config] 運行模式: 多機 (${GOLEMS_CONFIG.length} 實體)`);
+            console.log(`📡 [Config] 運行模式: 多機 (${ConfigManager.GOLEMS_CONFIG.length} 實體)`);
         }
 
         console.log('🧠 [Introspection] Scanning project structure...');
@@ -163,7 +163,7 @@ function getOrCreateGolem(golemId) {
         setInterval(runTieredCompression, 6 * 60 * 60 * 1000);
         runTieredCompression();
 
-        if (dcClient) dcClient.login(CONFIG.DC_TOKEN);
+        if (dcClient) dcClient.login(ConfigManager.CONFIG.DC_TOKEN);
 
         _isCoreInitialized = true;
     }
@@ -262,16 +262,8 @@ function getOrCreateGolem(golemId) {
                         }
                     });
 
-                    // [V9.0.8] 延遲啟動 Polling，先強制 Telegram 釋放叉的舊 Session，防止 409 Conflict
-                    setTimeout(async () => {
-                        try {
-                            // 呼叫一次 getUpdates 強制 Telegram Server 「踢掉」舊的 polling 連線
-                            await bot.getUpdates({ offset: -1, timeout: 1 }).catch(() => { });
-                            await new Promise(r => setTimeout(r, 1000));
-                        } catch (e) { /* ignore */ }
-                        bot.startPolling({ restart: true });
-                        console.log(`✅ [Bot] ${boundGolemId} Telegram Polling 已啟動。`);
-                    }, 3000);
+                    // [V9.0.8 保留] 409 衝突自動修復機制，但不再於此處強制提早啟動 polling
+                    // polling 將在 persona.json 存在且 brain.init() 完成後統一啟動
                 } catch (e) {
                     console.error(`❌ [Bot] 初始化 ${golemConfig.id} Telegram 失敗:`, e.message);
                 }
@@ -319,18 +311,24 @@ function getOrCreateGolem(golemId) {
             // [V9.0.9 Fix]: Verify persona.json to decide actual status
             const pathSync = require('path');
             const fsSync = require('fs');
-            const { GOLEM_MODE, MEMORY_BASE_DIR } = require('./src/config');
-            const isSingleMode = GOLEM_MODE === 'SINGLE';
+            const isSingleMode = ConfigManager.GOLEM_MODE === 'SINGLE';
 
             let personaPath;
             if (isSingleMode) {
-                personaPath = pathSync.resolve(MEMORY_BASE_DIR, 'persona.json');
+                personaPath = pathSync.resolve(ConfigManager.MEMORY_BASE_DIR, 'persona.json');
             } else {
-                personaPath = pathSync.resolve(MEMORY_BASE_DIR, golemConfig.id, 'persona.json');
+                personaPath = pathSync.resolve(ConfigManager.MEMORY_BASE_DIR, golemConfig.id, 'persona.json');
             }
 
             if (fsSync.existsSync(personaPath)) {
                 instance.brain.status = 'running';
+                // ✅ [Fix] 確保在 polling 前 brain.init() 已經準備完畢
+                await instance.brain.init();
+                const tgBot = telegramBots.get(golemConfig.id);
+                if (tgBot && tgBot.isPolling && !tgBot.isPolling()) {
+                    tgBot.startPolling({ restart: true });
+                    console.log(`✅ [Bot] ${golemConfig.id} Telegram Polling 已啟動。`);
+                }
             } else {
                 instance.brain.status = 'pending_setup';
             }
@@ -570,7 +568,7 @@ async function handleUnifiedMessage(ctx, forceTargetId = null) {
         const attachment = await ctx.getAttachment();
 
         // ✨ [群組模式身分與回覆注入]
-        const isGroupMode = CONFIG.TG_AUTH_MODE === 'CHAT' && ctx.platform === 'telegram';
+        const isGroupMode = ConfigManager.CONFIG.TG_AUTH_MODE === 'CHAT' && ctx.platform === 'telegram';
         let senderPrefix = isGroupMode ? `【發話者：${ctx.senderName}】\n` : "";
         if (ctx.replyToName) {
             senderPrefix += `【回覆給：${ctx.replyToName}】\n`;

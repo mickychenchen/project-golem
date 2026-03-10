@@ -1,4 +1,4 @@
-const { CONFIG, GOLEM_MODE, LOG_BASE_DIR } = require('../config');
+const ConfigManager = require('../config');
 const Introspection = require('../services/Introspection');
 const ResponseParser = require('../utils/ResponseParser');
 const PatchManager = require('../managers/PatchManager');
@@ -25,7 +25,7 @@ class AutonomyManager {
     }
 
     start() {
-        if (!CONFIG.TG_TOKEN && !CONFIG.DC_TOKEN) return;
+        if (!ConfigManager.CONFIG.TG_TOKEN && !ConfigManager.CONFIG.DC_TOKEN) return;
         this.scheduleNextAwakening();
         setInterval(() => this.timeWatcher(), 60000);
         // ✨ [v9.0.7] 每 30 分鐘自動檢查一次日誌狀態
@@ -38,8 +38,8 @@ class AutonomyManager {
             // ✅ [H-1 Fix] 傳入正確 golemId/logDir/isSingleMode，確保掃描正確目錄
             const logManager = new ChatLogManager({
                 golemId: this.golemId,
-                logDir: LOG_BASE_DIR,
-                isSingleMode: GOLEM_MODE === 'SINGLE'
+                logDir: ConfigManager.LOG_BASE_DIR,
+                isSingleMode: ConfigManager.GOLEM_MODE === 'SINGLE'
             });
             const logDir = logManager.dirs.hourly;
 
@@ -60,7 +60,7 @@ class AutonomyManager {
                     .filter(f => f.startsWith(date) && f.length === 14 && f.endsWith('.log'));
 
                 if (files.length >= threshold) {
-                    console.log(`📦 [Autonomy] 偵測到 ${date} (${label}) 有 ${files.length} 個日誌待壓縮，啟動自動化程序...`);
+                    console.log(`📦 [Autonomy] 門檻達成：${date} (${label}) 已累積 ${files.length} 個時段日誌，啟動自動歸檔程序...`);
 
                     await this.sendNotification(`📦 **【自動化日誌維護】**\n偵測到${label} (${date}) 已累積達 ${files.length} 小時對話，目前將進行記憶彙整，請稍等...`);
 
@@ -71,6 +71,8 @@ class AutonomyManager {
                     });
 
                     await this.sendNotification(`✅ **【自動化日誌維護】**\n${date} (${label}) 歸檔完成！\n${result}`);
+                } else {
+                    console.log(`ℹ️ [Autonomy] ${date} (${label}) 目前累積 ${files.length}/${threshold} 份日誌，未達壓縮門檻。`);
                 }
             }
         } catch (e) {
@@ -84,9 +86,9 @@ class AutonomyManager {
         const updatedSchedules = [];
 
         // --- ✨ 路徑隔離 (Path Isolation) ---
-        const logDir = GOLEM_MODE === 'SINGLE'
-            ? LOG_BASE_DIR
-            : path.join(LOG_BASE_DIR, this.golemId);
+        const logDir = ConfigManager.GOLEM_MODE === 'SINGLE'
+            ? ConfigManager.LOG_BASE_DIR
+            : path.join(ConfigManager.LOG_BASE_DIR, this.golemId);
 
         const scheduleFile = path.join(logDir, 'schedules.json');
 
@@ -140,15 +142,15 @@ class AutonomyManager {
         }
     }
     scheduleNextAwakening() {
-        const minHours = CONFIG.AWAKE_INTERVAL_MIN || 2;
-        const maxHours = CONFIG.AWAKE_INTERVAL_MAX || 5;
+        const minHours = ConfigManager.CONFIG.AWAKE_INTERVAL_MIN || 2;
+        const maxHours = ConfigManager.CONFIG.AWAKE_INTERVAL_MAX || 5;
         const randomHours = minHours + Math.random() * (maxHours - minHours);
         const waitMs = randomHours * 3600000;
         const nextWakeTime = new Date(Date.now() + waitMs);
         const hour = nextWakeTime.getHours();
         let finalWait = waitMs;
-        const sleepStart = CONFIG.SLEEP_START !== undefined ? CONFIG.SLEEP_START : 1;
-        const sleepEnd = CONFIG.SLEEP_END !== undefined ? CONFIG.SLEEP_END : 7;
+        const sleepStart = ConfigManager.CONFIG.SLEEP_START !== undefined ? ConfigManager.CONFIG.SLEEP_START : 1;
+        const sleepEnd = ConfigManager.CONFIG.SLEEP_END !== undefined ? ConfigManager.CONFIG.SLEEP_END : 7;
 
         // 處理跨夜情況 (例如 23:00 ~ 07:00)
         let isSleeping = false;
@@ -221,15 +223,15 @@ class AutonomyManager {
             const msgText = `💡 **自主進化提案 (${this.golemId})**\n目標：${targetName}\n內容：${patch.description}`;
             const options = { reply_markup: { inline_keyboard: [[{ text: '🚀 部署', callback_data: `PATCH_DEPLOY_${this.golemId}` }, { text: '🗑️ 丟棄', callback_data: `PATCH_DROP_${this.golemId}` }]] } };
             if (triggerCtx) { await triggerCtx.reply(msgText, options); await triggerCtx.sendDocument(testFile); }
-            else if (this.tgBot && CONFIG.ADMIN_IDS[0]) { await this.tgBot.sendMessage(CONFIG.ADMIN_IDS[0], msgText, options); await this.tgBot.sendDocument(CONFIG.ADMIN_IDS[0], testFile); }
+            else if (this.tgBot && ConfigManager.CONFIG.ADMIN_IDS[0]) { await this.tgBot.sendMessage(ConfigManager.CONFIG.ADMIN_IDS[0], msgText, options); await this.tgBot.sendDocument(ConfigManager.CONFIG.ADMIN_IDS[0], testFile); }
         }
     }
     async sendNotification(msgText, opts = {}) {
         if (!msgText) return;
 
         // --- Telegram Routing ---
-        let tgTargetId = CONFIG.ADMIN_IDS[0];
-        let tgAuthMode = CONFIG.TG_AUTH_MODE;
+        let tgTargetId = ConfigManager.CONFIG.ADMIN_IDS[0];
+        let tgAuthMode = ConfigManager.CONFIG.TG_AUTH_MODE;
         if (this.tgBot && this.tgBot.golemConfig) {
             const gCfg = this.tgBot.golemConfig;
             tgAuthMode = gCfg.tgAuthMode || tgAuthMode;
@@ -238,12 +240,12 @@ class AutonomyManager {
             } else if (gCfg.adminId) {
                 tgTargetId = Array.isArray(gCfg.adminId) ? gCfg.adminId[0] : String(gCfg.adminId).split(',')[0].trim();
             }
-        } else if (tgAuthMode === 'CHAT' && CONFIG.TG_CHAT_ID) {
-            tgTargetId = CONFIG.TG_CHAT_ID;
+        } else if (tgAuthMode === 'CHAT' && ConfigManager.CONFIG.TG_CHAT_ID) {
+            tgTargetId = ConfigManager.CONFIG.TG_CHAT_ID;
         }
 
         // --- Discord Routing ---
-        let dcTargetId = CONFIG.DISCORD_ADMIN_ID;
+        let dcTargetId = ConfigManager.CONFIG.DISCORD_ADMIN_ID;
         let dcAuthMode = 'ADMIN';
         if (this.dcClient && this.dcClient.golemConfig) {
             const gCfg = this.dcClient.golemConfig;

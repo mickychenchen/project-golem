@@ -5,8 +5,8 @@ const path = require('path');
 class SkillIndexManager {
     constructor(userDataDir) {
         if (!userDataDir) {
-            const { MEMORY_BASE_DIR } = require('../config');
-            userDataDir = MEMORY_BASE_DIR;
+            const ConfigManager = require('../config');
+            userDataDir = ConfigManager.MEMORY_BASE_DIR;
         }
         this.dbPath = path.join(userDataDir, 'skills.db');
         this.db = null;

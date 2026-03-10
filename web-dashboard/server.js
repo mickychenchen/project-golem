@@ -1084,14 +1084,22 @@ class WebServer {
                 const golemConfig = ConfigManager.GOLEMS_CONFIG.find(g => g.id === golemId);
 
                 if (golemConfig) {
-                    const GolemBrain = require('../src/core/GolemBrain');
-                    const AutonomyManager = require('../src/managers/AutonomyManager');
-
-                    const brain = new GolemBrain(golemConfig);
-                    const autonomy = new AutonomyManager(brain);
-                    this.contexts.set(golemId, { brain, autonomy });
-                    context = this.contexts.get(golemId);
-                    console.log(`✅ [WebServer] Temporary context created for [${golemId}].`);
+                    // ✅ [Bug #7 Fix]: 使用真正的 golemFactory 代替殘缺的腦部初始化，確保 Bot、Queue 全數綁定
+                    const factory = this.golemFactory;
+                    if (factory) {
+                        try {
+                            const newInstance = await factory(golemConfig);
+                            // factory 會塞進 activeGolems，為確保 dashboard 這邊取得，手動同步參考
+                            this.contexts.set(golemId, newInstance);
+                            context = this.contexts.get(golemId);
+                            console.log(`✅ [WebServer] Full context created for [${golemId}] via factory.`);
+                        } catch (e) {
+                            console.error(`❌ [WebServer] Failed to create context for [${golemId}]:`, e);
+                            return res.status(500).json({ error: "Failed to initialize golem context" });
+                        }
+                    } else {
+                        return res.status(500).json({ error: "golemFactory not available" });
+                    }
                 } else {
                     return res.status(404).json({ error: "Golem configuration not found" });
                 }

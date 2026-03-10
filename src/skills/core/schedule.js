@@ -3,7 +3,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { CONFIG, GOLEM_MODE, LOG_BASE_DIR } = require('../../config');
+const ConfigManager = require('../../config');
 
 async function run(ctx) {
     const args = ctx.args || {};
@@ -23,11 +23,11 @@ async function run(ctx) {
 
         if (isNaive && !isNaN(dateObj.getTime())) {
             // 如果是純時間字串，假設為 CONFIG.TZ
-            console.log(`🕒 [排程] 原始輸入不含時區: "${time}"，將套用預設時區: ${CONFIG.TZ}`);
+            console.log(`🕒 [排程] 原始輸入不含時區: "${time}"，將套用預設時區: ${ConfigManager.CONFIG.TZ}`);
 
             // 使用 Intl 定位目標時區的當前偏移量，並補全 ISO 字串
             // 這裡簡單處理：直接用 Date 生成帶時區的格式
-            const localizedTime = new Date(time).toLocaleString('en-US', { timeZone: CONFIG.TZ });
+            const localizedTime = new Date(time).toLocaleString('en-US', { timeZone: ConfigManager.CONFIG.TZ });
             dateObj = new Date(localizedTime);
         }
 
@@ -37,9 +37,9 @@ async function run(ctx) {
         // --- ✨ 路徑隔離 (Path Isolation) ---
         // 根據運行模式 (SINGLE/MULTI) 與 golemId 決定儲存路徑
         const golemId = (ctx.brain && ctx.brain.golemId) || 'golem_A';
-        const logDir = GOLEM_MODE === 'SINGLE'
-            ? LOG_BASE_DIR
-            : path.join(LOG_BASE_DIR, golemId);
+        const logDir = ConfigManager.GOLEM_MODE === 'SINGLE'
+            ? ConfigManager.LOG_BASE_DIR
+            : path.join(ConfigManager.LOG_BASE_DIR, golemId);
 
         if (!fs.existsSync(logDir)) {
             fs.mkdirSync(logDir, { recursive: true });

@@ -43,6 +43,12 @@ class KeyChain {
     }
 
     async getKey() {
+        // Auto-reload keys if CONFIG.API_KEYS has changed (e.g. via dashboard)
+        if (this.keys.join(',') !== CONFIG.API_KEYS.join(',')) {
+            console.log("🔄 [KeyChain] Detecting API Keys config change, hot-reloading keys...");
+            this.updateKeys([...CONFIG.API_KEYS]);
+        }
+
         if (this.keys.length === 0) return null;
         await this._throttle();
         for (let i = 0; i < this.keys.length; i++) {

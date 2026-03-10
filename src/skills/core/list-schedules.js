@@ -3,7 +3,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { CONFIG, GOLEM_MODE, LOG_BASE_DIR } = require('../../config');
+const ConfigManager = require('../../config');
 
 /**
  * 執行排程查詢
@@ -14,9 +14,9 @@ async function run(ctx) {
     try {
         // --- ✨ 路徑隔離 (Path Isolation) ---
         const golemId = (ctx.brain && ctx.brain.golemId) || 'golem_A';
-        const logDir = GOLEM_MODE === 'SINGLE'
-            ? LOG_BASE_DIR
-            : path.join(LOG_BASE_DIR, golemId);
+        const logDir = ConfigManager.GOLEM_MODE === 'SINGLE'
+            ? ConfigManager.LOG_BASE_DIR
+            : path.join(ConfigManager.LOG_BASE_DIR, golemId);
 
         const scheduleFile = path.join(logDir, 'schedules.json');
 
@@ -54,7 +54,7 @@ async function run(ctx) {
         let output = "📋 **目前排程清單：**\n\n";
         schedules.forEach((item, index) => {
             const timeStr = new Date(item.time).toLocaleString('zh-TW', {
-                timeZone: CONFIG.TZ || 'Asia/Taipei',
+                timeZone: ConfigManager.CONFIG.TZ || 'Asia/Taipei',
                 year: 'numeric',
                 month: '2-digit',
                 day: '2-digit',
@@ -67,7 +67,7 @@ async function run(ctx) {
 
         output += `\n目前共有 ${schedules.length} 個有效的排程。`;
 
-        console.log(`🔍 [查詢排程] 成功讀取 ${schedules.length} 筆有效資料 (時區: ${CONFIG.TZ})`);
+        console.log(`🔍 [查詢排程] 成功讀取 ${schedules.length} 筆有效資料 (時區: ${ConfigManager.CONFIG.TZ})`);
         return output;
 
     } catch (e) {
