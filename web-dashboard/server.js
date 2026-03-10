@@ -303,6 +303,8 @@ class WebServer {
                     return res.status(400).json({ error: 'Missing golemId or callback_data' });
                 }
 
+                const index = require('../index.js');
+
                 if (typeof global.handleDashboardMessage !== 'function') {
                     return res.status(503).json({ error: 'Dashboard message handler not ready' });
                 }
@@ -328,7 +330,38 @@ class WebServer {
                     instance: { username: golemId }
                 };
 
-                const index = require('../index.js');
+                // ── [v9.1.8] 翻譯指令代碼為人類語言 ──
+                let translatedMsg = callback_data;
+                let displayType = 'agent';
+
+                if (callback_data.includes('_')) {
+                    const [action, taskId] = callback_data.split('_');
+                    const isApprove = action === 'APPROVE';
+                    const isDeny = action === 'DENY';
+
+                    if (isApprove || isDeny) {
+                        translatedMsg = isApprove ? '✅ 批准執行' : '❌ 拒絕執行';
+                        displayType = 'agent'; // 雖然是 User 發起，但目前前端統一走 agent 頻道
+
+                        // 嘗試抓取具體指令內容增加上下文
+                        try {
+                            const instance = index.getOrCreateGolem ? index.getOrCreateGolem(golemId) : null;
+                            if (instance && instance.controller && instance.controller.pendingTasks) {
+                                const task = instance.controller.pendingTasks.get(taskId);
+                                if (task && task.steps && task.steps[task.nextIndex]) {
+                                    const step = task.steps[task.nextIndex];
+                                    const cmd = step.cmd || step.parameter || step.command || "";
+                                    if (cmd) {
+                                        translatedMsg += `: \`${cmd.length > 50 ? cmd.substring(0, 47) + '...' : cmd}\``;
+                                    }
+                                }
+                            }
+                        } catch (err) {
+                            console.warn('[WebServer] 無法取得任務上下文:', err.message);
+                        }
+                    }
+                }
+
                 if (typeof index.handleUnifiedCallback === 'function') {
                     index.handleUnifiedCallback(mockContext, callback_data, golemId).catch(console.error);
                 } else if (global.handleUnifiedCallback) {
@@ -337,12 +370,12 @@ class WebServer {
                     console.error('[WebServer] handleUnifiedCallback not found in index.js exports or global');
                 }
 
-                // 回顯操作給前端
+                // 回顯操作給前端 (改用 [WebUser] 前綴，讓前端正確歸類為使用者消息)
                 this.broadcastLog({
                     time: new Date().toLocaleTimeString(),
-                    msg: `[User Action] ${callback_data}`,
-                    type: 'agent',
-                    raw: `[User] ${callback_data}`
+                    msg: `[WebUser] ${translatedMsg}`,
+                    type: displayType,
+                    raw: `[User] ${translatedMsg}`
                 });
 
                 return res.json({ success: true });
