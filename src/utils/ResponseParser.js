@@ -103,8 +103,8 @@ class ResponseParser {
             }
         }
 
-        // 3. 獨立擷取 REPLY (✅ M-1 Fix: 優先匹配 closing tag，防止 AI 尾端雜訊污染)
-        const replyMatch = raw.match(/\[GOLEM_REPLY\]([\s\S]*?)(?:\[\/GOLEM_REPLY\]|$)/i);
+        // 3. 獨立擷取 REPLY (✅ Fix: 遇到其他標籤或結尾時即停止，避免抓到 GOLEM_ACTION)
+        const replyMatch = raw.match(/\[GOLEM_REPLY\]([\s\S]*?)(?:\[\/?GOLEM_[A-Z]+\]|$)/i);
         if (replyMatch && replyMatch[1]) {
             parsed.reply = replyMatch[1].trim();
         }

@@ -762,6 +762,9 @@ async function handleUnifiedCallback(ctx, actionData, forceTargetId = null) {
     }
 }
 
+global.handleDashboardMessage = handleUnifiedMessage;
+global.handleUnifiedCallback = handleUnifiedCallback;
+
 async function executeDeploy(ctx, targetId) {
     const { autonomy, brain } = getOrCreateGolem(targetId);
     if (!autonomy.pendingPatch) return;

@@ -1,0 +1,244 @@
+"use client";
+
+import React, { useState, useEffect, useRef } from "react";
+import { useGolem } from "@/components/GolemContext";
+import { socket } from "@/lib/socket";
+import { User, Bot, Send } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { Typewriter } from "@/components/Typewriter";
+
+interface ChatMessage {
+    id: string;
+    sender: string;
+    content: string;
+    timestamp: string;
+    isSystem: boolean;
+    actionData?: any;
+}
+
+export default function DirectChatPage() {
+    const { activeGolem, isSingleNode } = useGolem();
+    const [messages, setMessages] = useState<ChatMessage[]>([]);
+    const [completedTypingMsgs, setCompletedTypingMsgs] = useState<Set<string>>(new Set());
+    const [input, setInput] = useState("");
+    const [isSending, setIsSending] = useState(false);
+    const scrollRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        // We can optionally fetch logs history here later if needed
+        // For now let's just listen to live socket events.
+
+        socket.on("log", (data: any) => {
+            if (data.type === 'agent' || data.type === 'approval' || data.msg.includes('[MultiAgent]') || data.msg.includes('[User]')) {
+                let rawMsg = data.msg;
+
+                if (rawMsg.startsWith('[MultiAgent]')) {
+                    rawMsg = rawMsg.replace('[MultiAgent]', '').trim();
+                }
+
+                let sender = "System";
+                let content = rawMsg;
+                let isSystem = true;
+
+                const match = rawMsg.match(/\[(.*?)\]\s*([\s\S]*)/);
+                if (match) {
+                    sender = match[1];
+                    content = match[2] || " ";
+                    isSystem = !(sender === 'User' || sender === 'WebUser');
+                }
+
+                // If message is from another active Golem while we are talking to `activeGolem`, we still show it
+                // but we could filter it here. Actually, keeping it as a global 'terminal' style chat is fine.
+
+                setMessages((prev) => [...prev.slice(-1000), {
+                    id: Date.now().toString() + Math.random(),
+                    sender,
+                    content,
+                    timestamp: data.time || new Date().toLocaleTimeString(),
+                    isSystem,
+                    actionData: data.actionData
+                }]);
+            }
+        });
+
+        return () => {
+            socket.off("log");
+        };
+    }, []);
+
+    useEffect(() => {
+        if (scrollRef.current) {
+            scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+        }
+    }, [messages]);
+
+    const handleTypingComplete = (id: string) => {
+        setCompletedTypingMsgs((prev) => {
+            const next = new Set(prev);
+            next.add(id);
+            return next;
+        });
+    };
+
+    // Calculate which messages are allowed to type/show
+    const isMessageRendered = (index: number) => {
+        // A message is rendered if it's the first message, OR 
+        // if user message, it's always rendered immediately,
+        // if system message, it renders if the previous message has finished typing.
+        for (let i = 0; i < index; i++) {
+            const prevMsg = messages[i];
+            if (prevMsg.isSystem && !completedTypingMsgs.has(prevMsg.id)) {
+                return false; // A previous system message is still typing
+            }
+        }
+        return true;
+    };
+
+    const handleAction = async (callbackData: string) => {
+        if (!activeGolem) return;
+        setIsSending(true);
+        try {
+            await fetch('/api/chat/callback', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ golemId: activeGolem, callback_data: callbackData })
+            });
+        } catch (e) {
+            console.error("Failed to send action:", e);
+        } finally {
+            setIsSending(false);
+        }
+    };
+
+    const handleSend = async () => {
+        if (!input.trim() || !activeGolem) return;
+
+        const val = input.trim();
+        setInput("");
+        setIsSending(true);
+
+        try {
+            await fetch('/api/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ golemId: activeGolem, message: val })
+            });
+        } catch (e) {
+            console.error("Failed to send message:", e);
+        } finally {
+            setIsSending(false);
+        }
+    };
+
+    return (
+        <div className="flex flex-col h-full bg-gray-950 p-6 max-h-screen">
+            <div className="flex justify-between items-center mb-6 flex-shrink-0">
+                <div>
+                    <h2 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-cyan-400">
+                        直接交談 (Direct Chat)
+                    </h2>
+                    <p className="text-sm text-gray-500 mt-1">
+                        與目前活躍的 Golem ({activeGolem || "未選擇"}) 進行對話測試。不須透過外部通訊軟體。
+                    </p>
+                </div>
+            </div>
+
+            <div className="flex-1 overflow-hidden flex flex-col bg-gray-950 rounded-xl border border-gray-800">
+                {/* Chat window */}
+                <div className="flex-1 overflow-y-auto p-4 space-y-4" ref={scrollRef}>
+                    {messages.length === 0 ? (
+                        <div className="flex items-center justify-center h-full text-gray-600 italic">
+                            請在下方輸入訊息開始交談...
+                        </div>
+                    ) : (
+                        messages.map((msg, index) => {
+                            if (!isMessageRendered(index)) return null;
+
+                            const isUser = msg.sender === 'User' || msg.sender === 'WebUser';
+                            return (
+                                <div
+                                    key={msg.id}
+                                    className={cn(
+                                        "flex flex-col max-w-[80%]",
+                                        msg.isSystem ? "mr-auto items-start text-left" : isUser ? "ml-auto items-end" : "mr-auto"
+                                    )}
+                                >
+                                    {!msg.isSystem && (
+                                        <div className={cn("flex items-center space-x-2 mb-1", isUser && "flex-row-reverse space-x-reverse")}>
+                                            <div className={cn(
+                                                "w-6 h-6 rounded-full flex items-center justify-center border flex-shrink-0",
+                                                isUser ? "bg-blue-900 border-blue-700" : "bg-cyan-900 border-cyan-700"
+                                            )}>
+                                                {isUser ? <User className="w-3 h-3 text-blue-300" /> : <Bot className="w-3 h-3 text-cyan-300" />}
+                                            </div>
+                                            <span className={cn("text-xs font-bold", isUser ? "text-blue-400" : "text-cyan-400")}>{msg.sender}</span>
+                                            <span className="text-[10px] text-gray-600">{msg.timestamp}</span>
+                                        </div>
+                                    )}
+                                    <div
+                                        className={cn(
+                                            "p-3 rounded-lg text-sm whitespace-pre-wrap break-words inline-block",
+                                            msg.isSystem
+                                                ? "bg-gray-900 border-gray-800 rounded-tl-none text-gray-300"
+                                                : isUser
+                                                    ? "bg-blue-950/30 text-blue-100 border border-blue-900/50 rounded-tr-none"
+                                                    : "bg-cyan-950/30 text-cyan-100 border border-cyan-900/50 rounded-tl-none"
+                                        )}
+                                    >
+                                        {msg.isSystem ? <Typewriter content={msg.content.replace(/\n{2,}/g, '\n\n').trim()} onComplete={() => handleTypingComplete(msg.id)} /> : msg.content.replace(/\n{2,}/g, '\n\n').trim()}
+                                    </div>
+                                    {msg.actionData && Array.isArray(msg.actionData) && (!msg.isSystem || completedTypingMsgs.has(msg.id)) && (
+                                        <div className="flex space-x-2 mt-2">
+                                            {msg.actionData.map((btn: any, idx: number) => (
+                                                <button
+                                                    key={idx}
+                                                    onClick={() => handleAction(btn.callback_data)}
+                                                    className="px-4 py-2 text-sm bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-md text-white transition-colors"
+                                                >
+                                                    {btn.text}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })
+                    )}
+                </div>
+
+                {/* Input area */}
+                <div className="p-3 border-t border-gray-800 bg-gray-900/50">
+                    <div className="relative flex items-center">
+                        <textarea
+                            className="flex-1 max-h-32 min-h-[44px] bg-gray-950 border border-gray-800 rounded-lg px-4 py-3 pr-12 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/50 resize-none transition-all"
+                            placeholder={activeGolem ? `傳送訊息給 ${activeGolem}...` : "請先選擇一個 Golem..."}
+                            value={input}
+                            onChange={(e) => setInput(e.target.value)}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter' && !e.shiftKey) {
+                                    e.preventDefault();
+                                    handleSend();
+                                }
+                            }}
+                            disabled={!activeGolem || isSending}
+                            rows={1}
+                            style={{ height: "auto" }}
+                        />
+                        <button
+                            onClick={handleSend}
+                            disabled={!activeGolem || !input.trim() || isSending}
+                            className={cn(
+                                "absolute right-2 p-2 rounded-md transition-all flex items-center justify-center",
+                                (!activeGolem || !input.trim() || isSending)
+                                    ? "text-gray-600 bg-transparent"
+                                    : "text-cyan-400 hover:text-cyan-300 hover:bg-cyan-900/20"
+                            )}
+                        >
+                            <Send size={18} />
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}

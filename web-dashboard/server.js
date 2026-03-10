@@ -155,7 +155,14 @@ class WebServer {
     init() {
         // Serve static files with .html extension support
         const publicPath = path.join(__dirname, 'out');
-        this.app.use(express.static(publicPath, { extensions: ['html'] }));
+        this.app.use(express.static(publicPath, {
+            extensions: ['html'],
+            setHeaders: (res, path) => {
+                res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+                res.setHeader('Pragma', 'no-cache');
+                res.setHeader('Expires', '0');
+            }
+        }));
 
         // Fix Next.js static export routing
         this.app.get('/', (req, res) => {
@@ -224,6 +231,126 @@ class WebServer {
 
 
         // --- API Routes ---
+
+        // Chat API (Direct Web Chat)
+        this.app.post('/api/chat', async (req, res) => {
+            try {
+                const { golemId, message } = req.body;
+                if (!golemId || !message) {
+                    return res.status(400).json({ error: 'Missing golemId or message' });
+                }
+
+                if (typeof global.handleDashboardMessage !== 'function') {
+                    return res.status(503).json({ error: 'Dashboard message handler not ready' });
+                }
+
+                // 建立 UniversalContext 替代品
+                const mockContext = {
+                    platform: 'web',
+                    isAdmin: true,
+                    text: message,
+                    messageTime: Date.now(),
+                    senderName: 'User',
+                    replyToName: '',
+                    chatId: 'web-dashboard',
+                    reply: async (text, options) => {
+                        let payloadType = 'agent';
+                        let actionData = null;
+
+                        if (options && options.reply_markup && options.reply_markup.inline_keyboard) {
+                            payloadType = 'approval';
+                            actionData = options.reply_markup.inline_keyboard[0];
+                        }
+
+                        this.broadcastLog({
+                            time: new Date().toLocaleTimeString(),
+                            msg: `[${golemId}] ${text}`,
+                            type: payloadType,
+                            raw: text,
+                            actionData
+                        });
+                    },
+                    sendTyping: async () => { },
+                    getAttachment: async () => null,
+                    instance: { username: golemId }
+                };
+
+                // 回顯使用者的訊息到 Dashboard Log
+                this.broadcastLog({
+                    time: new Date().toLocaleTimeString(),
+                    msg: `[User] ${message}`,
+                    type: 'agent',
+                    raw: `[User] ${message}`
+                });
+
+                // 將訊息推進 Golem
+                global.handleDashboardMessage(mockContext, golemId).catch(exp => {
+                    console.error('[WebServer] Direct chat error:', exp);
+                });
+
+                return res.json({ success: true });
+            } catch (e) {
+                console.error('Failed to send chat message:', e);
+                return res.status(500).json({ error: e.message });
+            }
+        });
+
+        // Chat Action Callback API (Inline Button Click)
+        this.app.post('/api/chat/callback', async (req, res) => {
+            try {
+                const { golemId, callback_data } = req.body;
+                if (!golemId || !callback_data) {
+                    return res.status(400).json({ error: 'Missing golemId or callback_data' });
+                }
+
+                if (typeof global.handleDashboardMessage !== 'function') {
+                    return res.status(503).json({ error: 'Dashboard message handler not ready' });
+                }
+
+                const mockContext = {
+                    platform: 'web',
+                    isAdmin: true,
+                    data: callback_data,
+                    messageTime: Date.now(),
+                    senderName: 'User',
+                    replyToName: '',
+                    chatId: 'web-dashboard',
+                    reply: async (text) => {
+                        this.broadcastLog({
+                            time: new Date().toLocaleTimeString(),
+                            msg: `[${golemId}] ${text}`,
+                            type: 'agent',
+                            raw: text
+                        });
+                    },
+                    answerCallbackQuery: async () => { },
+                    sendTyping: async () => { },
+                    instance: { username: golemId }
+                };
+
+                const index = require('../index.js');
+                if (typeof index.handleUnifiedCallback === 'function') {
+                    index.handleUnifiedCallback(mockContext, callback_data, golemId).catch(console.error);
+                } else if (global.handleUnifiedCallback) {
+                    global.handleUnifiedCallback(mockContext, callback_data, golemId).catch(console.error);
+                } else {
+                    console.error('[WebServer] handleUnifiedCallback not found in index.js exports or global');
+                }
+
+                // 回顯操作給前端
+                this.broadcastLog({
+                    time: new Date().toLocaleTimeString(),
+                    msg: `[User Action] ${callback_data}`,
+                    type: 'agent',
+                    raw: `[User] ${callback_data}`
+                });
+
+                return res.json({ success: true });
+            } catch (e) {
+                console.error('Failed to send callback query:', e);
+                return res.status(500).json({ error: e.message });
+            }
+        });
 
         // Config API (Settings Page)
         this.app.get('/api/config', (req, res) => {
