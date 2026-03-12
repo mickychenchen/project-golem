@@ -345,24 +345,42 @@ class GolemBrain {
      * ✅ [需求變更] 依據使用者要求，禁止即時熱注入，改為「重新開啟 Gemini 對話視窗」後再注入
      */
     async reloadSkills() {
-        // 1. 清除 ProtocolFormatter 快取，讓下次 build 時重新掃描
-        ProtocolFormatter._lastScanTime = 0;
-        console.log(`🔄 [Brain][${this.golemId}] 技能快取已清除，開始重新開啟對話視窗並注入...`);
+        // 1. 設定熱重載：從 .env 重新讀取配置 (包含 API Key, 模式, 選用技能等)
+        console.log(`🔄 [Brain][${this.golemId}] 正在執行設定熱重載 (Config Reload)...`);
+        ConfigManager.reloadConfig();
 
-        // 2. 若瀏覽器還沒準備好，直接返回（表示本次注入會在下次 init 時生效）
+        // 2. 技能同步：依據最新設定同步 SQLite 索引
+        console.log(`📡 [Brain][${this.golemId}] 正在同步技能索引 (Skill Sync)...`);
+        try {
+            const personaManager = require('../skills/core/persona');
+            const personaData = personaManager.get(this.userDataDir);
+            const personaSkills = personaData.skills || [];
+            const { resolveEnabledSkills } = require('../skills/skillsConfig');
+            
+            // 使用最新的 process.env.OPTIONAL_SKILLS
+            const enabledSet = resolveEnabledSkills(process.env.OPTIONAL_SKILLS || '', personaSkills);
+            await this.skillIndex.sync(Array.from(enabledSet));
+        } catch (e) {
+            console.warn(`⚠️ [Brain][${this.golemId}] 技能同步失敗:`, e.message);
+        }
+
+        // 3. 清除 ProtocolFormatter 快取，讓下次 build 時重新掃描
+        ProtocolFormatter._lastScanTime = 0;
+        console.log(`🔄 [Brain][${this.golemId}] 協議快取已清除，開始重新開啟對話視窗並注入...`);
+
+        // 4. 若瀏覽器還沒準備好，直接返回（表示本次注入會在下次 init 時生效）
         if (!this.page) {
             console.log(`⚠️ [Brain][${this.golemId}] 瀏覽器尚未初始化，技能將在下次啟動時自動載入。`);
             return;
         }
 
-        // 3. 重新開啟 Gemini 視窗 (New Chat) 後再注入
+        // 5. 重新開啟 Gemini 視窗 (New Chat) 後再注入
         console.log(`🔄 [Brain][${this.golemId}] 正在開啟新的 Gemini 對話視窗...`);
         const { URLS } = require('./constants');
-        console.log(`🚀 [System] Browser Session Started (Golem: ${this.golemId})`);
         await this.page.goto(URLS.GEMINI_APP, { waitUntil: 'networkidle2' });
 
         await this._injectSystemPrompt(true);
-        console.log(`✅ [Brain][${this.golemId}] 技能書已成功注入至全新的 Gemini 會話。`);
+        console.log(`✅ [Brain][${this.golemId}] 完整重啟流程執行完畢 (Config + Skill + Protocol)。`);
     }
 
     /**

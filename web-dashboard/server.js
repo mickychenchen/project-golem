@@ -848,7 +848,7 @@ class WebServer {
                 for (const [id, context] of this.contexts.entries()) {
                     if (context.brain && typeof context.brain.reloadSkills === 'function') {
                         try {
-                            console.log(`⚡ [WebServer] Injecting skills into Golem [${id}]...`);
+                            console.log(`🚀 [WebServer] 啟動 [${id}] 完整重啟程序...`);
                             await context.brain.reloadSkills();
                             results.push({ id, status: 'success' });
 
