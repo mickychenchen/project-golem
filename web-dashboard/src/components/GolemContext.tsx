@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { socket } from "@/lib/socket";
+import { apiUrl } from "@/lib/api";
 
 interface GolemInfo {
     id: string;
@@ -20,6 +21,7 @@ interface GolemContextType {
     isSystemConfigured: boolean;
     isLoadingSystem: boolean;
     isSingleNode: boolean;
+    version: string;
 }
 
 const GolemContext = createContext<GolemContextType>({
@@ -34,6 +36,7 @@ const GolemContext = createContext<GolemContextType>({
     isSystemConfigured: true,
     isLoadingSystem: true,
     isSingleNode: true,
+    version: "v9.0",
 });
 
 export const useGolem = () => useContext(GolemContext);
@@ -45,11 +48,13 @@ export function GolemProvider({ children }: { children: React.ReactNode }) {
     const [isSystemConfigured, setIsSystemConfigured] = useState(false);
     const [isLoadingSystem, setIsLoadingSystem] = useState(true);
     const [isSingleNode] = useState(true);
+    const [version, setVersion] = useState("v9.0");
 
     const fetchGolems = async () => {
         setIsLoadingGolems(true);
         try {
-            const res = await fetch("/api/golems");
+            const res = await fetch(apiUrl("/api/golems"));
+            if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
             const data = await res.json();
             if (data.golems && data.golems.length > 0) {
                 setGolems(data.golems);
@@ -77,18 +82,32 @@ export function GolemProvider({ children }: { children: React.ReactNode }) {
 
     const fetchSystemStatus = () => {
         setIsLoadingSystem(true);
-        fetch("/api/system/status")
-            .then(res => res.json())
+        fetch(apiUrl("/api/system/status"))
+            .then(res => {
+                if (!res.ok) throw new Error("Status failed");
+                return res.json();
+            })
             .then(data => {
                 setIsSystemConfigured(data.isSystemConfigured ?? true);
             })
             .catch(() => setIsSystemConfigured(true)) // on error, don't block
             .finally(() => setIsLoadingSystem(false));
+
+        // Also fetch version from system config
+        fetch(apiUrl("/api/system/config"))
+            .then(res => {
+                if (!res.ok) throw new Error("Config failed");
+                return res.json();
+            })
+            .then(data => {
+                if (data.version) setVersion(`v${data.version}`);
+            })
+            .catch(err => console.error("Failed to fetch version", err));
     };
 
     const startGolem = async (id: string) => {
         try {
-            const res = await fetch("/api/golems/start", {
+            const res = await fetch(apiUrl("/api/golems/start"), {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ id }),
@@ -160,6 +179,7 @@ export function GolemProvider({ children }: { children: React.ReactNode }) {
             isSystemConfigured,
             isLoadingSystem,
             isSingleNode,
+            version,
         }}>
             {children}
         </GolemContext.Provider>

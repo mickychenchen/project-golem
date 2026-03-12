@@ -15,7 +15,7 @@ function DashboardSidebar({
     setIsSidebarOpen: (v: boolean) => void
 }) {
     const pathname = usePathname();
-    const { activeGolem, setActiveGolem, golems, isSingleNode } = useGolem();
+    const { activeGolem, setActiveGolem, golems, isSingleNode, version } = useGolem();
 
     const navItems = [
         { name: "戰術控制台", href: "/dashboard", icon: LayoutDashboard },
@@ -38,7 +38,7 @@ function DashboardSidebar({
                 {isSidebarOpen && (
                     <div className="flex-1 min-w-0 pr-2">
                         <h1 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-cyan-400 whitespace-nowrap overflow-hidden text-ellipsis">
-                            Golem v9.0
+                            Golem {version}
                         </h1>
                         <p className="text-xs text-gray-500 mt-1 whitespace-nowrap">
                             Bot Control Center
@@ -54,8 +54,8 @@ function DashboardSidebar({
                 </button>
             </div>
 
-            {/* Golem Switcher */}
-            {isSidebarOpen && golems.length > 0 && (
+            {/* Golem Switcher - Only show if there are multiple golems */}
+            {isSidebarOpen && golems.length > 1 && (
                 <div className="px-4 py-3 border-b border-gray-800">
                     <label className="text-xs text-gray-500 mb-1 block">Active Golem</label>
                     <select

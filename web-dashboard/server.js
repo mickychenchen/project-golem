@@ -44,6 +44,11 @@ class WebServer {
     constructor(dashboard) {
         this.dashboard = dashboard; // Reference to main dashboard if needed for initial state
         this.app = express();
+        const cors = require('cors');
+        this.app.use(cors({
+            origin: ["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:3001", "http://127.0.0.1:3001"],
+            methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+        }));
         this.app.use(express.json()); // Enable JSON body parsing
         this.server = http.createServer(this.app);
 
@@ -59,21 +64,29 @@ class WebServer {
             res.json({});
         });
 
+        // Health check for debugging
+        this.app.get('/api/health', (req, res) => {
+            res.json({ status: 'ok', time: new Date().toISOString() });
+        });
+
         this.io = new Server(this.server, {
             cors: {
-                origin: ["http://localhost:3000", "http://localhost:3001"], // Allow Next.js dev server and alternative ports
+                origin: ["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:3001", "http://127.0.0.1:3001"], // Allow Next.js dev server and alternative ports
                 methods: ["GET", "POST"]
             }
         });
+
         this.port = process.env.DASHBOARD_PORT || 3000;
-        
-        // ✨ [Dev Mode Optimization]
+        console.log(`📡 [WebServer] Initial port: ${this.port}, Dev Mode: ${process.env.DASHBOARD_DEV_MODE}`);
+
         // If in Dev Mode and port is still 3000 (default), shift backend to 3001 
         // to avoid conflict with Next.js Dev Server (which also defaults to 3000).
-        if (process.env.DASHBOARD_DEV_MODE === 'true' && this.port == 3000) {
+        const isDev = (process.env.DASHBOARD_DEV_MODE || "").trim() === 'true';
+        if (isDev && this.port == 3000) {
             console.log('🚧 [WebServer] Dev Mode detected + Port 3000: Automatically shifting backend to 3001.');
             this.port = 3001;
         }
+        console.log(`📡 [WebServer] Final bound port: ${this.port}`);
 
         this.contexts = new Map();
         this.golemFactory = null; // Injected from index.js for dynamic Golem creation
@@ -1112,7 +1125,18 @@ class WebServer {
             try {
                 const EnvManager = require('../src/utils/EnvManager');
                 const envVars = EnvManager.readEnv();
+                
+                // Read version from package.json
+                let version = 'v9.0';
+                try {
+                    const pkg = JSON.parse(fs.readFileSync(path.resolve(process.cwd(), 'package.json'), 'utf8'));
+                    version = pkg.version;
+                } catch (e) {
+                    console.warn('[WebServer] Failed to read version from package.json:', e.message);
+                }
+
                 return res.json({
+                    version,
                     userDataDir: envVars.USER_DATA_DIR || './golem_memory',
                     golemMemoryMode: envVars.GOLEM_MEMORY_MODE || 'browser',
                     golemMode: 'SINGLE'
@@ -1650,12 +1674,18 @@ class WebServer {
             console.log("⛔ [WebServer] Received shutdown request. Stopping system...");
             res.json({ success: true, message: "System is shutting down... Please restart manually if needed." });
 
-            // 直接終止進程，不 spawn 新子進程
-            // 與 reload 的差異：reload 會生出新進程再死去（熱重啟），shutdown 則完全停止
-            // Single mode / Multi mode 皆適用（都是同一個 Node.js 進程）
-            setTimeout(() => {
-                process.exit(0);
-            }, 1000);
+            // 呼叫全域關閉函式，執行完整的資源清理
+            if (typeof global.fullShutdown === 'function') {
+                setTimeout(() => {
+                    global.fullShutdown().catch(err => {
+                        console.error("❌ [System] Shutdown error:", err);
+                        process.exit(1);
+                    });
+                }, 1000);
+            } else {
+                console.warn("⚠️ [System] global.fullShutdown not found, falling back to process.exit()");
+                setTimeout(() => process.exit(0), 1000);
+            }
         });
 
         // Socket.io connection handler
@@ -1693,7 +1723,7 @@ class WebServer {
         });
 
         // Start Server
-        this.server.listen(this.port, () => {
+        this.server.listen(this.port, '0.0.0.0', () => {
             const displayPort = process.env.DASHBOARD_DEV_MODE === 'true' ? 3000 : this.port;
             const url = `http://localhost:${displayPort}/dashboard`;
             console.log(`🚀 [WebServer] Dashboard running at ${url}`);

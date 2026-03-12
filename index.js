@@ -774,8 +774,11 @@ if (dcClient) {
     dcClient.on('interactionCreate', (interaction) => { if (interaction.isButton()) handleUnifiedCallback(new UniversalContext('discord', interaction, dcClient), interaction.customId); });
 }
 
-global.gracefulRestart = async function () {
-    console.log("🛑 [System] 準備重啟，正在清理資源...");
+/**
+ * 🧹 資源清理核心程序
+ */
+async function performCleanup() {
+    console.log("🛑 [System] 正在執行資源清理程序...");
 
     // 1. 停止 Telegram Bot Polling
     if (activeTgBot) {
@@ -799,6 +802,10 @@ global.gracefulRestart = async function () {
             console.warn(`⚠️ [System] 關閉瀏覽器失敗: ${e.message}`);
         }
     }
+}
+
+global.gracefulRestart = async function () {
+    await performCleanup();
 
     // 3. 生成子程序並安全退出
     const { spawn } = require('child_process');
@@ -809,6 +816,12 @@ global.gracefulRestart = async function () {
         env: env
     });
     subprocess.unref();
+    process.exit(0);
+};
+
+global.fullShutdown = async function () {
+    await performCleanup();
+    console.log("👋 [System] 所有服務已關閉，正在退出系統。");
     process.exit(0);
 };
 

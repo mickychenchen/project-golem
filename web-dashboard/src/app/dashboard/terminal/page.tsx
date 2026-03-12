@@ -16,8 +16,18 @@ export default function TerminalPage() {
 
     const [memHistory, setMemHistory] = useState<{ time: string; value: number }[]>([]);
     const [hoveredPoint, setHoveredPoint] = useState<{ time: string; value: number; x: number; y: number } | null>(null);
+    const [isConnected, setIsConnected] = useState(false);
 
     useEffect(() => {
+        const handleConnect = () => setIsConnected(true);
+        const handleDisconnect = () => setIsConnected(false);
+
+        socket.on("connect", handleConnect);
+        socket.on("disconnect", handleDisconnect);
+
+        // Sync current state immediately (handles race condition)
+        setIsConnected(socket.connected);
+
         socket.on("init", (data: any) => {
             setMetrics((prev) => ({ ...prev, ...data }));
         });
@@ -41,6 +51,8 @@ export default function TerminalPage() {
         });
 
         return () => {
+            socket.off("connect", handleConnect);
+            socket.off("disconnect", handleDisconnect);
             socket.off("init");
             socket.off("state_update");
             socket.off("heartbeat");
@@ -83,9 +95,9 @@ export default function TerminalPage() {
                         <p className="text-xs text-gray-500 mt-0.5 font-medium">Real-time Golem Core System Monitor</p>
                     </div>
                 </div>
-                <div className="flex items-center space-x-2 text-[10px] uppercase tracking-widest text-gray-600 font-bold bg-gray-900/50 px-3 py-1.5 rounded-full border border-gray-800">
-                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
-                    <span>System Online</span>
+                <div className={`flex items-center space-x-2 text-[10px] uppercase tracking-widest font-bold bg-gray-900/50 px-3 py-1.5 rounded-full border border-gray-800 ${isConnected ? "text-emerald-500" : "text-red-500"}`}>
+                    <div className={`w-1.5 h-1.5 rounded-full animate-pulse ${isConnected ? "bg-emerald-500" : "bg-red-500"}`}></div>
+                    <span>{isConnected ? "System Online" : "System Offline"}</span>
                 </div>
             </div>
 

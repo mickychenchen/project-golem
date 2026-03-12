@@ -148,7 +148,7 @@ export default function GolemSetupPage() {
                         <Sparkles className="w-8 h-8 text-cyan-400" />
                     </div>
                     <h1 className="text-4xl md:text-5xl font-bold bg-clip-text text-transparent bg-gradient-to-br from-white via-blue-100 to-cyan-400 mb-3 tracking-tight">
-                        初始化 Golem [{activeGolem}]
+                        初始化 Golem
                     </h1>
                     <p className="text-lg text-gray-400 max-w-2xl">
                         此 Golem 的大腦層尚未初始化。請在正式啟動前，賦予它專屬的人格、身分與任務模板。

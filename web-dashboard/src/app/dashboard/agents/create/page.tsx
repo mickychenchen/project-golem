@@ -198,7 +198,7 @@ export default function CreateGolemPage() {
                                 <Hash className="w-5 h-5 text-indigo-400" />
                                 <h2 className="text-base font-semibold text-white">實體識別</h2>
                             </div>
-                            <div>
+                            <div className="hidden">
                                 <label className="block text-sm font-medium text-gray-400 mb-2">
                                     Golem ID <span className="text-red-400">*</span>
                                 </label>

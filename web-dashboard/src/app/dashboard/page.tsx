@@ -173,6 +173,7 @@ export default function DashboardPage() {
         open: false, variant: "restarted"
     });
     const [isLoading, setIsLoading] = useState(false);
+    const [isConnected, setIsConnected] = useState(false);
 
     // 開啟確認 dialog
     const openConfirm = (variant: "restart" | "shutdown") => {
@@ -222,6 +223,15 @@ export default function DashboardPage() {
     };
 
     useEffect(() => {
+        const handleConnect = () => setIsConnected(true);
+        const handleDisconnect = () => setIsConnected(false);
+
+        socket.on("connect", handleConnect);
+        socket.on("disconnect", handleDisconnect);
+
+        // Sync current state immediately (socket may already be connected before listeners registered)
+        setIsConnected(socket.connected);
+
         socket.on("init", (data: any) => {
             setMetrics((prev) => ({ ...prev, ...data }));
         });
@@ -245,6 +255,8 @@ export default function DashboardPage() {
         });
 
         return () => {
+            socket.off("connect", handleConnect);
+            socket.off("disconnect", handleDisconnect);
             socket.off("init");
             socket.off("state_update");
             socket.off("heartbeat");
@@ -317,7 +329,9 @@ export default function DashboardPage() {
                             </div>
                             <div className="flex justify-between items-center text-sm border-b border-gray-800 pb-2">
                                 <span className="text-gray-400">Backend</span>
-                                <span className="text-green-400">Connected</span>
+                                <span className={isConnected ? "text-green-400" : "text-red-400 animate-pulse"}>
+                                    {isConnected ? "Connected" : "Disconnected"}
+                                </span>
                             </div>
                         </div>
 

@@ -42,11 +42,6 @@ export default function SystemSetupPage() {
         e.preventDefault();
         setError(null);
 
-        // Gemini API Key 改為選填，移除強制檢查
-        // if (!geminiKeys.trim()) {
-        //     return setError("請填寫 Gemini API Keys");
-        // }
-
         setIsLoading(true);
         try {
             const res = await fetch("/api/system/config", {
@@ -63,7 +58,7 @@ export default function SystemSetupPage() {
             if (!res.ok || !data.success) {
                 throw new Error(data.error || "儲存失敗，請稍後再試");
             }
-            // 系統設定完成後，引導使用者建立第一個 Golem
+            // 儲存成功後直接跳轉至 Agent 建立頁面
             window.location.href = "/dashboard/agents/create";
         } catch (err: any) {
             setError(err.message);
@@ -227,7 +222,7 @@ export default function SystemSetupPage() {
                             </span>
                         ) : (
                             <span className="flex items-center gap-2">
-                                完成設定，進入控制台
+                                {isSystemConfigured ? "更新系統設定" : "完成設定，進入控制台"}
                                 <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
                             </span>
                         )}
@@ -241,4 +236,4 @@ export default function SystemSetupPage() {
             </div>
         </div>
     );
-}
+} 
