@@ -476,7 +476,7 @@ class WebServer {
 
         this.app.get('/api/skills/marketplace', (req, res) => {
             try {
-                const marketplaceDir = path.join(process.cwd(), 'data', 'marketplace');
+                const marketplaceDir = path.join(process.cwd(), 'data', 'marketplace', 'skills');
                 let allSkills = [];
 
                 const { search, category, page = 1, limit = 20 } = req.query;

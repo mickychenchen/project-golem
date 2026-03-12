@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const https = require('https');
 
-const DATA_DIR = path.join(__dirname, 'data', 'marketplace');
+const DATA_DIR = path.join(__dirname, 'data', 'marketplace', 'skills');
 
 // Update to bilingual mapping if not present
 const CATEGORY_MAP = {

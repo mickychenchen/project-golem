@@ -3,7 +3,7 @@ const path = require('path');
 const https = require('https');
 
 const REPO_URL = 'https://raw.githubusercontent.com/VoltAgent/awesome-openclaw-skills/main/';
-const DATA_DIR = path.join(__dirname, '..', '..', 'data', 'marketplace');
+const DATA_DIR = path.join(__dirname, '..', '..', 'data', 'marketplace', 'skills');
 
 // Define bilingual categories
 const CATEGORY_MAP = {
