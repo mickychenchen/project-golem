@@ -21,8 +21,8 @@ install_nvm_node() {
         return 1
     fi
 
-    ui_success "NVM 安裝成功！正在安裝 Node.js LTS 版本..."
-    if nvm install --lts && nvm use --lts; then
+    ui_success "NVM 安裝成功！正在安裝 Node.js 20 版本..."
+    if nvm install 20 && nvm use 20; then
         ui_success "Node.js $(node -v) 安裝完成！"
         return 0
     else

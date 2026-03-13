@@ -76,7 +76,7 @@ case "${1:-}" in
         ;;
     --install)   run_full_install ;;
     --init)      run_clean_init ;;
-    --stop)      stop_system ;;
+    --stop|--stop-all) stop_system ;;
     --docker)    launch_docker ;;
     --doctor)    npm run doctor ;;
     --config)    step_check_env; config_wizard ;;
@@ -94,7 +94,7 @@ case "${1:-}" in
         echo "  --start --bg  以背景模式啟動系統"
         echo "  --install     執行完整安裝流程"
         echo "  --init        完全初始化 (刪除資料並重新安裝)"
-        echo "  --stop        停止 Golem 與 Web Dashboard"
+        echo "  --stop, --stop-all  關閉所有 Golem 與 Web Dashboard 程序"
         echo "  --config      啟動配置精靈 (Gemini Key / 系統選項)"
         echo "  --docker      使用 Docker 啟動系統"
         echo "  --doctor      執行系統環境自我診斷"
@@ -114,7 +114,7 @@ case "${1:-}" in
         echo "  ./setup.sh                  # 互動式選單"
         echo "  ./setup.sh --start --bg     # 背景啟動"
         echo "  ./setup.sh --install        # 自動完整安裝"
-        echo "  ./setup.sh --init           # 完全初始化"
+        echo "  ./setup.sh --stop           # 關閉所有程序"
         echo "  ./setup.sh --status         # 檢查狀態"
         echo ""
         exit 0

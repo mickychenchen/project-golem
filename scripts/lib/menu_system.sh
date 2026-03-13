@@ -30,10 +30,10 @@ show_menu() {
     local options=()
     if [ "$IS_RUNNING" = true ]; then
         options+=("Restart|🔄 重新啟動所有服務 (Restart Stack)")
-        options+=("Stop|🛑 停止執行中的程序 (Shutdown)")
     else
         options+=("Start|🚀 啟動系統與控制台 (Power On)")
     fi
+    options+=("Stop|🛑 關閉所有 Golem 程序 (Shutdown)")
     
     options+=("Install|📦 更新依賴與系統建置 (Update / Build)")
     
@@ -88,10 +88,10 @@ show_system_tip() {
 stop_system() {
     local interactive="${1:-true}"
     echo ""
-    echo -e "  ${YELLOW}🛑 正在停止 Golem 與 Web Dashboard...${NC}"
+    echo -e "  ${YELLOW}🛑 正在執行深度清理，停止所有相關程序...${NC}"
     local killed=0
 
-    # 1. Kill via .golem.pid
+    # 1. Kill via .golem.pid (Primary PID file)
     local pid_file="$SCRIPT_DIR/.golem.pid"
     if [ -f "$pid_file" ]; then
         local gpid
@@ -111,32 +111,33 @@ stop_system() {
     local dash_pids
     dash_pids=$(lsof -ti tcp:"$dash_port" 2>/dev/null)
     if [ -n "$dash_pids" ]; then
-        echo "$dash_pids" | xargs kill 2>/dev/null
+        echo "$dash_pids" | xargs kill -9 2>/dev/null
         echo -e "  ${GREEN}✅ Dashboard (port $dash_port) 已停止${NC}"
         killed=1
     fi
 
-    # 2.5 Kill Next.js Dev Server if running on 3000 (standard for dev mode)
+    # 3. Kill Next.js Dev Server if running on 3000 (standard for dev mode)
     if [ -n "$(lsof -ti tcp:3000 2>/dev/null)" ] && [ "$dash_port" != "3000" ]; then
-        lsof -ti tcp:3000 2>/dev/null | xargs kill 2>/dev/null
+        lsof -ti tcp:3000 2>/dev/null | xargs kill -9 2>/dev/null
         echo -e "  ${GREEN}✅ Next.js Dev Server (port 3000) 已停止${NC}"
         killed=1
     fi
 
-    # 3. Also kill any lingering 'node index.js' / 'npm start' spawned by setup
+    # 4. Comprehensive regex kill for all related node/npm processes
+    # Patterns: index.js, dashboard.js, migrateData.js, nodemon, next-dev
     local golem_pids
-    golem_pids=$(pgrep -f 'node.*index\.js' 2>/dev/null)
+    golem_pids=$(pgrep -f 'node.*(index|dashboard|migrateData)\.js|nodemon|next-dev|npm.*(start|dev|dashboard)' 2>/dev/null)
     if [ -n "$golem_pids" ]; then
-        echo "$golem_pids" | xargs kill 2>/dev/null
-        echo -e "  ${GREEN}✅ 殘留 Node.js 程序已終止${NC}"
+        echo "$golem_pids" | xargs kill -9 2>/dev/null
+        echo -e "  ${GREEN}✅ 所有殘留 Golem 與 Web 程序的 Node.js 進程已終止${NC}"
         killed=1
     fi
 
     if [ "$killed" -eq 0 ]; then
-        echo -e "  ${DIM}   找不到正在執行的 Golem 程序${NC}"
+        echo -e "  ${DIM}   找不到正在執行的 Golem 相關程序${NC}"
     fi
 
-    log "System stopped via stop_system"
+    log "System stopped and cleaned via stop_system"
     echo ""
 
     if [ "$interactive" = true ]; then

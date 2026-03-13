@@ -757,7 +757,6 @@ class WebServer {
                 console.log(`✨ [WebServer] Custom skill created: ${safeId}.md`);
 
                 // 2. Index to SQLite if it would be enabled (mandatory or in OPTIONAL_SKILLS)
-                const { MANDATORY_SKILLS, resolveEnabledSkills } = require('../src/skills/skillsConfig');
                 const enabledSkills = resolveEnabledSkills(process.env.OPTIONAL_SKILLS || '', []);
                 if (MANDATORY_SKILLS.includes(safeId) || enabledSkills.has(safeId)) {
                     const SkillIndexManager = require('../src/managers/SkillIndexManager');
@@ -795,7 +794,6 @@ class WebServer {
                 console.log(`📝 [WebServer] Custom skill updated: ${safeId}.md`);
 
                 // 2. Update SQLite Index if active
-                const { MANDATORY_SKILLS, resolveEnabledSkills } = require('../src/skills/skillsConfig');
                 const enabledSkills = resolveEnabledSkills(process.env.OPTIONAL_SKILLS || '', []);
                 if (MANDATORY_SKILLS.includes(safeId) || enabledSkills.has(safeId)) {
                     const SkillIndexManager = require('../src/managers/SkillIndexManager');
@@ -843,7 +841,6 @@ class WebServer {
                             // 📣 TG 通知
                             const tgBot = context.brain.tgBot;
                             if (tgBot) {
-                                const { MANDATORY_SKILLS, OPTIONAL_SKILLS: OPT_LIST, resolveEnabledSkills } = require('../src/skills/skillsConfig');
                                 const enabledSkills = resolveEnabledSkills(process.env.OPTIONAL_SKILLS || '', []);
                                 const enabledOptional = OPT_LIST.filter(s => enabledSkills.has(s));
                                 const disabledOptional = OPT_LIST.filter(s => !enabledSkills.has(s));

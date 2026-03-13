@@ -15,7 +15,7 @@ check_status() {
     NODE_VER=$(node -v 2>/dev/null || echo "N/A")
     NODE_MAJ=$(echo "$NODE_VER" | grep -oE '^v[0-9]+' | tr -d 'v')
     
-    if [ -n "$NODE_MAJ" ] && [ "$NODE_MAJ" -ge 20 ]; then
+    if [ -n "$NODE_MAJ" ] && [ "$NODE_MAJ" -eq 20 ]; then
         STATUS_NODE="${GREEN}✅ $NODE_VER${NC}"
         NODE_OK=true
     else
@@ -144,8 +144,8 @@ check_dependencies() {
         
         # 如果不是 Windows，詢問是否自動安裝
         if [[ "$os" != "windows" && "$os" != "unknown" ]]; then
-            echo -e "\n${BOLD}${CYAN}是否要由腳本自動安裝 NVM 與 Node.js？${NC}"
-            if confirm_action "這將會下載並安裝最新的 Node.js LTS 版本"; then
+            echo -e "\n${BOLD}${CYAN}是否要由腳本自動安裝 NVM 與 Node.js 20？${NC}"
+            if confirm_action "這將會下載並安裝 Node.js v20 (Titan Chronos 推薦版本)"; then
                 if install_nvm_node; then
                     # 安裝成功，重新執行檢查
                     check_dependencies
@@ -176,8 +176,8 @@ check_dependencies() {
                 echo -e "  2. 安裝後請重啟 Git Bash 或終端機。"
                 ;;
             *)
-                echo -e "${YELLOW}請先安裝 Node.js (建議 v20+) 與 npm，再執行此腳本。${NC}"
-                echo -e "${DIM}下載地址: https://nodejs.org/${NC}"
+                echo -e "${YELLOW}請先安裝 Node.js (限定 v20) 與 npm，再執行此腳本。${NC}"
+                echo -e "${DIM}建議下載地址: https://nodejs.org/dist/latest-v20.x/${NC}"
                 ;;
         esac
         
@@ -222,9 +222,9 @@ run_health_check() {
     if [ "$NODE_OK" = true ]; then
         box_line_colored "  ${GREEN}●${NC} 核心環境: Node.js ${GREEN}$NODE_VER${NC} (符合需求)"
     else
-        box_line_colored "  ${RED}●${NC} 核心環境: Node.js ${RED}$NODE_VER${NC} (需要 v20+)"
+        box_line_colored "  ${RED}●${NC} 核心環境: Node.js ${RED}$NODE_VER${NC} (需要 v20)"
         all_pass=false
-        fix_suggestions+=("使用 nvm 安裝最新 LTS: ${CYAN}nvm install --lts && nvm use --lts${NC}")
+        fix_suggestions+=("使用 nvm 安裝版本 20: ${CYAN}nvm install 20 && nvm use 20${NC}")
     fi
 
     # 2. 檔案權限檢查
