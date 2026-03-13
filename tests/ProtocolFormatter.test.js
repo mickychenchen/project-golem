@@ -16,8 +16,9 @@ jest.mock('../src/managers/SkillManager', () => ({
 }));
 jest.mock('../src/managers/SkillIndexManager', () => {
     return jest.fn().mockImplementation(() => ({
-        getEnabledSkills: jest.fn().mockResolvedValue([]),
-        init: jest.fn().mockResolvedValue()
+        getEnabledSkills: jest.fn().mockResolvedValue([{ id: 'actor', content: 'actor guide' }]),
+        init: jest.fn().mockResolvedValue(),
+        close: jest.fn().mockResolvedValue()
     }));
 });
 jest.mock('../src/skills/skillsConfig', () => ({
@@ -101,5 +102,26 @@ describe('ProtocolFormatter', () => {
         // (This just verifies it doesn't crash on cache hit)
         const r = await ProtocolFormatter.buildSystemPrompt(false, { userDataDir: '/tmp/cache-test' });
         expect(r).toBeDefined();
+    });
+
+    test('buildSystemPrompt loads markdown skills, handles optionally active/deactivated skills', async () => {
+        const fs = require('fs');
+        const ProtocolFormatter = require('../src/services/ProtocolFormatter');
+        const skillIndexManager = require('../src/managers/SkillIndexManager');
+        const personaManager = require('../src/skills/core/persona');
+        const { resolveEnabledSkills, OPTIONAL_SKILLS } = require('../src/skills/skillsConfig');
+
+        // Mock readdir to return some .md files
+        fs.promises.readdir.mockResolvedValue(['actor.md', 'git.md', 'not-a-skill.txt']);
+        
+        // Mock persona
+        personaManager.get = jest.fn().mockReturnValue({ skills: ['actor'] });
+
+        // Test the true/false logic
+        const result = await ProtocolFormatter.buildSystemPrompt(true, { userDataDir: '/tmp' });
+        
+        // It should inject knowledge about activated skills and deactivated ones
+        expect(result.systemPrompt).toContain('SKILL: ACTOR'); // It injects the loaded skill contents
+        expect(result.systemPrompt).toContain('DEACTIVATED SERVICES:');
     });
 });

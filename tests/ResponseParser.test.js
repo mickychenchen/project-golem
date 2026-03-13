@@ -67,11 +67,28 @@ describe('ResponseParser', () => {
             expect(result.actions[0].action).toBe('command');
         });
 
-        test('uses fallback regex parser for broken JSON', () => {
-            // Provide a partially broken JSON that the fallback regex can handle
-            const raw = '[GOLEM_ACTION][{"action":"command","parameter":"ls"}][GOLEM_REPLY]ok';
+        test('uses fallback regex parser for broken JSON syntax', () => {
+            // Trailing garbage breaks standard parser, but regex \{[\s\S]*\} extracts the object
+            // Just provide the bare minimum that works for \{[\s\S]*\}
+            const raw = '[GOLEM_ACTION] { "action": "command", "parameter": "ls" } \n \n junk';
             const result = ResponseParser.parse(raw);
             expect(result.actions).toHaveLength(1);
+            expect(result.actions[0].action).toBe('command');
+        });
+
+        test('uses ultimate regex fallback when parameter contains unescaped quotes', () => {
+            // Unescaped quotes inside parameter breaks JSON.parse entirely, ultimate regex fixes it
+            // We must put the array closing bracket ] so the lookahead comma|]|EOF matches.
+            const raw = `[GOLEM_ACTION] [{ "action": "command", "parameter": "echo "hello" \n world" }] `;
+            const result = ResponseParser.parse(raw);
+            expect(result.actions).toHaveLength(1);
+            expect(result.actions[0].parameter).toContain('echo "hello" \n world');
+        });
+
+        test('ultimate fallback catches errors safely', () => {
+            const raw = `[GOLEM_ACTION] [{ "action": "cmd\\x00", "parameter": "test" }]`;
+            const result = ResponseParser.parse(raw);
+            expect(result).toBeDefined();
         });
 
         test('treats untagged text as reply (fallback)', () => {
