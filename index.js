@@ -665,6 +665,16 @@ async function handleUnifiedCallback(ctx, actionData) {
                 return;
             }
 
+            // 🛡️ [Security Safeguard] 指令安全檢查
+            const safeguard = require('./src/utils/CommandSafeguard');
+            const validation = safeguard.validate(cmd);
+            if (!validation.safe) {
+                console.error(`🛡️ [Safeguard] 攔截危險指令: ${cmd} | 原因: ${validation.reason}`);
+                await ctx.reply(`🛡️ **安全警告**：偵測到潛在危險指令！\n執行權限已自動攔截。\n原因：${validation.reason}`);
+                return;
+            }
+            cmd = validation.sanitizedCmd;
+
             if (cmd.includes('reincarnate.js')) {
                 await ctx.reply("🔄 收到轉生指令！正在將記憶注入核心並準備重啟大腦...");
                 const { exec } = require('child_process');

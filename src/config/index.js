@@ -12,7 +12,10 @@ const cleanEnv = (str, allowSpaces = false) => {
 
 const isPlaceholder = (str) => {
     if (!str) return true;
-    return /你的|這裡|YOUR_|TOKEN/i.test(str) || str.length < 10;
+    // 檢查常見的佔位符關鍵字與長度
+    const lowered = str.toLowerCase();
+    const hasPlaceholderKeywords = /你的|這裡|your_|token_here/i.test(lowered);
+    return hasPlaceholderKeywords || str.length < 8;
 };
 
 const CONFIG = {

@@ -56,7 +56,10 @@ puppeteer_data/
 logs/
 *.log
 error.txt
+test_output*.txt
 combined.log
+coverage/
+.nyc_output/
 
 # 截圖與錄影 (Agent 執行失敗時的截圖)
 screenshots/
