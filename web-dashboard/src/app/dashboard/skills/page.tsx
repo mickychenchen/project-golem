@@ -11,7 +11,7 @@ import {
     DialogDescription,
     DialogFooter,
 } from "@/components/ui/dialog";
-import { BookOpen, AlertCircle, CheckCircle2, RefreshCcw, ChevronRight, Zap, TriangleAlert, Plus, Pencil, X, Search, Download, Store, Tags } from "lucide-react";
+import { BookOpen, AlertCircle, CheckCircle2, RefreshCcw, ChevronRight, Zap, TriangleAlert, Plus, Pencil, X, Search, Download, Store, Tags, Trash2 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
@@ -234,6 +234,44 @@ function InstallSuccessDialog({
     );
 }
 
+// ── Delete Confirm Dialog ───────────────────────────────────────────────────
+function DeleteConfirmDialog({
+    open, onOpenChange, onConfirm, isLoading, skillTitle
+}: {
+    open: boolean;
+    onOpenChange: (v: boolean) => void;
+    onConfirm: () => void;
+    isLoading: boolean;
+    skillTitle: string;
+}) {
+    return (
+        <Dialog open={open} onOpenChange={isLoading ? undefined : onOpenChange}>
+            <DialogContent showCloseButton={!isLoading} className="bg-gray-900 border-gray-700 text-white max-w-sm">
+                <DialogHeader>
+                    <div className="w-12 h-12 rounded-xl border bg-red-500/10 border-red-500/20 flex items-center justify-center mb-2">
+                        <Trash2 className="w-5 h-5 text-red-500" />
+                    </div>
+                    <DialogTitle className="text-white text-base">刪除技能？</DialogTitle>
+                    <DialogDescription className="text-gray-400 text-sm leading-relaxed">
+                        您確定要刪除「<span className="text-red-400 font-medium">{skillTitle}</span>」嗎？此動作將永久移除該技能的 Markdown 檔案，且無法復原。
+                    </DialogDescription>
+                </DialogHeader>
+                <DialogFooter className="gap-2 sm:gap-2">
+                    <Button variant="outline" className="flex-1 bg-transparent border-gray-800 text-gray-500 hover:bg-gray-800 hover:text-gray-300"
+                        onClick={() => onOpenChange(false)} disabled={isLoading}>取消</Button>
+                    <Button className="flex-1 bg-red-600 hover:bg-red-500 text-white" onClick={onConfirm} disabled={isLoading}>
+                        {isLoading ? (
+                            <span className="flex items-center gap-1.5"><RefreshCcw className="w-3.5 h-3.5 animate-spin" />刪除中...</span>
+                        ) : (
+                            <span className="flex items-center gap-1.5"><Trash2 className="w-3.5 h-3.5" />確認刪除</span>
+                        )}
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+    );
+}
+
 const MARKET_CATEGORIES = [
     { id: 'all', name: '全部類別', name_en: 'All Categories' },
     { id: 'ai-and-llms', name: '人工智慧與模型', name_en: 'AI & LLMs' },
@@ -301,8 +339,13 @@ export default function SkillsPage() {
     // Success dialog
     const [showInstallSuccess, setShowInstallSuccess] = useState(false);
 
+    // Delete dialog
+    const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+    const [isDeleting, setIsDeleting] = useState(false);
+
     // Sync hint
     const [showSyncHint, setShowSyncHint] = useState(false);
+    const [syncHintType, setSyncHintType] = useState<"enable" | "delete">("enable");
 
     const loadSkills = useCallback(() => {
         fetch("/api/skills")
@@ -384,6 +427,7 @@ export default function SkillsPage() {
                     setSelectedSkill((prev: any) => prev ? { ...prev, isEnabled: enabled } : null);
                 }
                 if (enabled) {
+                    setSyncHintType("enable");
                     setShowSyncHint(true);
                 }
                 setHasUnsyncedChanges(true);
@@ -418,7 +462,18 @@ export default function SkillsPage() {
         setIsInjecting(true);
         try {
             const res = await fetch("/api/skills/inject", { method: "POST" });
-            const data = await res.json();
+            
+            // ── [v9.1.12] 強化非 JSON 回應處理 ──
+            const contentType = res.headers.get("content-type");
+            let data: any;
+            
+            if (contentType && contentType.includes("application/json")) {
+                data = await res.json();
+            } else {
+                const text = await res.text();
+                data = { success: false, message: text || `Server error (${res.status})` };
+            }
+
             if (data.success) {
                 setShowConfirm(false);
                 setHasUnsyncedChanges(false);
@@ -430,11 +485,55 @@ export default function SkillsPage() {
                     loadSkills();
                 }, 3000);
             } else {
+                console.error("Injection failed:", data.message || data.error);
+                alert(`注入失敗: ${data.message || data.error || "未知伺服器錯誤"}`);
                 setIsInjecting(false);
+            }
+        } catch (err: any) {
+            console.error(err);
+            alert(`請求失敗: ${err.message || "請檢查網路連線或伺服器狀態"}`);
+            setIsInjecting(false);
+        }
+    };
+
+    const handleDeleteSkill = async () => {
+        if (!selectedSkill) return;
+        setIsDeleting(true);
+        try {
+            const res = await fetch("/api/skills/delete", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ id: selectedSkill.id }),
+            });
+            const data = await res.json();
+            if (data.success) {
+                setShowDeleteConfirm(false);
+                setHasUnsyncedChanges(true); // 檔案刪除後也需要重新注入以同步內部狀態
+                
+                // ── [v9.1.13] 優化：僅在刪除「已啟用」的技能時顯示提示 ──
+                if (selectedSkill.isEnabled) {
+                    setSyncHintType("delete");
+                    setShowSyncHint(true);
+                }
+                
+                // 從列表中移除
+                const updatedSkills = skills.filter(s => s.id !== selectedSkill.id);
+                setSkills(updatedSkills);
+                
+                // 選取下一個或清空
+                if (updatedSkills.length > 0) {
+                    setSelectedSkill(updatedSkills[0]);
+                } else {
+                    setSelectedSkill(null);
+                }
+            } else {
+                alert(data.error || "刪除失敗");
             }
         } catch (err) {
             console.error(err);
-            setIsInjecting(false);
+            alert("請求發送失敗");
+        } finally {
+            setIsDeleting(false);
         }
     };
 
@@ -544,12 +643,20 @@ export default function SkillsPage() {
                                                     </div>
                                                 )}
                                                 {selectedSkill.isOptional && (
-                                                    <button
-                                                        onClick={(e) => handleEditSkill(e, selectedSkill)}
-                                                        className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-800 border border-gray-700 text-gray-300 hover:text-white hover:bg-gray-700 text-xs font-medium rounded-lg transition-colors"
-                                                    >
-                                                        <Pencil className="w-3.5 h-3.5" /> 編輯
-                                                    </button>
+                                                    <div className="flex items-center gap-2">
+                                                        <button
+                                                            onClick={() => setShowDeleteConfirm(true)}
+                                                            className="flex items-center gap-1.5 px-3 py-1.5 bg-red-950/20 border border-red-900/30 text-red-400 hover:text-red-300 hover:bg-red-900/40 text-xs font-medium rounded-lg transition-colors"
+                                                        >
+                                                            <Trash2 className="w-3.5 h-3.5" /> 刪除
+                                                        </button>
+                                                        <button
+                                                            onClick={(e) => handleEditSkill(e, selectedSkill)}
+                                                            className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-800 border border-gray-700 text-gray-300 hover:text-white hover:bg-gray-700 text-xs font-medium rounded-lg transition-colors"
+                                                        >
+                                                            <Pencil className="w-3.5 h-3.5" /> 編輯
+                                                        </button>
+                                                    </div>
                                                 )}
                                                 {selectedSkill.isOptional && (
                                                     <label className="relative inline-flex items-center cursor-pointer ml-1">
@@ -844,7 +951,9 @@ export default function SkillsPage() {
                                 <Zap className="w-5 h-5 text-amber-400 animate-pulse" />
                             </div>
                             <div className="flex flex-col">
-                                <p className="text-sm font-bold text-amber-200">技能已啟用！</p>
+                                <p className="text-sm font-bold text-amber-200">
+                                    {syncHintType === "enable" ? "技能已啟用！" : "技能已刪除！"}
+                                </p>
                                 <p className="text-xs text-amber-400/80">請記得點擊右上方「注入技能書」按鈕，讓 AI 同步最新的能力。</p>
                             </div>
                             <Button 
@@ -877,6 +986,14 @@ export default function SkillsPage() {
             <InstallSuccessDialog
                 open={showInstallSuccess}
                 onOpenChange={setShowInstallSuccess}
+            />
+
+            <DeleteConfirmDialog
+                open={showDeleteConfirm}
+                onOpenChange={setShowDeleteConfirm}
+                onConfirm={handleDeleteSkill}
+                isLoading={isDeleting}
+                skillTitle={selectedSkill?.title || ""}
             />
         </>
     );

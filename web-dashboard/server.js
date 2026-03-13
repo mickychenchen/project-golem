@@ -810,6 +810,47 @@ class WebServer {
             }
         });
 
+        // 🗑️ 刪除技能 API
+        this.app.post('/api/skills/delete', async (req, res) => {
+            try {
+                const { id } = req.body;
+                if (!id) return res.status(400).json({ error: 'Missing skill ID' });
+
+                const safeId = id.replace(/[^a-z0-9_-]/gi, '_').toLowerCase();
+                
+                // 1. 安全檢查：禁止刪除強制性技能
+                if (MANDATORY_SKILLS.includes(safeId)) {
+                    return res.status(403).json({ error: `Cannot delete mandatory skill '${safeId}'` });
+                }
+
+                const libPath = path.join(process.cwd(), 'src', 'skills', 'lib');
+                const filePath = path.join(libPath, `${safeId}.md`);
+
+                if (!fs.existsSync(filePath)) {
+                    return res.status(404).json({ error: `Skill '${safeId}' not found` });
+                }
+
+                // 2. 執行檔案刪除
+                fs.unlinkSync(filePath);
+                console.log(`🗑️ [WebServer] Custom skill deleted: ${safeId}.md`);
+
+                // 3. 從 SQLite 索引移除
+                const SkillIndexManager = require('../src/managers/SkillIndexManager');
+                const { MEMORY_BASE_DIR } = require('../src/config');
+                const idx = new SkillIndexManager(MEMORY_BASE_DIR);
+                await idx.removeSkill(safeId).catch(e => console.error(`[SkillIndex] Delete-Remove Error for ${safeId}:`, e.message));
+
+                // 4. 清除技能快取 (ProtocolFormatter)
+                const ProtocolFormatter = require('../src/services/ProtocolFormatter');
+                ProtocolFormatter._lastScanTime = 0;
+
+                return res.json({ success: true, id: safeId });
+            } catch (e) {
+                console.error('Failed to delete skill:', e);
+                return res.status(500).json({ error: e.message });
+            }
+        });
+
         this.app.post('/api/skills/reload', (req, res) => {
             try {
                 console.log("🔄 [WebServer] Hot-reloading skills... Clearing ProtocolFormatter cache.");
@@ -842,8 +883,8 @@ class WebServer {
                             const tgBot = context.brain.tgBot;
                             if (tgBot) {
                                 const enabledSkills = resolveEnabledSkills(process.env.OPTIONAL_SKILLS || '', []);
-                                const enabledOptional = OPT_LIST.filter(s => enabledSkills.has(s));
-                                const disabledOptional = OPT_LIST.filter(s => !enabledSkills.has(s));
+                                const enabledOptional = OPTIONAL_SKILL_LIST.filter(s => enabledSkills.has(s));
+                                const disabledOptional = OPTIONAL_SKILL_LIST.filter(s => !enabledSkills.has(s));
 
                                 const mandatoryList = MANDATORY_SKILLS.map(s => `• ${s}`).join('\n');
                                 const optionalList = enabledOptional.length > 0 ? enabledOptional.map(s => `• ${s}`).join('\n') : '（無）';
@@ -1653,6 +1694,38 @@ class WebServer {
                 return res.json({ success: true, id: safeId });
             } catch (e) {
                 console.error('Failed to create persona:', e);
+                return res.status(500).json({ success: false, error: e.message });
+            }
+        });
+
+        // 🗑️ 刪除人格 API
+        this.app.post('/api/persona/delete', async (req, res) => {
+            try {
+                const { id } = req.body;
+                if (!id) return res.status(400).json({ success: false, error: 'Missing persona ID' });
+
+                const safeId = id.replace(/[^a-z0-9_-]/gi, '_').toLowerCase();
+                
+                // 1. 安全檢查：禁止刪除內建人格
+                const BUILTIN_PERSONAS = ['standard', 'expert', 'analyst', 'coach', 'creative', 'storyteller', 'translator'];
+                if (BUILTIN_PERSONAS.includes(safeId)) {
+                    return res.status(403).json({ success: false, error: `無法刪除內建人格樣板 '${safeId}'` });
+                }
+
+                const personasDir = path.resolve(process.cwd(), 'personas');
+                const filePath = path.join(personasDir, `${safeId}.md`);
+
+                if (!fs.existsSync(filePath)) {
+                    return res.status(404).json({ success: false, error: `樣板檔案 '${safeId}.md' 不存在` });
+                }
+
+                // 2. 執行檔案刪除
+                fs.unlinkSync(filePath);
+                console.log(`🗑️ [WebServer] Persona template deleted: ${safeId}.md`);
+
+                return res.json({ success: true, id: safeId });
+            } catch (e) {
+                console.error('Failed to delete persona:', e);
                 return res.status(500).json({ success: false, error: e.message });
             }
         });
