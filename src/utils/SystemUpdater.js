@@ -42,6 +42,8 @@ class SystemUpdater {
                 // 3. Get current commit info
                 const { stdout: currentCommitOut } = await exec('git log -1 --format="%h - %s (%cr)"', { cwd: rootDir });
                 const currentCommit = currentCommitOut.trim();
+                const { stdout: currentHashOut } = await exec('git rev-parse HEAD', { cwd: rootDir });
+                const currentHash = currentHashOut.trim();
 
                 // 4. Traverse all remotes to find matching branch
                 const { stdout: rbOut } = await exec('git branch -r', { cwd: rootDir });
@@ -63,6 +65,8 @@ class SystemUpdater {
                 }
 
                 let latestCommit = 'N/A';
+                let latestHash = null;
+                let remoteUrl = null;
                 let behindCount = 0;
 
                 if (foundMatch) {
@@ -71,8 +75,20 @@ class SystemUpdater {
                         const { stdout: latestCommitOut } = await exec(`git log ${targetRef} -1 --format="%h - %s (%cr)"`, { cwd: rootDir });
                         latestCommit = latestCommitOut.trim();
 
+                        const { stdout: latestHashOut } = await exec(`git rev-parse ${targetRef}`, { cwd: rootDir });
+                        latestHash = latestHashOut.trim();
+
                         const { stdout: behindOut } = await exec(`git rev-list HEAD..${targetRef} --count`, { cwd: rootDir });
                         behindCount = parseInt(behindOut.trim(), 10) || 0;
+
+                        // Get remote URL
+                        const { stdout: urlOut } = await exec(`git remote get-url ${targetRemote}`, { cwd: rootDir });
+                        let rawUrl = urlOut.trim();
+                        if (rawUrl.startsWith('git@github.com:')) {
+                            remoteUrl = rawUrl.replace('git@github.com:', 'https://github.com/').replace('.git', '');
+                        } else {
+                            remoteUrl = rawUrl.replace('.git', '');
+                        }
                     } catch (err) {
                         latestCommit = '解析遠端資訊失敗';
                     }
@@ -83,9 +99,12 @@ class SystemUpdater {
                 gitInfo = {
                     currentBranch,
                     currentCommit,
+                    currentHash,
                     latestCommit,
+                    latestHash,
                     behindCount,
-                    targetRemote: foundMatch ? targetRemote : null
+                    targetRemote: foundMatch ? targetRemote : null,
+                    remoteUrl
                 };
             } catch (e) {
                 console.error("[SystemUpdater] Failed to get git info", e);

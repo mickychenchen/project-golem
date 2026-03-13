@@ -184,7 +184,21 @@ const SettingField = ({
 };
 
 const SystemUpdateSection = () => {
-    const [updateInfo, setUpdateInfo] = useState<{ currentVersion: string, remoteVersion?: string, isOutdated?: boolean, installMode: string, gitInfo?: { currentBranch: string, currentCommit: string, latestCommit: string, behindCount: number } } | null>(null);
+    const [updateInfo, setUpdateInfo] = useState<{ 
+        currentVersion: string, 
+        remoteVersion?: string, 
+        isOutdated?: boolean, 
+        installMode: string, 
+        gitInfo?: { 
+            currentBranch: string, 
+            currentCommit: string, 
+            currentHash: string,
+            latestCommit: string, 
+            latestHash: string,
+            behindCount: number,
+            remoteUrl: string | null
+        } 
+    } | null>(null);
     const [showModal, setShowModal] = useState(false);
     const [isUpdating, setIsUpdating] = useState(false);
     const [progress, setProgress] = useState(0);
@@ -344,11 +358,33 @@ const SystemUpdateSection = () => {
                                         </div>
                                         <div className="flex flex-col gap-1">
                                             <span className="text-gray-500">當前版本 (Current):</span>
-                                            <span className="text-gray-400 font-mono text-xs">{updateInfo.gitInfo.currentCommit}</span>
+                                            {updateInfo.gitInfo.remoteUrl && updateInfo.gitInfo.currentHash ? (
+                                                <a 
+                                                    href={`${updateInfo.gitInfo.remoteUrl}/commit/${updateInfo.gitInfo.currentHash}`} 
+                                                    target="_blank" 
+                                                    rel="noopener noreferrer"
+                                                    className="text-gray-400 font-mono text-xs hover:text-indigo-400 hover:underline transition-colors"
+                                                >
+                                                    {updateInfo.gitInfo.currentCommit}
+                                                </a>
+                                            ) : (
+                                                <span className="text-gray-400 font-mono text-xs">{updateInfo.gitInfo.currentCommit}</span>
+                                            )}
                                         </div>
                                         <div className="flex flex-col gap-1">
                                             <span className="text-gray-500">遠端最新 (Latest):</span>
-                                            <span className="text-emerald-400/90 font-mono text-xs">{updateInfo.gitInfo.latestCommit}</span>
+                                            {updateInfo.gitInfo.remoteUrl && updateInfo.gitInfo.latestHash ? (
+                                                <a 
+                                                    href={`${updateInfo.gitInfo.remoteUrl}/commit/${updateInfo.gitInfo.latestHash}`} 
+                                                    target="_blank" 
+                                                    rel="noopener noreferrer"
+                                                    className="text-emerald-400/90 font-mono text-xs hover:text-emerald-300 hover:underline transition-colors"
+                                                >
+                                                    {updateInfo.gitInfo.latestCommit}
+                                                </a>
+                                            ) : (
+                                                <span className="text-emerald-400/90 font-mono text-xs">{updateInfo.gitInfo.latestCommit}</span>
+                                            )}
                                         </div>
                                         <div className="pt-2 border-t border-gray-800 mt-2">
                                             {updateInfo.gitInfo.behindCount > 0 ? (
