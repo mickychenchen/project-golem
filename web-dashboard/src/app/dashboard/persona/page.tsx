@@ -29,6 +29,7 @@ import {
     Pencil,
     Check,
     RotateCcw,
+    Trash2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -141,6 +142,56 @@ function RestartingDialog({ open }: { open: boolean }) {
                         人格已更新，Golem 正在新視窗載入您的設定。頁面將在 3 秒後自動重新整理。
                     </DialogDescription>
                 </DialogHeader>
+            </DialogContent>
+        </Dialog>
+    );
+}
+
+// ── Persona Delete Confirm Dialog ──────────────────────────────────────────
+function PersonaDeleteConfirmDialog({
+    open, onOpenChange, onConfirm, isLoading, personaName,
+}: {
+    open: boolean;
+    onOpenChange: (v: boolean) => void;
+    onConfirm: () => void;
+    isLoading: boolean;
+    personaName: string;
+}) {
+    return (
+        <Dialog open={open} onOpenChange={isLoading ? undefined : onOpenChange}>
+            <DialogContent showCloseButton={!isLoading} className="bg-gray-900 border-gray-700 text-white max-w-sm">
+                <DialogHeader>
+                    <div className="w-12 h-12 rounded-xl border bg-red-500/10 border-red-500/20 flex items-center justify-center mb-2">
+                        <Trash2 className="w-5 h-5 text-red-400" />
+                    </div>
+                    <DialogTitle className="text-white text-base">確定要刪除此人格嗎？</DialogTitle>
+                    <DialogDescription className="text-gray-400 text-sm leading-relaxed">
+                        您即將刪除樣板「<span className="text-gray-200 font-medium">{personaName}</span>」。此動作無法復原。
+                    </DialogDescription>
+                </DialogHeader>
+                <DialogFooter className="gap-2 sm:gap-2 pt-2">
+                    <Button
+                        variant="outline"
+                        className="flex-1 bg-transparent border-gray-800 text-gray-500 hover:bg-gray-800 hover:text-gray-300"
+                        onClick={() => onOpenChange(false)}
+                        disabled={isLoading}
+                    >取消</Button>
+                    <Button
+                        className="flex-1 bg-red-700 hover:bg-red-600 text-white"
+                        onClick={onConfirm}
+                        disabled={isLoading}
+                    >
+                        {isLoading ? (
+                            <span className="flex items-center gap-1.5">
+                                <RefreshCcw className="w-3.5 h-3.5 animate-spin" />刪除中...
+                            </span>
+                        ) : (
+                            <span className="flex items-center gap-1.5">
+                                <Trash2 className="w-3.5 h-3.5" />確認刪除
+                            </span>
+                        )}
+                    </Button>
+                </DialogFooter>
             </DialogContent>
         </Dialog>
     );
@@ -330,6 +381,10 @@ export default function PersonaPage() {
     const [marketCategory, setMarketCategory] = useState("all");
     const [isMarketLoading, setIsMarketLoading] = useState(false);
 
+    // Delete state
+    const [personaToDelete, setPersonaToDelete] = useState<Preset | null>(null);
+    const [isDeletingPersona, setIsDeletingPersona] = useState(false);
+
     const [statusMsg, setStatusMsg] = useState<{ type: "error" | "info"; text: string } | null>(null);
 
     const applyToForm = (data: PersonaData) => {
@@ -440,6 +495,33 @@ export default function PersonaPage() {
             type: "info", 
             text: `已套用樣板「${preset.name_zh || preset.name}」，確認後請點擊「儲存並重啟」。` 
         });
+    };
+
+    const handleDeletePersona = async () => {
+        if (!personaToDelete) return;
+        setIsDeletingPersona(true);
+        try {
+            const res = await fetch("/api/persona/delete", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ id: personaToDelete.id }),
+            });
+            const data = await res.json();
+            if (data.success) {
+                setPersonaToDelete(null);
+                loadTemplates(); // 重新整理列表
+                if (activePresetId === personaToDelete.id) {
+                    setActivePresetId("");
+                }
+            } else {
+                alert(data.error || "刪除失敗");
+            }
+        } catch (err) {
+            console.error(err);
+            alert("請求發送失敗");
+        } finally {
+            setIsDeletingPersona(false);
+        }
     };
 
     const allTags = Array.from(new Set(templates.flatMap(t => t.tags || [])));
@@ -653,11 +735,14 @@ export default function PersonaPage() {
                                 {/* Local Grid */}
                                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                                     {filteredTemplates.length > 0 ? filteredTemplates.map(preset => (
-                                        <button
+                                        <div
                                             key={preset.id}
+                                            role="button"
+                                            tabIndex={0}
                                             onClick={() => applyPreset(preset)}
+                                            onKeyDown={(e) => e.key === 'Enter' && applyPreset(preset)}
                                             className={cn(
-                                                "text-left p-4 rounded-2xl border transition-all duration-300 group relative overflow-hidden flex flex-col",
+                                                "text-left p-4 rounded-2xl border transition-all duration-300 group relative overflow-hidden flex flex-col cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-purple-500",
                                                 activePresetId === preset.id
                                                     ? "bg-purple-950/25 border-purple-500/50 ring-1 ring-purple-500/30"
                                                     : "bg-gray-900 border-gray-800 hover:border-gray-700 hover:bg-gray-800/70"
@@ -681,7 +766,21 @@ export default function PersonaPage() {
                                                 {preset.name}
                                             </h4>
                                             <p className="text-xs text-gray-500 leading-relaxed flex-1">{preset.description}</p>
-                                        </button>
+                                            
+                                            {/* Delete Button (only for custom ones) */}
+                                            {activeTab === "local" && !['standard', 'expert', 'analyst', 'coach', 'creative', 'storyteller', 'translator'].includes(preset.id) && (
+                                                <button
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        setPersonaToDelete(preset);
+                                                    }}
+                                                    className="absolute bottom-3 right-3 p-2 bg-gray-950/50 border border-gray-800 text-gray-500 hover:text-red-400 hover:border-red-900/40 rounded-lg opacity-0 group-hover:opacity-100 transition-all z-10"
+                                                    title="刪除人格樣板"
+                                                >
+                                                    <Trash2 className="w-3.5 h-3.5" />
+                                                </button>
+                                            )}
+                                        </div>
                                     )) : (
                                         <div className="col-span-full py-16 text-center bg-gray-900/20 border border-dashed border-gray-800 rounded-2xl flex flex-col items-center">
                                             <Search className="w-8 h-8 text-gray-700 mb-2" />
@@ -745,11 +844,14 @@ export default function PersonaPage() {
                                     <>
                                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                                             {marketPersonas.length > 0 ? marketPersonas.map(preset => (
-                                                <button
+                                                <div
                                                     key={preset.id}
+                                                    role="button"
+                                                    tabIndex={0}
                                                     onClick={() => applyPreset({ ...preset, icon: "Sparkles", aiName: preset.name, userName: "User", tone: "Professional", skills: [] })}
+                                                    onKeyDown={(e) => e.key === 'Enter' && applyPreset({ ...preset, icon: "Sparkles", aiName: preset.name, userName: "User", tone: "Professional", skills: [] })}
                                                     className={cn(
-                                                        "text-left p-4 rounded-2xl border transition-all duration-300 group relative overflow-hidden flex flex-col",
+                                                        "text-left p-4 rounded-2xl border transition-all duration-300 group relative overflow-hidden flex flex-col cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-blue-500",
                                                         activePresetId === preset.id
                                                             ? "bg-blue-950/25 border-blue-500/50 ring-1 ring-blue-500/30"
                                                             : "bg-gray-900 border-gray-800 hover:border-gray-700 hover:bg-gray-800/70"
@@ -787,7 +889,7 @@ export default function PersonaPage() {
                                                             #market
                                                         </span>
                                                     </div>
-                                                </button>
+                                                </div>
                                             )) : (
                                                 <div className="col-span-full py-16 text-center bg-gray-900/20 border border-dashed border-gray-800 rounded-2xl flex flex-col items-center">
                                                     <Search className="w-8 h-8 text-gray-700 mb-2" />
@@ -855,6 +957,13 @@ export default function PersonaPage() {
             <RestartConfirmDialog open={showConfirm} onOpenChange={setShowConfirm} onConfirm={handleInject} isLoading={isInjecting} />
             <RestartingDialog open={showDone} />
             <CreatePersonaDialog open={showCreate} onOpenChange={setShowCreate} onCreated={loadTemplates} />
+            <PersonaDeleteConfirmDialog
+                open={!!personaToDelete}
+                onOpenChange={(open) => !open && setPersonaToDelete(null)}
+                onConfirm={handleDeletePersona}
+                isLoading={isDeletingPersona}
+                personaName={personaToDelete?.name || ""}
+            />
         </>
     );
 }
