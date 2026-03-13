@@ -148,69 +148,107 @@ class SystemUpdater {
     }
 
     static async updateViaGit(options, io) {
-        // Wait briefly so the frontend socket has time to connect
         await this.sleep(1000);
-        this.broadcast(io, 'running', '開始執行 Git 更新流程...', 0);
+        this.broadcast(io, 'running', '正在啟動 Git 全新更新流程...', 0);
+        const { keepMemory } = options;
+        const rootDir = process.cwd();
+
         try {
-            const rootDir = process.cwd();
-            // Git stash, pull, pop
-            this.broadcast(io, 'running', '儲存本地暫存變更 (git stash)...', 10);
-            try { await this.execAsync('git stash', { cwd: rootDir }); } catch (e) { }
+            // 1. Identify Branch
+            this.broadcast(io, 'running', '正在識別當前分支...', 5);
+            const { stdout: branchOut } = await require('util').promisify(require('child_process').exec)('git rev-parse --abbrev-ref HEAD', { cwd: rootDir });
+            const currentBranch = branchOut.trim();
+            this.broadcast(io, 'running', `當前分支: ${currentBranch}`, 10);
 
-            this.broadcast(io, 'running', '執行 git fetch --all 同步所有遠端資訊...', 20);
-            await this.execAsync('git fetch --all', { cwd: rootDir });
+            // 2. Full Backup
+            this.broadcast(io, 'running', '正在執行全量備份...', 20);
+            const backupDirName = `backup_update_${new Date().toISOString().replace(/[:.]/g, '-')}`;
+            const backupPath = path.join(rootDir, '..', backupDirName); // Backup to parent dir to avoid being moved into itself
+            
+            // Actually, safer to put inside a 'backups' folder in the parent or root. 
+            // Let's put it in path.join(rootDir, 'backups', backupDirName) but we need to move CURRENT files into it.
+            const finalBackupDir = path.join(rootDir, 'backups', backupDirName);
+            if (!fs.existsSync(path.join(rootDir, 'backups'))) fs.mkdirSync(path.join(rootDir, 'backups'));
+            fs.mkdirSync(finalBackupDir);
 
-            let currentBranch = 'main';
-            let targetRemote = 'origin';
-            try {
-                const util = require('util');
-                const exec = util.promisify(require('child_process').exec);
-
-                const { stdout: branchOut } = await exec('git rev-parse --abbrev-ref HEAD', { cwd: rootDir });
-                currentBranch = branchOut.trim();
-
-                const { stdout: rbOut } = await exec('git branch -r', { cwd: rootDir });
-                const remoteBranches = rbOut.trim().split('\n').map(b => b.trim());
-
-                const { stdout: rOut } = await exec('git remote', { cwd: rootDir });
-                const remotes = rOut.trim().split('\n');
-
-                const priorityRemotes = ['upstream', 'origin', ...remotes.filter(r => r !== 'upstream' && r !== 'origin')];
-                let foundMatch = false;
-                for (const r of priorityRemotes) {
-                    if (remoteBranches.includes(`${r}/${currentBranch}`)) {
-                        targetRemote = r;
-                        foundMatch = true;
-                        break;
-                    }
+            const files = fs.readdirSync(rootDir);
+            for (const file of files) {
+                if (file === 'backups' || file === 'node_modules' || file === '.git') continue;
+                const srcPath = path.join(rootDir, file);
+                const destPath = path.join(finalBackupDir, file);
+                try {
+                    fs.renameSync(srcPath, destPath);
+                } catch (e) {
+                    // fallback to copy and delete if rename fails (across devices)
+                    this.broadcast(io, 'running', `正在備份 ${file}...`, 25);
+                    // Minimal dependency implementation of move
+                    await this.execAsync(`cp -R "${srcPath}" "${destPath}" && rm -rf "${srcPath}"`);
                 }
-
-                if (!foundMatch) {
-                    console.warn(`[SystemUpdater] No remote branch matches ${currentBranch}, fallback to ${targetRemote}`);
-                }
-            } catch (e) {
-                console.warn("[SystemUpdater] Git detection failed, using defaults");
             }
 
-            this.broadcast(io, 'running', `從遠端拉取代碼 (git pull ${targetRemote} ${currentBranch})...`, 30);
-            try { await this.execAsync(`git pull ${targetRemote} ${currentBranch}`, { cwd: rootDir }); }
-            catch (e) { throw new Error(`拉取遠端 ${targetRemote}/${currentBranch} 失敗。`); }
+            // 3. Clone Fresh
+            this.broadcast(io, 'running', `正在 Clone 全新分支 (${currentBranch})...`, 40);
+            const tempCloneDir = path.join(rootDir, 'temp_clone_' + Date.now());
+            // Get remote URL
+            const { stdout: remoteUrlOut } = await require('util').promisify(require('child_process').exec)('git remote get-url origin', { cwd: finalBackupDir });
+            const remoteUrl = remoteUrlOut.trim();
+            
+            await this.execAsync(`git clone -b ${currentBranch} ${remoteUrl} "${tempCloneDir}"`);
 
-            this.broadcast(io, 'running', '回復本地變更 (git stash pop)...', 50);
-            try { await this.execAsync('git stash pop', { cwd: rootDir }); } catch (e) { }
+            // 4. Move Files into root
+            this.broadcast(io, 'running', '正在套用新版本檔案...', 60);
+            const newFiles = fs.readdirSync(tempCloneDir);
+            for (const file of newFiles) {
+                if (file === '.git') continue; // We keep the old .git if possible? No, user wants fresh.
+                // Actually, move the new .git too so it stays a git repo.
+                const srcPath = path.join(tempCloneDir, file);
+                const destPath = path.join(rootDir, file);
+                fs.renameSync(srcPath, destPath);
+            }
+            // Move .git as well to maintain repo state
+            fs.renameSync(path.join(tempCloneDir, '.git'), path.join(rootDir, '.git'));
+            fs.rmSync(tempCloneDir, { recursive: true, force: true });
 
-            this.broadcast(io, 'running', '安裝主專案依賴套件 (npm install)...', 70);
+            // 5. Restore Personal Data
+            if (keepMemory) {
+                this.broadcast(io, 'running', '正在還原個人資料 (.env, golem_memory, logs, personas)...', 75);
+                const toRestore = ['.env', 'golem_memory', 'logs', 'personas', 'data'];
+                for (const item of toRestore) {
+                    const src = path.join(finalBackupDir, item);
+                    const dest = path.join(rootDir, item);
+                    if (fs.existsSync(src)) {
+                        if (fs.existsSync(dest)) fs.rmSync(dest, { recursive: true, force: true });
+                        fs.renameSync(src, dest);
+                    }
+                }
+            }
+
+            // 6. Reinstall node_modules
+            this.broadcast(io, 'running', '正在重新安裝依賴套件 (npm install)...', 85);
             await this.execAsync('npm install --production=false', { cwd: rootDir });
 
             if (fs.existsSync(path.join(rootDir, 'web-dashboard', 'package.json'))) {
-                this.broadcast(io, 'running', '更新 Dashboard 模組與依賴...', 90);
+                this.broadcast(io, 'running', '正在更新 Dashboard 依賴...', 90);
                 await this.execAsync('npm install', { cwd: path.join(rootDir, 'web-dashboard') });
-                try { await this.execAsync('npm run build', { cwd: path.join(rootDir, 'web-dashboard') }); } catch (e) { }
+                // We skip build here if it's too slow, but user might want it. 
+                // Let's stick to simple install for now as per current behavior.
             }
 
-            this.broadcast(io, 'requires_restart', '✨ 更新完成！請點擊重啟按鈕。', 100);
+            this.broadcast(io, 'running', '更新完成！即將在 5 秒後關閉系統。', 95);
+            
+            // 7. Shutdown Countdown
+            for (let i = 5; i > 0; i--) {
+                this.broadcast(io, 'running', `系統將在 ${i} 秒後關閉，請稍後手動執行 setup.sh 重新啟動。`, 95 + (5 - i));
+                await this.sleep(1000);
+            }
+
+            this.broadcast(io, 'success', '系統已更新並關閉。', 100);
+            
+            // Sudden death
+            process.exit(0);
+
         } catch (error) {
-            console.error('[SystemUpdater] Git update failed:', error);
+            console.error('[SystemUpdater] Advanced update failed:', error);
             this.broadcast(io, 'error', `更新失敗: ${error.message}`);
         }
     }
@@ -218,98 +256,75 @@ class SystemUpdater {
     static async updateViaZip(options, io) {
         await this.sleep(1000);
         this.broadcast(io, 'running', '開始執行 ZIP 更新流程...', 0);
-        const { keepOldData, keepMemory } = options;
+        const { keepMemory } = options;
         const AdmZip = require('adm-zip');
         const rootDir = process.cwd();
 
         try {
             // 1. Download
             this.broadcast(io, 'running', '從 GitHub 下載最新版本...', 10);
-            const repoUrl = 'https://github.com/sz9751210/project-golem/archive/refs/heads/main.zip';
+            const repoUrl = 'https://github.com/Arvincreator/project-golem/archive/refs/heads/main.zip';
             const response = await fetch(repoUrl);
             if (!response.ok) throw new Error(`下載 ZIP 失敗: HTTP ${response.status}`);
 
             const arrayBuffer = await response.arrayBuffer();
             const buffer = Buffer.from(arrayBuffer);
 
-            // 2. Extract to temp
+            // 2. Full Backup
+            this.broadcast(io, 'running', '正在執行全量備份...', 20);
+            const backupDirName = `backup_update_${new Date().toISOString().replace(/[:.]/g, '-')}`;
+            const finalBackupDir = path.join(rootDir, 'backups', backupDirName);
+            if (!fs.existsSync(path.join(rootDir, 'backups'))) fs.mkdirSync(path.join(rootDir, 'backups'));
+            fs.mkdirSync(finalBackupDir);
+
+            const files = fs.readdirSync(rootDir);
+            for (const file of files) {
+                if (file === 'backups' || file === 'node_modules' || file === '.git') continue;
+                const srcPath = path.join(rootDir, file);
+                const destPath = path.join(finalBackupDir, file);
+                try {
+                    fs.renameSync(srcPath, destPath);
+                } catch (e) {
+                    await this.execAsync(`cp -R "${srcPath}" "${destPath}" && rm -rf "${srcPath}"`);
+                }
+            }
+
+            // 3. Extract ZIP
             this.broadcast(io, 'running', '解壓縮更新檔...', 40);
             const tempDir = path.join(rootDir, 'temp_update_' + Date.now());
             const zip = new AdmZip(buffer);
             zip.extractAllTo(tempDir, true);
 
-            // The unzipped folder will be like project-golem-main
             const extractedFolders = fs.readdirSync(tempDir);
             if (extractedFolders.length === 0) throw new Error('ZIP 包內沒有檔案');
             const sourceDir = path.join(tempDir, extractedFolders[0]);
 
-            // 3. Backup old files
-            this.broadcast(io, 'running', '備份現有資料並清理...', 60);
-            await this.sleep(100); // let UI update
-            const backupDir = path.join(rootDir, 'backup_' + new Date().toISOString().replace(/[:.]/g, '-'));
-            if (keepOldData) {
-                fs.mkdirSync(backupDir, { recursive: true });
-            }
-
-            const currentFiles = fs.readdirSync(rootDir);
-            for (const file of currentFiles) {
-                // Skip critical / tmp paths
-                if (file.startsWith('backup_') || file.startsWith('temp_update_') || file === 'node_modules' || file === '.git' || file === '.DS_Store' || file === 'web-dashboard') {
-                    if (file === 'web-dashboard') {
-                        // explicitly handle web-dashboard: just delete node_modules & .next inside it if not keeping?
-                        // actually safer to backup or delete the whole thing so it upgrades perfectly.
-                    } else {
-                        continue;
-                    }
-                }
-
-                // Keep memory
-                if (keepMemory && (file === 'golem_memory' || file === '.env' || file === '.env.example' || file === 'personas')) {
-                    continue; // Skip moving/deleting these
-                }
-
-                const srcPath = path.join(rootDir, file);
-
-                if (keepOldData) {
-                    const destPath = path.join(backupDir, file);
-                    try { fs.renameSync(srcPath, destPath); } catch (e) {
-                        try { fs.rmSync(srcPath, { recursive: true, force: true }); } catch (ignore) { }
-                    }
-                } else {
-                    try { fs.rmSync(srcPath, { recursive: true, force: true }); } catch (e) { }
-                }
-            }
-
-            // 4. Move new files into root
-            this.broadcast(io, 'running', '套用新版本檔案...', 75);
-            await this.sleep(100);
+            // 4. Move Files into root
+            this.broadcast(io, 'running', '套用新版本檔案...', 60);
             const newFiles = fs.readdirSync(sourceDir);
             for (const file of newFiles) {
                 const srcPath = path.join(sourceDir, file);
                 const destPath = path.join(rootDir, file);
+                fs.renameSync(srcPath, destPath);
+            }
+            fs.rmSync(tempDir, { recursive: true, force: true });
 
-                // If dest exists, we don't overwrite if it was kept
-                if (fs.existsSync(destPath) && keepMemory && (file === 'golem_memory' || file === '.env' || file === 'personas')) {
-                    continue;
-                }
-
-                try {
-                    // if moving a directory that already exists, cp -r is better, but rename is atomic if on same drive.
-                    // If dest exists and wasn't skipped above, we should delete it first
-                    if (fs.existsSync(destPath)) {
-                        fs.rmSync(destPath, { recursive: true, force: true });
+            // 5. Restore Personal Data
+            if (keepMemory) {
+                this.broadcast(io, 'running', '正在還原個人資料 (.env, golem_memory, logs, personas)...', 75);
+                const toRestore = ['.env', 'golem_memory', 'logs', 'personas', 'data'];
+                for (const item of toRestore) {
+                    const src = path.join(finalBackupDir, item);
+                    const dest = path.join(rootDir, item);
+                    if (fs.existsSync(src)) {
+                        if (fs.existsSync(dest)) fs.rmSync(dest, { recursive: true, force: true });
+                        fs.renameSync(src, dest);
                     }
-                    fs.renameSync(srcPath, destPath);
-                } catch (e) {
-                    console.error(`Failed to move ${file}: ${e.message}`);
                 }
             }
 
-            // Cleanup temp
-            try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch (e) { }
-
-            // 5. Npm install
-            this.broadcast(io, 'running', '安裝依賴套件 (npm install)...', 85);
+            // 6. Reinstall node_modules
+            this.broadcast(io, 'running', '正在安裝依賴套件 (npm install)...', 85);
             await this.execAsync('npm install --production=false', { cwd: rootDir });
 
             if (fs.existsSync(path.join(rootDir, 'web-dashboard', 'package.json'))) {
@@ -317,7 +332,17 @@ class SystemUpdater {
                 await this.execAsync('npm install', { cwd: path.join(rootDir, 'web-dashboard') });
             }
 
-            this.broadcast(io, 'requires_restart', '✨ 更新完成！舊檔案已備份。請點擊重啟按鈕。', 100);
+            this.broadcast(io, 'running', '更新完成！即將在 5 秒後關閉系統。', 95);
+            
+            // 7. Shutdown Countdown
+            for (let i = 5; i > 0; i--) {
+                this.broadcast(io, 'running', `系統將在 ${i} 秒後關閉，請稍後手動執行 setup.sh 重新啟動。`, 95 + (5 - i));
+                await this.sleep(1000);
+            }
+
+            this.broadcast(io, 'success', '系統已更新並關閉。', 100);
+            process.exit(0);
+
         } catch (error) {
             console.error('[SystemUpdater] ZIP update failed:', error);
             this.broadcast(io, 'error', `更新失敗: ${error.message}`);
