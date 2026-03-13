@@ -179,45 +179,46 @@ class SystemUpdater {
             const currentBranch = branchOut.trim();
             this.broadcast(io, 'running', `當前分支: ${currentBranch}`, 10);
 
-            // 2. Full Backup
-            this.broadcast(io, 'running', '正在執行全量備份...', 20);
+            // 2. Clone Fresh FIRST to a temp directory
+            // This ensures we have the new files before we touch the old ones
+            this.broadcast(io, 'running', `正在 Clone 全新分支 (${currentBranch})...`, 20);
+            const tempCloneDir = path.join(rootDir, 'temp_clone_' + Date.now());
+            const { stdout: remoteUrlOut } = await require('util').promisify(require('child_process').exec)('git remote get-url origin', { cwd: rootDir });
+            const remoteUrl = remoteUrlOut.trim();
+            await this.execAsync(`git clone -b ${currentBranch} ${remoteUrl} "${tempCloneDir}"`);
+
+            // 3. Full Backup (Move current files into a backup folder)
+            this.broadcast(io, 'running', '正在執行全量備份...', 40);
             const backupDirName = `backup_update_${new Date().toISOString().replace(/[:.]/g, '-')}`;
-            const backupPath = path.join(rootDir, '..', backupDirName); // Backup to parent dir to avoid being moved into itself
-            
-            // Actually, safer to put inside a 'backups' folder in the parent or root. 
-            // Let's put it in path.join(rootDir, 'backups', backupDirName) but we need to move CURRENT files into it.
             const finalBackupDir = path.join(rootDir, 'backups', backupDirName);
             if (!fs.existsSync(path.join(rootDir, 'backups'))) fs.mkdirSync(path.join(rootDir, 'backups'));
             fs.mkdirSync(finalBackupDir);
 
             const files = fs.readdirSync(rootDir);
             for (const file of files) {
-                if (file === 'backups' || file === 'node_modules' || file === '.git') continue;
+                // EXCLUDE essential files from initial move to keep the process alive
+                if (file === 'backups' || file === 'node_modules' || file === '.git' || file === 'web-dashboard' || file === 'src') continue;
                 const srcPath = path.join(rootDir, file);
                 const destPath = path.join(finalBackupDir, file);
                 try {
-                    if (fs.existsSync(destPath)) {
-                        fs.rmSync(destPath, { recursive: true, force: true });
-                    }
                     fs.renameSync(srcPath, destPath);
                 } catch (e) {
-                    // fallback to copy and delete if rename fails (across devices)
-                    this.broadcast(io, 'running', `正在備份 ${file}...`, 25);
                     await this.execAsync(`cp -R "${srcPath}" "${destPath}" && rm -rf "${srcPath}"`);
                 }
             }
 
-            // 3. Clone Fresh
-            this.broadcast(io, 'running', `正在 Clone 全新分支 (${currentBranch})...`, 40);
-            const tempCloneDir = path.join(rootDir, 'temp_clone_' + Date.now());
-            // Get remote URL
-            const { stdout: remoteUrlOut } = await require('util').promisify(require('child_process').exec)('git remote get-url origin', { cwd: finalBackupDir });
-            const remoteUrl = remoteUrlOut.trim();
-            
-            await this.execAsync(`git clone -b ${currentBranch} ${remoteUrl} "${tempCloneDir}"`);
+            // Also back up web-dashboard and src via copy (slower but keeps server alive)
+            this.broadcast(io, 'running', '正在備份系統核心功能...', 50);
+            for (const item of ['web-dashboard', 'src']) {
+                const srcPath = path.join(rootDir, item);
+                const destPath = path.join(finalBackupDir, item);
+                if (fs.existsSync(srcPath)) {
+                    await this.execAsync(`cp -R "${srcPath}" "${destPath}"`);
+                }
+            }
 
-            // 4. Move Files into root
-            this.broadcast(io, 'running', '正在套用新版本檔案...', 60);
+            // 4. Move Files from temp into root (Swap)
+            this.broadcast(io, 'running', '正在套用新版本檔案...', 70);
             const newFiles = fs.readdirSync(tempCloneDir);
             for (const file of newFiles) {
                 if (file === '.git') continue; 
@@ -225,11 +226,13 @@ class SystemUpdater {
                 const destPath = path.join(rootDir, file);
                 
                 if (fs.existsSync(destPath)) {
+                    // Quick swap for core folders
                     fs.rmSync(destPath, { recursive: true, force: true });
                 }
                 fs.renameSync(srcPath, destPath);
             }
-            // Move .git as well to maintain repo state
+            
+            // Move .git
             if (fs.existsSync(path.join(rootDir, '.git'))) {
                 fs.rmSync(path.join(rootDir, '.git'), { recursive: true, force: true });
             }
@@ -238,40 +241,31 @@ class SystemUpdater {
 
             // 5. Restore Personal Data
             if (keepMemory) {
-                this.broadcast(io, 'running', '正在還原個人資料 (.env, golem_memory, logs, personas)...', 75);
+                this.broadcast(io, 'running', '正在還原個人資料 (.env, golem_memory, logs, personas)...', 85);
                 const toRestore = ['.env', 'golem_memory', 'logs', 'personas', 'data'];
                 for (const item of toRestore) {
                     const src = path.join(finalBackupDir, item);
                     const dest = path.join(rootDir, item);
                     if (fs.existsSync(src)) {
                         if (fs.existsSync(dest)) fs.rmSync(dest, { recursive: true, force: true });
-                        fs.renameSync(src, dest);
+                        // Using rename if possible, fallback to copy
+                        try {
+                            fs.renameSync(src, dest);
+                        } catch (e) {
+                            await this.execAsync(`cp -R "${src}" "${dest}"`);
+                        }
                     }
                 }
             }
 
-            // 6. Reinstall node_modules
-            this.broadcast(io, 'running', '正在重新安裝依賴套件 (npm install)...', 85);
-            await this.execAsync('npm install --production=false', { cwd: rootDir });
-
-            if (fs.existsSync(path.join(rootDir, 'web-dashboard', 'package.json'))) {
-                this.broadcast(io, 'running', '正在更新 Dashboard 依賴...', 90);
-                await this.execAsync('npm install', { cwd: path.join(rootDir, 'web-dashboard') });
-                // We skip build here if it's too slow, but user might want it. 
-                // Let's stick to simple install for now as per current behavior.
-            }
-
-            this.broadcast(io, 'running', '更新完成！即將在 5 秒後關閉系統。', 95);
-            
-            // 7. Shutdown Countdown
+            // 6. Final success message before shutdown
+            this.broadcast(io, 'running', '更新完成！系統即將在 5 秒後關閉並重啟。', 95);
             for (let i = 5; i > 0; i--) {
-                this.broadcast(io, 'running', `系統將在 ${i} 秒後關閉，請稍後手動執行 setup.sh 重新啟動。`, 95 + (5 - i));
+                this.broadcast(io, 'running', `系統將在 ${i} 秒後自動重啟（請稍後手動執行 setup.sh）。`, 95 + (5 - i));
                 await this.sleep(1000);
             }
 
-            this.broadcast(io, 'success', '系統已更新並關閉。', 100);
-            
-            // Sudden death
+            this.broadcast(io, 'success', '更新已完成，系統關閉中。', 100);
             process.exit(0);
 
         } catch (error) {
@@ -355,8 +349,8 @@ class SystemUpdater {
         }
 
         try {
-            // 1. Create a "pre-rollback" backup for safety
-            this.broadcast(io, 'running', '正在建立回退前安全性備份...', 10);
+            // 1. Create a "pre-rollback" safety backup via COPY
+            this.broadcast(io, 'running', '正在建立回退前安全性備份 (Copy)...', 10);
             const safetyBackupName = `backup_pre_rollback_${new Date().toISOString().replace(/[:.]/g, '-')}`;
             const safetyBackupDir = path.join(backupsDir, safetyBackupName);
             fs.mkdirSync(safetyBackupDir);
@@ -367,39 +361,35 @@ class SystemUpdater {
                 const srcPath = path.join(rootDir, file);
                 const destPath = path.join(safetyBackupDir, file);
                 try {
-                    await this.execAsync(`cp -R "${srcPath}" "${destPath}"`);
+                    if (fs.lstatSync(srcPath).isDirectory()) {
+                        await this.execAsync(`cp -R "${srcPath}" "${destPath}"`);
+                    } else {
+                        fs.copyFileSync(srcPath, destPath);
+                    }
                 } catch (e) {
                     console.warn(`[Updater] Safety backup failed for ${file}:`, e.message);
                 }
             }
 
-            // 2. Clear current files (excluding backups and engine internals)
-            this.broadcast(io, 'running', '正在移除當前系統檔案...', 30);
-            for (const file of currentFiles) {
-                if (file === 'backups' || file === 'node_modules' || file === '.git') continue;
-                const p = path.join(rootDir, file);
-                fs.rmSync(p, { recursive: true, force: true });
-            }
+            // 2. Clear current files ONLY if they are not essential or if we are about to replace them
+            this.broadcast(io, 'running', '正在準備還原環境...', 40);
+            // We don't delete everything at once to keep server alive.
+            // We will overwrite during restore.
 
-            // 3. Restore from backup
-            this.broadcast(io, 'running', '正在還原備份檔案...', 50);
+            // 3. Restore from backup (Overwrite)
+            this.broadcast(io, 'running', '正在從備份還原檔案...', 60);
             const backupFiles = fs.readdirSync(sourceDir);
             for (const file of backupFiles) {
                 const srcPath = path.join(sourceDir, file);
                 const destPath = path.join(rootDir, file);
+                
+                if (fs.existsSync(destPath)) {
+                    fs.rmSync(destPath, { recursive: true, force: true });
+                }
                 await this.execAsync(`cp -R "${srcPath}" "${destPath}"`);
             }
 
-            // 4. Reinstall dependencies
-            this.broadcast(io, 'running', '正在重新安裝相依套件 (npm install)...', 70);
-            await this.execAsync('npm install --production=false', { cwd: rootDir });
-
-            if (fs.existsSync(path.join(rootDir, 'web-dashboard', 'package.json'))) {
-                this.broadcast(io, 'running', '正在更新 Dashboard 依賴...', 85);
-                await this.execAsync('npm install', { cwd: path.join(rootDir, 'web-dashboard') });
-            }
-
-            // 5. Success and Shutdown
+            // 4. Success and Shutdown
             this.broadcast(io, 'running', '回退成功！系統即將在 5 秒後關閉。', 95);
             for (let i = 5; i > 0; i--) {
                 this.broadcast(io, 'running', `系統將在 ${i} 秒後自動重啟（請稍後手動執行 setup.sh）。`, 95 + (5 - i));
