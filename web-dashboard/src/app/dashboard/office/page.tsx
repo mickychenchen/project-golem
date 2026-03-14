@@ -107,6 +107,7 @@ const STATE_META: Record<GolemBehaviorState, { label: string; colour: string }> 
 
 function GolemSprite({ activeMessage }: { activeMessage: Message | null }) {
     const { state } = useGolemState();
+    const pos = SCENE_POSITIONS[state];
     const prevStateRef = useRef(state);
     const [visible, setVisible] = useState(true);
 
@@ -123,20 +124,25 @@ function GolemSprite({ activeMessage }: { activeMessage: Message | null }) {
 
     return (
         <div
-            className="relative flex flex-col items-center"
+            className="absolute z-[900]"
             style={{
+                width: 400,
+                height: 400,
+                left: pos.left,
+                top: pos.top,
+                transform: "translate(-50%, -50%)",
                 opacity: visible ? 1 : 0,
-                transition: "opacity 0.18s ease",
+                transition: "opacity 0.2s ease, left 0.6s cubic-bezier(0.4,0,0.2,1), top 0.6s cubic-bezier(0.4,0,0.2,1)",
                 // pixel-art: disable anti-aliasing globally for this subtree
                 imageRendering: "pixelated",
             }}
         >
             {/* Working animation (writing / researching / executing) */}
             {isWorking && (
-                <div className="absolute" style={{ top: 0, left: "50%", transform: "translate(-50%, -50%)" }}>
+                <div className="absolute inset-0 flex items-center justify-center">
                     <PixelSprite
                         {...SPRITES.working}
-                        scale={1.32} // restored to layout.js original exact scale
+                        scale={1.32}
                         isPlaying={true}
                     />
                 </div>
@@ -144,7 +150,7 @@ function GolemSprite({ activeMessage }: { activeMessage: Message | null }) {
 
             {/* Idle — show static star image sitting on sofa */}
             {state === "idle" && (
-                <div className="absolute" style={{ filter: "drop-shadow(0 4px 8px rgba(0,0,0,0.5))", transform: "translate(-50%, -50%)" }}>
+                <div className="absolute inset-0 flex items-center justify-center">
                     <PixelSprite
                         {...SPRITES.idle}
                         scale={1}
@@ -155,7 +161,7 @@ function GolemSprite({ activeMessage }: { activeMessage: Message | null }) {
 
             {/* Syncing animation */}
             {state === "syncing" && (
-                <div className="absolute" style={{ transform: "translate(-50%, -50%)" }}>
+                <div className="absolute inset-0 flex items-center justify-center">
                     <PixelSprite
                         {...SPRITES.sync}
                         scale={1}
@@ -166,14 +172,14 @@ function GolemSprite({ activeMessage }: { activeMessage: Message | null }) {
 
             {/* Error bug */}
             {state === "error" && (
-                <div className="absolute" style={{ transform: "translate(-50%, -50%)" }}>
+                <div className="absolute inset-0 flex items-center justify-center">
                     <PixelSprite
                         {...SPRITES.errorBug}
                         scale={0.9}
                         isPlaying={true}
                     />
                     <span
-                        className="absolute -top-6 left-1/2 -translate-x-1/2 text-red-400 text-[12px] font-bold animate-bounce whitespace-nowrap"
+                        className="absolute -top-12 left-1/2 -translate-x-1/2 text-red-400 text-[12px] font-bold animate-bounce whitespace-nowrap"
                         style={{ fontFamily: "var(--font-press-start)" }}
                     >
                         !! ERROR !!
@@ -222,8 +228,9 @@ function StatusBadge() {
 // ─────────────────────────────────────────────────────────
 
 function InteractiveDecoration({ sprite, className, style, scale = 1, isAnim = false }: { sprite: any, className?: string, style?: React.CSSProperties, scale?: number, isAnim?: boolean }) {
-    // Generate initial random frame
-    const [frame, setFrame] = useState(() => Math.floor(Math.random() * sprite.frameCount));
+    // Stable random initial frame
+    const initialFrame = useRef(Math.floor(Math.random() * sprite.frameCount)).current;
+    const [frame, setFrame] = useState(initialFrame);
     const [isPlaying, setIsPlaying] = useState(isAnim);
 
     const handleClick = () => {
@@ -256,13 +263,13 @@ function InteractiveDecoration({ sprite, className, style, scale = 1, isAnim = f
 function DecorationSprites() {
     return (
         <>
-            {/* Coffee machine — bottom-right-ish. Animated by default in game.js, but let's make it animated and togglable. */}
+            {/* Coffee machine — bottom-right-ish. */}
             <InteractiveDecoration
                 sprite={SPRITES.coffee}
                 scale={1}
-                isAnim={true}
+                isAnim={false} // Only animate on click as per user request
                 className="absolute"
-                style={{ left: 659, top: 397, transform: "translate(-50%, -50%)", zIndex: 99, opacity: 0.88 }}
+                style={{ left: 659, top: 397, transform: "translate(-50%, -50%)", zIndex: 99 }}
             />
 
             {/* Plants */}
@@ -296,19 +303,19 @@ function DecorationSprites() {
                 style={{ left: 94, top: 557, transform: "translate(-50%, -50%)", zIndex: 2000 }}
             />
 
-            {/* Desk image */}
+            {/* Desk overlay (Mask) — sits ON TOP of GolemSprite (z-900) */}
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
                 src="/star-office/desk-v3.webp"
-                alt="desk"
+                alt="desk mask"
                 className="absolute"
                 style={{
                     left: 218,
                     top: 417,
-                    transform: "translate(-50%, -50%)",
-                    zIndex: 1000,
+                    transform: "translate(-50%, -50%) scale(1.32)",
+                    zIndex: 1000, 
                     imageRendering: "pixelated",
-                    filter: "drop-shadow(0 4px 12px rgba(0,0,0,0.5))",
+                    pointerEvents: "none", // Let clicks pass through to character if needed
                 }}
             />
         </>
@@ -320,13 +327,40 @@ function DecorationSprites() {
 // Use exact center coordinates from layout.js
 // ─────────────────────────────────────────────────────────
 
+// ─────────────────────────────────────────────────────────
+// Armchair Patch — hides the baked-in cat in office_bg_small.webp
+// when Golem is not sitting there.
+// ─────────────────────────────────────────────────────────
+function ArmchairPatch() {
+    const { state } = useGolemState();
+    // Only show patch if Golem is NOT idle (i.e. not sitting in that chair)
+    if (state === "idle") return null;
+
+    return (
+        <div
+            className="absolute z-[5]"
+            style={{
+                left: 670,
+                top: 144,
+                width: 256,
+                height: 256,
+                backgroundImage: "url('/star-office/office_bg_small.webp')",
+                backgroundPosition: "-670px -144px", // Align with background
+                backgroundSize: "1280px 720px",
+                imageRendering: "pixelated",
+                pointerEvents: "none",
+            }}
+        />
+    );
+}
+
 const SCENE_POSITIONS: Record<GolemBehaviorState, { left: number; top: number }> = {
-    idle:        { left: 670 + 128, top: 144 + 128 }, // sofa origin is 0,0 (width 256), so center is +128
-    writing:     { left: 217, top: 333 }, // desk area (masked by desk z-1000)
-    researching: { left: 217, top: 333 }, // desk area (masked by desk z-1000)
-    executing:   { left: 217, top: 333 }, // desk area (masked by desk z-1000)
-    syncing:     { left: 1157, top: 592 }, // sync corner
-    error:       { left: 1007, top: 221 }, // error area
+    idle:        { left: 670 + 128, top: 144 + 110 }, // Slightly higher on sofa
+    writing:     { left: 247, top: 380 }, // Shifted right and down to align with monitor
+    researching: { left: 247, top: 380 },
+    executing:   { left: 247, top: 380 },
+    syncing:     { left: 1157, top: 592 },
+    error:       { left: 1007, top: 221 },
 };
 
 // ─────────────────────────────────────────────────────────
@@ -360,7 +394,7 @@ function SceneContainer({ children }: { children: React.ReactNode }) {
                     transform: `scale(${scale})`, 
                     transformOrigin: "center center",
                     backgroundImage: "url('/star-office/office_bg_small.webp')",
-                    backgroundSize: "cover",
+                    backgroundSize: "100% 100%", // Precise alignment with 1280x720 coordinate system
                     imageRendering: "pixelated",
                 }} 
                 className="relative overflow-hidden shadow-[inset_0_20px_50px_rgba(0,0,0,0.5)]"
@@ -405,17 +439,19 @@ function OfficeInner() {
             const lowerText = rawText.toLowerCase();
 
             const multiAgentMatch = rawText.match(/\[MultiAgent\]\s*\[(.*?)\]/i);
+            const isGolemReply = rawText.includes("🤖 [Golem] 說:") || rawText.includes("[GOLEM_REPLY]") || lowerText.includes("golem:");
+
             if (multiAgentMatch) {
                 role = multiAgentMatch[1].trim().toLowerCase();
             } else if (rawText.includes("[GOLEM_MEMORY]")) {
                 role = "memory";
             } else if (rawText.includes("[GOLEM_ACTION]")) {
                 role = "action";
-            } else if (rawText.includes("🤖 [Golem] 說:") || rawText.includes("[GOLEM_REPLY]")) {
+            } else if (isGolemReply) {
                 role = "brain";
             } else if (
                 rawText.includes("🗣️ [User] 說:") ||
-                lowerText.includes("[user]") ||
+                lowerText.includes("[user]:") ||
                 lowerText.includes("you:") ||
                 lowerText.includes("使用者:")
             ) {
@@ -507,8 +543,11 @@ function OfficeInner() {
                 </div>
             </div>
 
-            {/* ── SCENE ───────────────────────────────── */}
+            {/* Scene elements */}
             <SceneContainer>
+                {/* Background patch for baked cat */}
+                <ArmchairPatch />
+
                 {/* Ambient decorations */}
                 <DecorationSprites />
 
@@ -519,17 +558,8 @@ function OfficeInner() {
                     </div>
                 )}
 
-                {/* Golem character — position shifts by state. z-[900] sits BEHIND the desk (z-[1000]) */}
-                <div
-                    className="absolute z-[900]"
-                    style={{
-                        left: pos.left,
-                        top: pos.top,
-                        transition: "left 0.6s cubic-bezier(0.4,0,0.2,1), top 0.6s cubic-bezier(0.4,0,0.2,1)",
-                    }}
-                >
-                    <GolemSprite activeMessage={golemMessage} />
-                </div>
+                {/* Golem character — position shifts by state. */}
+                <GolemSprite activeMessage={golemMessage} />
 
                 {/* Golem Chat Bubble — stays IN FRONT of everything (z-[2000]) */}
                 {golemMessage && (

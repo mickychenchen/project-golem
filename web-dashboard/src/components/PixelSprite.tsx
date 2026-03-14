@@ -49,91 +49,93 @@ export function PixelSprite({
     className,
     style,
 }: PixelSpriteProps) {
+    const displayW = Math.round(frameWidth * scale);
+    const displayH = Math.round(frameHeight * scale);
+
+    // Number of rows in the spritesheet
+    const rows = Math.ceil(frameCount / cols);
+
+    // For a grid-based spritesheet, we need two steps:
+    // 1. Horizontal movement (cols)
+    // 2. Vertical movement (rows)
+    // However, CSS steps() for a grid is complex via just background-position.
+    // The most stable way for a grid is using animation-timing-function: steps().
+    // But since it's a grid, we'll use a single-axis step if possible, 
+    // or keep the Canvas but FIX the clearing/doubling issue.
+    
+    // Actually, looking at the user's "repeated" glitch, it's likely a Canvas scaling issue 
+    // combined with the browser's high DPI. 
+    // Let's use a pure CSS implementation for SINGLE STRIPS or a solid Canvas fix.
+    
+    // DECISION: Many grid sprites prefer Canvas. Let's fix the Canvas implementation 
+    // by using integer-only coordinates and ensuring the context is stable.
+    
     const canvasRef = useRef<HTMLCanvasElement>(null);
-    const rafRef = useRef<number | null>(null);
     const imgRef = useRef<HTMLImageElement | null>(null);
     const frameRef = useRef(startFrame);
     const lastTimeRef = useRef(0);
-    const isPlayingRef = useRef(isPlaying);
-    const loopRef = useRef(loop);
-
-    // Keep refs in sync with props without re-starting the animation loop
-    isPlayingRef.current = isPlaying;
-    loopRef.current = loop;
-
-    const displayW = frameWidth * scale;
-    const displayH = frameHeight * scale;
 
     useEffect(() => {
         const canvas = canvasRef.current;
         if (!canvas) return;
-        const ctx = canvas.getContext("2d");
+        const ctx = canvas.getContext("2d", { alpha: true });
         if (!ctx) return;
 
-        // Draw a specific frame from the spritesheet
-        const drawFrame = (frame: number, img: HTMLImageElement) => {
+        let rafId: number;
+        const img = new Image();
+        imgRef.current = img;
+
+        const draw = (frame: number) => {
             const col = frame % cols;
             const row = Math.floor(frame / cols);
-            ctx.imageSmoothingEnabled = false;
+            
             ctx.clearRect(0, 0, frameWidth, frameHeight);
+            ctx.imageSmoothingEnabled = false;
+            
             ctx.drawImage(
                 img,
-                col * frameWidth, // sx
-                row * frameHeight, // sy
-                frameWidth,        // sWidth
-                frameHeight,       // sHeight
-                0, 0,              // dx, dy
-                frameWidth,        // dWidth
-                frameHeight        // dHeight
+                col * frameWidth,
+                row * frameHeight,
+                frameWidth,
+                frameHeight,
+                0,
+                0,
+                frameWidth,
+                frameHeight
             );
         };
 
-        const img = new Image();
-        imgRef.current = img;
-        img.onload = () => {
-            // Draw the first frame immediately
-            drawFrame(frameRef.current, img);
+        const tick = (timestamp: number) => {
+            if (!isPlaying) {
+                rafId = requestAnimationFrame(tick);
+                return;
+            }
 
             const interval = 1000 / fps;
-
-            const tick = (timestamp: number) => {
-                if (!isPlayingRef.current) {
-                    rafRef.current = requestAnimationFrame(tick);
-                    return;
-                }
-                if (timestamp - lastTimeRef.current >= interval) {
-                    lastTimeRef.current = timestamp;
-                    drawFrame(frameRef.current, img);
-                    frameRef.current++;
-                    if (frameRef.current >= frameCount) {
-                        if (loopRef.current) {
-                            frameRef.current = 0;
-                        } else {
-                            frameRef.current = frameCount - 1;
-                            return; // Stop at last frame
-                        }
+            if (timestamp - lastTimeRef.current >= interval) {
+                lastTimeRef.current = timestamp;
+                draw(frameRef.current);
+                
+                frameRef.current++;
+                if (frameRef.current >= frameCount) {
+                    if (loop) frameRef.current = 0;
+                    else {
+                        frameRef.current = frameCount - 1;
+                        return;
                     }
                 }
-                rafRef.current = requestAnimationFrame(tick);
-            };
+            }
+            rafId = requestAnimationFrame(tick);
+        };
 
-            rafRef.current = requestAnimationFrame(tick);
+        img.onload = () => {
+            draw(frameRef.current);
+            rafId = requestAnimationFrame(tick);
         };
         img.src = src;
 
-        return () => {
-            if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
-        };
-    // Restart animation when src or frame dimensions change
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [src, frameWidth, frameHeight, frameCount, cols, fps]);
-
-    // Reset to first frame when isPlaying transitions to true
-    useEffect(() => {
-        if (isPlaying) {
-            frameRef.current = startFrame;
-        }
-    }, [isPlaying, startFrame]);
+        return () => cancelAnimationFrame(rafId);
+    }, [src, frameWidth, frameHeight, frameCount, cols, fps, isPlaying, loop]);
 
     return (
         <div
@@ -141,6 +143,10 @@ export function PixelSprite({
             style={{
                 width: displayW,
                 height: displayH,
+                overflow: "hidden", // CRITICAL: Prevent bleeding
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
                 imageRendering: "pixelated",
                 ...style,
             }}
@@ -153,7 +159,6 @@ export function PixelSprite({
                     width: displayW,
                     height: displayH,
                     imageRendering: "pixelated",
-                    display: "block",
                 }}
             />
         </div>

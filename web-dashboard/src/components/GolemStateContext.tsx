@@ -46,7 +46,8 @@ interface GolemStateContextValue {
 // ─────────────────────────────────────────────────────────
 
 /** After this many ms of silence, revert to "idle". */
-const IDLE_TIMEOUT_MS = 4000;
+/** After this many ms of silence, revert to "idle". Sync with bubble duration. */
+const IDLE_TIMEOUT_MS = 8000;
 
 // ─────────────────────────────────────────────────────────
 // Context
@@ -83,16 +84,15 @@ function classifyLog(logData: {
         return { role: name, text };
     }
 
+    const isGolemReply = text.includes("🤖 [Golem] 說:") || text.includes("[GOLEM_REPLY]") || lowerText.includes("golem:");
+
     if (text.includes("[GOLEM_MEMORY]")) return { role: "memory", text };
     if (text.includes("[GOLEM_ACTION]")) return { role: "action", text };
-    if (
-        text.includes("🤖 [Golem] 說:") ||
-        text.includes("[GOLEM_REPLY]")
-    )
-        return { role: "brain", text };
+    if (isGolemReply) return { role: "brain", text };
+
     if (
         text.includes("🗣️ [User] 說:") ||
-        lowerText.includes("[user]") ||
+        lowerText.includes("[user]:") ||
         lowerText.includes("you:") ||
         lowerText.includes("使用者:")
     )
