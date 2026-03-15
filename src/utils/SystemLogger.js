@@ -15,17 +15,20 @@ class SystemLogger {
         const originalWarn = console.warn;
 
         console.log = (...args) => {
-            originalLog(...args);
+            const ts = new Date().toLocaleTimeString('zh-TW', { hour12: false });
+            originalLog(`\x1b[90m[${ts}]\x1b[0m`, ...args);
             this._write('INFO', ...args);
         };
 
         console.error = (...args) => {
-            originalError(...args);
+            const ts = new Date().toLocaleTimeString('zh-TW', { hour12: false });
+            originalError(`\x1b[90m[${ts}]\x1b[0m`, ...args);
             this._write('ERROR', ...args);
         };
 
         console.warn = (...args) => {
-            originalWarn(...args);
+            const ts = new Date().toLocaleTimeString('zh-TW', { hour12: false });
+            originalWarn(`\x1b[90m[${ts}]\x1b[0m`, ...args);
             this._write('WARN', ...args);
         };
 
