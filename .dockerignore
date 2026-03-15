@@ -3,10 +3,16 @@ npm-debug.log
 .git
 .gitignore
 .env
+.env.*
 logs
 golem_memory
 coverage
-tests
+test
+*.md
+!README.md
 web-dashboard/node_modules
+web-dashboard/.next
 web-dashboard/out
 .DS_Store
+oracle-deploy.sh
+ORACLE-DEPLOY.md

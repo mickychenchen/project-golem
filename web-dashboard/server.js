@@ -267,7 +267,7 @@ class WebServer {
                     return res.status(503).json({ error: 'Dashboard message handler not ready' });
                 }
 
-                // 建立 UniversalContext 替代品
+                // 建立了 UniversalContext 替代品
                 const mockContext = {
                     platform: 'web',
                     isAdmin: true,
@@ -286,7 +286,7 @@ class WebServer {
                         }
 
                         this.broadcastLog({
-                            time: new Date().toLocaleTimeString(),
+                            time: new Date().toLocaleTimeString('zh-TW', { hour12: false }),
                             msg: `[${golemId}] ${text}`,
                             type: payloadType,
                             raw: text,
@@ -351,12 +351,22 @@ class WebServer {
                     senderName: 'User',
                     replyToName: '',
                     chatId: 'web-dashboard',
-                    reply: async (text) => {
+                    reply: async (text, options) => {
+                        let payloadType = 'agent';
+                        let actionData = null;
+
+                        if (options && options.reply_markup && options.reply_markup.inline_keyboard) {
+                            payloadType = 'approval';
+                            actionData = options.reply_markup.inline_keyboard[0];
+                        }
+
                         this.broadcastLog({
-                            time: new Date().toLocaleTimeString(),
+                            time: new Date().toLocaleTimeString('zh-TW', { hour12: false }),
                             msg: `[${golemId}] ${text}`,
-                            type: 'agent',
-                            raw: text
+                            type: payloadType,
+                            raw: text,
+                            actionData,
+                            golemId
                         });
                     },
                     answerCallbackQuery: async () => { },
@@ -1784,6 +1794,21 @@ class WebServer {
                 console.warn("⚠️ [System] global.fullShutdown not found, falling back to process.exit()");
                 setTimeout(() => process.exit(0), 1000);
             }
+        });
+
+
+        // --- Health Check Endpoint ---
+        this.app.get('/api/health', (req, res) => {
+            const pkg = (() => { try { return require('../package.json'); } catch { return { version: 'unknown' }; } })();
+            res.json({
+                status: 'ok',
+                uptime: process.uptime(),
+                memory: process.memoryUsage(),
+                brain: { connected: !!(this.brain && this.brain.page) },
+                skills: this.brain?.skillManager?.getLoadedSkills?.()?.length || 0,
+                version: pkg.version,
+                timestamp: new Date().toISOString()
+            });
         });
 
         // Socket.io connection handler
