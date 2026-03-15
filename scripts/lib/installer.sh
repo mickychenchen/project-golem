@@ -40,11 +40,20 @@ step_stop_running_system() {
     echo -e "  🔍 檢查執行中進程..."
     log "Checking for running processes before installation"
     
+    # [MAGIC MODE] 安裝前無條件超級清洗 (包含失聯的 zombie port 3001)
+    if [ "${GOLEM_MAGIC_MODE:-false}" = "true" ]; then
+        echo -e "    ${CYAN}🧹 魔法模式：正在深度清理所有相關進程與佔用通訊埠...${NC}"
+        stop_system false >/dev/null 2>&1
+        echo -e "    ${GREEN}✔${NC} 系統環境已淨空"
+        echo ""
+        return
+    fi
+    
     check_status
-    if [ "$IS_RUNNING" = true ]; then
+    if [ "$IS_RUNNING" = true ] || lsof -i :3000 -t &>/dev/null || lsof -i :3001 -t &>/dev/null; then
         echo ""
         box_top
-        box_line_colored "  ${RED}${BOLD}⚠️  偵測到系統正在執行中 (Running)${NC}                  "
+        box_line_colored "  ${RED}${BOLD}⚠️  偵測到系統正在執行中或通訊埠被佔用${NC}            "
         box_line_colored "  ${DIM}為避免檔案佔用或資料損壞，建議在安裝前先關閉進程。${NC}   "
         box_bottom
         echo ""
@@ -58,7 +67,7 @@ step_stop_running_system() {
             exit 1
         fi
     else
-        echo -e "    ${GREEN}✔${NC} 查無佔用進程，可安全安裝"
+        echo -e "    ${GREEN}✔${NC} 查無佔用進程或通訊埠，可安全安裝"
     fi
     echo ""
 }
