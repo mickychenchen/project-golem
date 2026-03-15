@@ -37,10 +37,14 @@ class CommandSafeguard {
 
         const trimmedCmd = cmd.trim();
 
-        // 1. 檢查絕對禁止的破壞性操作
-        for (const op of this.dangerousOps) {
-            if (trimmedCmd.includes(op)) {
-                return { safe: false, reason: `偵測到高度危險操作: ${op}` };
+        // 1. 檢查絕對禁止的破壞性操作 (可經由環境變數或核准跳過)
+        const isStrict = process.env.GOLEM_STRICT_SAFEGUARD !== 'false';
+        
+        if (!skipWhitelist && isStrict) {
+            for (const op of this.dangerousOps) {
+                if (trimmedCmd.includes(op)) {
+                    return { safe: false, reason: `偵測到高度危險操作: ${op}` };
+                }
             }
         }
 

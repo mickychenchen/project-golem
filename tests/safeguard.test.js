@@ -11,8 +11,9 @@ describe('CommandSafeguard', () => {
         const cmd = 'node src/skills/core/search-web.js "test"; rm -rf /';
         const result = safeguard.validate(cmd);
         expect(result.safe).toBe(false);
-        expect(result.reason).toContain('敏感關鍵字');
+        expect(result.reason).toContain('偵測到高度危險操作');
     });
+
 
     test('should reject command with pipe', () => {
         const cmd = 'node src/skills/core/search-web.js "test" | cat .env';

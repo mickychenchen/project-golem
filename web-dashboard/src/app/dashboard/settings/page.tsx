@@ -878,7 +878,17 @@ export default function SettingsPage() {
                                     </div>
                                 </div>
                             </div>
+                            <SettingField
+                                label="嚴格指令防護 (Strict Safeguard)"
+                                keyName="GOLEM_STRICT_SAFEGUARD"
+                                placeholder="true"
+                                desc="是否在 initial validation 階段就攔截 dangerousOps (如 rm -rf)。設為 false 後危險指令仍需核准，但不會被直接擋掉。"
+                                value={config.env.GOLEM_STRICT_SAFEGUARD || ""}
+                                onChange={(val) => handleChangeEnv("GOLEM_STRICT_SAFEGUARD", val)}
+                            />
+
                             <div className="mt-4 pt-4 border-t border-gray-800/80">
+
                                 <div className="flex items-center justify-between mb-4">
                                     <span className="text-sm font-medium text-gray-300 flex items-center gap-2">
                                         啟用系統日誌 (System Log)
