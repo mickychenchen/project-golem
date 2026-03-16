@@ -251,9 +251,19 @@ run_health_check() {
             local pid=$(lsof -i :3000 -t | head -n 1)
             box_line_colored "  ${RED}●${NC} 通訊埠 3000: 已被佔用 (PID: $pid)"
             all_pass=false
-            fix_suggestions+=("關閉佔用程序: ${CYAN}kill -9 $pid${NC} (或更改 .env 中的 PORT)")
+            fix_suggestions+=("關閉佔用程序: ${CYAN}kill -9 $pid${NC}")
         else
             box_line_colored "  ${GREEN}●${NC} 通訊埠 3000: 閒置 (可供 Dashboard 使用)"
+        fi
+
+        if lsof -i :3001 -t &>/dev/null; then
+            port_busy=true
+            local pid3001=$(lsof -i :3001 -t | head -n 1)
+            box_line_colored "  ${RED}●${NC} 通訊埠 3001: 已被佔用 (PID: $pid3001)"
+            all_pass=false
+            fix_suggestions+=("關閉佔用程序: ${CYAN}kill -9 $pid3001${NC}")
+        else
+            box_line_colored "  ${GREEN}●${NC} 通訊埠 3001: 閒置 (可供 Backend API 使用)"
         fi
     fi
 

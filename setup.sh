@@ -50,6 +50,7 @@ print_status() {
     echo -e "  .env:          $([ -f "$DOT_ENV_PATH" ] && echo "Found" || echo "Missing")"
     echo -e "  Dashboard:     ${ENABLE_WEB_DASHBOARD:-unknown}"
     echo -e "  Port 3000:     $(lsof -i :3000 &>/dev/null 2>&1 && echo "In Use" || echo "Free")"
+    echo -e "  Port 3001:     $(lsof -i :3001 &>/dev/null 2>&1 && echo "In Use" || echo "Free")"
     echo -e "  Docker:        $([ -x "$(command -v docker)" ] && echo "Yes" || echo "No")"
     echo -e "  Disk:          $DISK_AVAIL available"
     echo ""
