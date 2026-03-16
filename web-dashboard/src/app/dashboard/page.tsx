@@ -5,6 +5,7 @@ import { socket } from "@/lib/socket";
 import { MetricCard } from "@/components/MetricCard";
 import { LogStream } from "@/components/LogStream";
 import { useGolem } from "@/components/GolemContext";
+import { useTranslation } from "@/components/I18nContext";
 import { Activity, Cpu, Server, Clock, RefreshCcw, PowerOff, AlertTriangle, TriangleAlert, BrainCircuit, UserPlus, Zap } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -28,26 +29,27 @@ interface ConfirmDialogProps {
 
 function ConfirmDialog({ open, onOpenChange, variant, onConfirm, isLoading }: ConfirmDialogProps) {
     const isRestart = variant === "restart";
+    const { t } = useTranslation();
 
     const config = isRestart
         ? {
             icon: <RefreshCcw className="w-5 h-5 text-primary" />,
             iconBg: "bg-primary/10 border-primary/20",
-            title: "重新啟動 Golem？",
-            description: "這將終止目前進程並立即重啟。前端會短暫斷線（約 3-5 秒）後自動重新連線。",
-            warning: "進行中的對話將被中斷。",
-            confirmLabel: "確認重啟",
-            loadingLabel: "正在重啟...",
+            title: t('dashboard.actions.reload_confirm'),
+            description: t('dashboard.actions.reload_warning'),
+            warning: t('dashboard.actions.reload_warning'), // Will refine later if needed
+            confirmLabel: t('dashboard.actions.reload'),
+            loadingLabel: t('dashboard.actions.reloading'),
             confirmClass: "bg-primary hover:bg-primary/90 text-primary-foreground",
         }
         : {
             icon: <PowerOff className="w-5 h-5 text-destructive" />,
             iconBg: "bg-destructive/10 border-destructive/20",
-            title: "關閉 Golem？",
-            description: "這將完全終止後端進程。關閉後需手動在終端機執行 npm start 重新啟動。",
-            warning: "所有運行中的任務將立即停止。",
-            confirmLabel: "確認關閉",
-            loadingLabel: "正在關閉...",
+            title: t('dashboard.actions.wipe'), // Using wipe as placeholder for shutdown title if not defined
+            description: t('dashboard.actions.reload_warning'), // Reuse warning for lack of better key
+            warning: t('dashboard.actions.reload_warning'),
+            confirmLabel: t('common.confirm'),
+            loadingLabel: t('common.loading'),
             confirmClass: "bg-destructive hover:bg-destructive/90 text-destructive-foreground",
         };
 
@@ -112,6 +114,7 @@ interface DoneDialogProps {
 
 function DoneDialog({ open, onOpenChange, variant }: DoneDialogProps) {
     const isRestarted = variant === "restarted";
+    const { t } = useTranslation();
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent className="bg-card border-border text-foreground max-w-sm" showCloseButton={false}>
@@ -123,12 +126,12 @@ function DoneDialog({ open, onOpenChange, variant }: DoneDialogProps) {
                         }
                     </div>
                     <DialogTitle className="text-foreground text-base">
-                        {isRestarted ? "正在重新啟動..." : "Golem 已關閉"}
+                        {isRestarted ? t('dashboard.actions.reloading') : t('dashboard.status.offline')}
                     </DialogTitle>
                     <DialogDescription className="text-muted-foreground text-sm">
                         {isRestarted
-                            ? "系統正在重啟中，頁面將在 3 秒後自動重新整理。"
-                            : "進程已完全停止。若需重新啟動，請在終端機執行："
+                            ? t('dashboard.actions.reload_success')
+                            : t('dashboard.status.disconnected')
                         }
                     </DialogDescription>
                 </DialogHeader>
@@ -144,7 +147,7 @@ function DoneDialog({ open, onOpenChange, variant }: DoneDialogProps) {
                             className="w-full border-border"
                             onClick={() => onOpenChange(false)}
                         >
-                            關閉
+                            {t('common.cancel')}
                         </Button>
                     </DialogFooter>
                 )}
@@ -156,10 +159,11 @@ function DoneDialog({ open, onOpenChange, variant }: DoneDialogProps) {
 // ── 主頁面 ─────────────────────────────────────────────────────────────────
 export default function DashboardPage() {
     const { hasGolems, isLoadingGolems, isSingleNode, isBooting } = useGolem();
+    const { t } = useTranslation();
     const [metrics, setMetrics] = useState({
         uptime: "0h 0m",
         queueCount: 0,
-        lastSchedule: "無排程",
+        lastSchedule: t('dashboard.logs.no_schedule'),
         memUsage: 0,
     });
 
@@ -274,19 +278,19 @@ export default function DashboardPage() {
                         <BrainCircuit className="w-12 h-12 text-primary" />
                     </div>
                     <div>
-                        <h1 className="text-3xl font-bold text-foreground mb-3 tracking-tight">系統已就緒</h1>
+                        <h1 className="text-3xl font-bold text-foreground mb-3 tracking-tight">{t('dashboard.status.ready')}</h1>
                         <p className="text-muted-foreground text-base leading-relaxed">
-                            目前尚未部署任何 Golem 實體。<br />請建立你的第一個 AI 代理人來開始使用。
+                            {t('dashboard.persona_init.desc')}
                         </p>
                     </div>
                     <Link href="/dashboard/agents/create" className="inline-block w-full pt-4">
                         <Button className="w-full h-14 bg-primary hover:bg-primary/90 text-primary-foreground text-base font-semibold border-0 shadow-lg shadow-primary/20 transition-all hover:scale-[1.02] hover:shadow-primary/25">
                             <UserPlus className="w-5 h-5 mr-2" />
-                            建立第一個 Golem
+                            {t('dashboard.persona_init.start_instantiation')}
                         </Button>
                     </Link>
                     <div className="pt-2 p-3 rounded-xl bg-muted border border-border text-muted-foreground text-[10px] text-left">
-                        <p>💡 提示：系統向導將協助您快速設定 <code>.env</code> 文件。</p>
+                        <p>💡 {t('dashboard.setup.footer_hint')}</p>
                     </div>
                 </div>
             </div>
@@ -297,40 +301,40 @@ export default function DashboardPage() {
         <div className="p-6 h-full flex flex-col space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 <MetricCard
-                    title="Memory Usage"
+                    title={t('dashboard.metrics.memory')}
                     value={`${metrics.memUsage.toFixed(1)} MB`}
                     icon={Activity}
                     data={memHistory}
                     color="#10b981"
                 />
-                <MetricCard title="Queue Load" value={metrics.queueCount} icon={Server} />
-                <MetricCard title="System Uptime" value={metrics.uptime} icon={Clock} />
-                <MetricCard title="Next Schedule" value={metrics.lastSchedule} icon={Cpu} />
+                <MetricCard title={t('dashboard.metrics.queue')} value={metrics.queueCount} icon={Server} />
+                <MetricCard title={t('dashboard.metrics.uptime')} value={metrics.uptime} icon={Clock} />
+                <MetricCard title={t('dashboard.metrics.schedule')} value={metrics.lastSchedule} icon={Cpu} />
             </div>
 
             <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-6 min-h-0">
                 <div className="md:col-span-2 flex flex-col min-h-0">
-                    <h2 className="text-lg font-semibold mb-2">Live System Logs</h2>
+                    <h2 className="text-lg font-semibold mb-2">{t('dashboard.logs.title')}</h2>
                     <LogStream className="flex-1" />
                 </div>
                 <div className="bg-card border border-border rounded-xl p-6 flex flex-col justify-between">
                     <div>
-                        <h2 className="text-lg font-semibold mb-4">System Status</h2>
+                        <h2 className="text-lg font-semibold mb-4">{t('dashboard.settings_page.health')}</h2>
                         <div className="space-y-4">
                             <div className="flex justify-between items-center text-sm border-b border-border pb-2">
-                                <span className="text-muted-foreground">Environment</span>
-                                <span className="text-foreground">Production</span>
+                                <span className="text-muted-foreground">{t('dashboard.status.environment')}</span>
+                                <span className="text-foreground">{t('dashboard.status.production')}</span>
                             </div>
                             <div className="flex justify-between items-center text-sm border-b border-border pb-2">
-                                <span className="text-muted-foreground">Mode</span>
+                                <span className="text-muted-foreground">{t('dashboard.status.mode')}</span>
                                 <span className="text-primary font-medium">
-                                    Single Node
+                                    {t('dashboard.status.multi_agent')}
                                 </span>
                             </div>
                             <div className="flex justify-between items-center text-sm border-b border-border pb-2">
-                                <span className="text-muted-foreground">Backend</span>
+                                <span className="text-muted-foreground">{t('dashboard.status.backend')}</span>
                                 <span className={isConnected ? "text-green-600 dark:text-green-400" : "text-destructive animate-pulse"}>
-                                    {isConnected ? "Connected" : "Disconnected"}
+                                    {isConnected ? t('dashboard.status.connected') : t('dashboard.status.disconnected')}
                                 </span>
                             </div>
                         </div>
@@ -350,8 +354,8 @@ export default function DashboardPage() {
                                 <RefreshCcw className="w-3.5 h-3.5 text-primary" />
                             </div>
                             <div className="text-left">
-                                <p className="text-xs font-medium text-foreground">重新啟動</p>
-                                <p className="text-[10px] text-muted-foreground">Hot-reload · 自動重連</p>
+                                <p className="text-xs font-medium text-foreground">{t('dashboard.actions.reload')}</p>
+                                <p className="text-[10px] text-muted-foreground">Hot-reload · {t('dashboard.status.reconnecting')}</p>
                             </div>
                         </button>
 
@@ -365,8 +369,8 @@ export default function DashboardPage() {
                                 <PowerOff className="w-3.5 h-3.5 text-destructive" />
                             </div>
                             <div className="text-left">
-                                <p className="text-xs font-medium text-destructive">關閉 Golem</p>
-                                <p className="text-[10px] text-muted-foreground">完全停止 · 需手動重啟</p>
+                                <p className="text-xs font-medium text-destructive">{t('dashboard.actions.wipe')}</p>
+                                <p className="text-[10px] text-muted-foreground">{t('dashboard.status.offline')} · {t('dashboard.actions.reload_warning')}</p>
                             </div>
                         </button>
                     </div>

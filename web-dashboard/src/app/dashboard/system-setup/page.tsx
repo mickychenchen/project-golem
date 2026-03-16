@@ -9,12 +9,14 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useGolem } from "@/components/GolemContext";
+import { useTranslation } from "@/components/I18nContext";
 
 type MemoryMode = "browser" | "qmd";
 
 export default function SystemSetupPage() {
     const router = useRouter();
     const { isSystemConfigured } = useGolem();
+    const { t } = useTranslation();
 
     const [geminiKeys, setGeminiKeys] = useState("");
     const [userDataDir, setUserDataDir] = useState("./golem_memory");
@@ -56,7 +58,7 @@ export default function SystemSetupPage() {
             });
             const data = await res.json();
             if (!res.ok || !data.success) {
-                throw new Error(data.error || "儲存失敗，請稍後再試");
+                throw new Error(data.error || t('dashboard.setup.save_failed'));
             }
             // 儲存成功後直接跳轉至 Agent 建立頁面
             window.location.href = "/dashboard/agents/create";
@@ -85,12 +87,9 @@ export default function SystemSetupPage() {
                         <Sparkles className="w-8 h-8 text-emerald-400" />
                     </div>
                     <h1 className="text-4xl font-bold bg-clip-text text-transparent bg-gradient-to-br from-white via-emerald-100 to-emerald-400 mb-3 tracking-tight">
-                        系統初始化設定
+                        {t('dashboard.setup.title')}
                     </h1>
-                    <p className="text-lg text-gray-400 max-w-lg leading-relaxed">
-                        在開始使用 Golem 之前，請完成核心參數設定。<br />
-                        Golem Bot 可以在設定完成後隨時從 Dashboard 新增。
-                    </p>
+                    <p className="text-lg text-gray-400 max-w-lg leading-relaxed" dangerouslySetInnerHTML={{ __html: t('dashboard.setup.desc') }} />
                 </div>
 
                 <form onSubmit={handleSubmit} className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-700 delay-150">
@@ -109,8 +108,8 @@ export default function SystemSetupPage() {
                         <div className="flex items-center justify-between mb-5">
                             <div className="flex items-center gap-2">
                                 <Key className="w-5 h-5 text-emerald-400" />
-                                <h2 className="text-base font-semibold text-white">Gemini API Keys</h2>
-                                <span className="text-gray-500 text-xs font-medium border border-gray-800 px-1.5 py-0.5 rounded">選填</span>
+                                <h2 className="text-base font-semibold text-white">{t('dashboard.setup.gemini_keys')}</h2>
+                                <span className="text-gray-500 text-xs font-medium border border-gray-800 px-1.5 py-0.5 rounded">{t('dashboard.setup.optional')}</span>
                             </div>
                             <a
                                 href="https://aistudio.google.com/app/apikey"
@@ -118,7 +117,7 @@ export default function SystemSetupPage() {
                                 rel="noopener noreferrer"
                                 className="text-xs text-emerald-500 hover:text-emerald-400 flex items-center gap-1 transition-colors"
                             >
-                                取得 API Key
+                                {t('dashboard.setup.get_key')}
                                 <ExternalLink className="w-3 h-3" />
                             </a>
                         </div>
@@ -129,7 +128,7 @@ export default function SystemSetupPage() {
                                 type={showKeys ? "text" : "password"}
                                 value={geminiKeys}
                                 onChange={e => setGeminiKeys(e.target.value)}
-                                placeholder="AIzaSy... (多組 Key 請用半形逗號分隔)"
+                                placeholder={t('dashboard.setup.key_placeholder')}
                                 className="w-full bg-gray-950 border border-gray-800 rounded-xl px-4 py-3 pr-11 text-white font-mono text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-500 transition-all"
                             />
                             <button
@@ -141,15 +140,13 @@ export default function SystemSetupPage() {
                             </button>
                         </div>
                         <p className="text-xs text-gray-600 mt-2">
-                            支援多組 Key 輪替（KeyChain），建議填入 2 組以上以防超過配額。
+                            {t('dashboard.setup.key_hint')}
                         </p>
 
                         {!geminiKeys.trim() && (
                             <div className="mt-4 flex items-start gap-2 p-3 bg-amber-950/20 border border-amber-900/30 rounded-xl text-amber-200/60 animate-in fade-in slide-in-from-top-2">
                                 <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
-                                <p className="text-[11px] leading-relaxed">
-                                    注意：若不填寫 API Key，系統將失去<strong>多模態功能</strong>（如圖片解析、語音識別及視覺分析等）。
-                                </p>
+                                <p className="text-[11px] leading-relaxed" dangerouslySetInnerHTML={{ __html: t('dashboard.setup.key_warning') }} />
                             </div>
                         )}
                     </div>
@@ -160,12 +157,12 @@ export default function SystemSetupPage() {
 
                         <div className="flex items-center gap-2 mb-5">
                             <Brain className="w-5 h-5 text-blue-400" />
-                            <h2 className="text-base font-semibold text-white">記憶引擎設定</h2>
+                            <h2 className="text-base font-semibold text-white">{t('dashboard.setup.memory_engine')}</h2>
                         </div>
 
                         {/* Memory Mode */}
                         <div className="mb-5">
-                            <label className="block text-sm font-medium text-gray-400 mb-3">記憶引擎模式</label>
+                            <label className="block text-sm font-medium text-gray-400 mb-3">{t('dashboard.setup.memory_mode')}</label>
                             <div className="grid grid-cols-2 gap-3">
                                 {([
                                     { value: "browser", label: "Browser 模式", desc: "內建 memory.html，無須額外安裝（推薦）" },
@@ -194,7 +191,7 @@ export default function SystemSetupPage() {
                         <div>
                             <label className="block text-sm font-medium text-gray-400 mb-2">
                                 <HardDrive className="w-3.5 h-3.5 inline mr-1.5 text-gray-500" />
-                                記憶資料儲存路徑
+                                {t('dashboard.setup.memory_path')}
                             </label>
                             <input
                                 type="text"
@@ -204,7 +201,7 @@ export default function SystemSetupPage() {
                                 placeholder="./golem_memory"
                             />
                             <p className="text-xs text-gray-600 mt-1.5">
-                                存放 Puppeteer Login Session 與長期記憶。相對路徑以專案根目錄為基準。
+                                {t('dashboard.setup.memory_path_hint')}
                             </p>
                         </div>
                     </div>
@@ -218,19 +215,18 @@ export default function SystemSetupPage() {
                         {isLoading ? (
                             <span className="flex items-center gap-2">
                                 <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                                正在儲存設定...
+                                {t('dashboard.setup.saving')}
                             </span>
                         ) : (
                             <span className="flex items-center gap-2">
-                                {isSystemConfigured ? "更新系統設定" : "完成設定，進入控制台"}
+                                {isSystemConfigured ? t('dashboard.setup.save_config') : t('dashboard.setup.complete_setup')}
                                 <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
                             </span>
                         )}
                     </Button>
 
                     <p className="text-center text-xs text-gray-600">
-                        設定完成後可隨時從側欄「新增 Golem」加入 Telegram Bot。
-                        設定值儲存至 <code className="text-gray-500 font-mono">.env</code>。
+                        {t('dashboard.setup.footer_hint')}
                     </p>
                 </form>
             </div>

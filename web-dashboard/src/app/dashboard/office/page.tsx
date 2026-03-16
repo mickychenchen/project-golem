@@ -3,6 +3,7 @@
 import { useEffect, useState, useRef } from "react";
 import { socket } from "@/lib/socket";
 import { ChatBubble } from "@/components/ChatBubble";
+import { useTranslation } from "@/components/I18nContext";
 
 interface ChatMessage {
     id: string;
@@ -52,6 +53,7 @@ const DEFAULT_LAYOUT: OfficeItem[] = [
 ];
 
 export default function OfficePage() {
+    const { t } = useTranslation();
     const [messageHistory, setMessageHistory] = useState<ChatMessage[]>([]);
     const [selectedTeam, setSelectedTeam] = useState<TeamType>('default');
     const [isLogExpanded, setIsLogExpanded] = useState(true);
@@ -242,12 +244,12 @@ export default function OfficePage() {
                     </div>
 
                     <div className="flex items-center gap-4">
-                        <span className="text-primary font-bold">CURRENT SCENE: <span className="text-accent-foreground ml-2 uppercase">{selectedTeam} {selectedTeam !== 'default' ? 'STUDIO' : 'OFFICE'}</span></span>
+                        <span className="text-primary font-bold">{t('dashboard.office.scene')}: <span className="text-accent-foreground ml-2 uppercase">{selectedTeam} {selectedTeam !== 'default' ? t('dashboard.office.studio') : t('dashboard.office.office')}</span></span>
                         <button
                             onClick={() => setIsLogExpanded(!isLogExpanded)}
                             className="bg-card/60 border-2 border-primary px-2 py-0.5 text-primary hover:bg-card transition-colors transform active:scale-95 flex items-center gap-1 font-bold"
                         >
-                            {isLogExpanded ? 'CLOSE LOG ▲' : 'OPEN LOG ▼'}
+                            {isLogExpanded ? t('dashboard.office.close_log') : t('dashboard.office.open_log')}
                         </button>
                     </div>
                 </div>
@@ -257,7 +259,7 @@ export default function OfficePage() {
                     className={`w-full bg-card/90 border-4 border-border border-t-0 p-2 overflow-y-auto font-mono text-[10px] text-primary custom-scrollbar flex flex-col gap-1 z-40 shrink-0 shadow-[inset_0_2px_10px_rgba(0,0,0,0.3)] transition-all duration-500 origin-bottom ${isLogExpanded ? 'h-32 opacity-100' : 'h-0 opacity-0 py-0 border-b-0'}`}
                 >
                     {messageHistory.length === 0 ? (
-                        <div className="text-gray-500 italic">Waiting for system logs...</div>
+                        <div className="text-gray-500 italic">{t('dashboard.office.waiting_logs')}</div>
                     ) : (
                         messageHistory.map((msg) => (
                             <div key={msg.id} className="border-b border-green-900/40 pb-1 mb-1">

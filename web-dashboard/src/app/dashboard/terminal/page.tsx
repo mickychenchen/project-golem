@@ -6,12 +6,14 @@ import { LogStream } from "@/components/LogStream";
 import { MetricCard } from "@/components/MetricCard";
 import { socket } from "@/lib/socket";
 import { cn } from "@/lib/utils";
+import { useTranslation } from "@/components/I18nContext";
 
 export default function TerminalPage() {
+    const { t } = useTranslation();
     const [metrics, setMetrics] = useState({
         uptime: "0h 0m",
         queueCount: 0,
-        lastSchedule: "N/A",
+        lastSchedule: t('dashboard.logs.no_schedule'),
         memUsage: 0,
     });
 
@@ -92,8 +94,8 @@ export default function TerminalPage() {
                         <TerminalIcon className="w-5 h-5 text-primary" />
                     </div>
                     <div>
-                        <h2 className="text-base font-bold text-foreground tracking-tight">Terminal Dashboard</h2>
-                        <p className="text-xs text-muted-foreground mt-0.5 font-medium">Real-time Golem Core System Monitor</p>
+                        <h2 className="text-base font-bold text-foreground tracking-tight">{t('dashboard.nav.terminal')}</h2>
+                        <p className="text-xs text-muted-foreground mt-0.5 font-medium">{t('dashboard.terminal.warning')}</p>
                     </div>
                 </div>
                 <div className={cn(
@@ -104,7 +106,7 @@ export default function TerminalPage() {
                         "w-1.5 h-1.5 rounded-full animate-pulse",
                         isConnected ? "bg-primary shadow-[0_0_8px_rgba(var(--primary),0.5)]" : "bg-destructive"
                     )}></div>
-                    <span>{isConnected ? "System Online" : "System Offline"}</span>
+                    <span>{isConnected ? t('dashboard.terminal.status_online') : t('dashboard.terminal.status_offline')}</span>
                 </div>
             </div>
 
@@ -117,7 +119,7 @@ export default function TerminalPage() {
 
                     <div className="flex justify-between items-start mb-6 z-10">
                         <div>
-                            <h3 className="text-muted-foreground text-xs font-bold uppercase tracking-widest mb-2">Memory Usage Snapshot</h3>
+                            <h3 className="text-muted-foreground text-xs font-bold uppercase tracking-widest mb-2">{t('dashboard.memory_page.telemetry')}</h3>
                             <div className="flex items-baseline space-x-2">
                                 <span className="text-5xl font-black text-foreground tracking-tighter font-mono">
                                     {metrics.memUsage.toFixed(1)}
@@ -195,7 +197,7 @@ export default function TerminalPage() {
                     <div className="mt-4 pt-4 border-t border-border/40 flex items-center justify-between">
                         <div className="text-[10px] text-muted-foreground font-bold uppercase tracking-widest flex items-center">
                             <span className="w-1.5 h-1.5 rounded-full bg-primary mr-2"></span>
-                            Live Engine Stream
+                            {t('dashboard.logs.title')}
                         </div>
                         <div className="text-[10px] text-muted-foreground font-mono">HISTORY: {memHistory.length}/60s</div>
                     </div>
@@ -204,7 +206,7 @@ export default function TerminalPage() {
                 {/* [右上 0,8 - 寬4,高4] 狀態 (Status) */}
                 <div className="col-span-4 row-span-4 bg-card border border-border rounded-2xl flex flex-col overflow-hidden shadow-sm">
                     <div className="bg-muted/30 px-4 py-3 border-b border-border flex items-center justify-between">
-                        <span className="text-muted-foreground text-[10px] font-black uppercase tracking-[0.2em]">System Status</span>
+                        <span className="text-muted-foreground text-[10px] font-black uppercase tracking-[0.2em]">{t('dashboard.settings_page.health')}</span>
                         <div className="flex space-x-1">
                             <div className="w-1 h-1 rounded-full bg-green-500"></div>
                             <div className="w-1 h-1 rounded-full bg-muted-foreground/30"></div>
@@ -218,19 +220,19 @@ export default function TerminalPage() {
                                 Core Module (v9.0)
                             </div>
                             <ul className="space-y-2.5 ml-3 border-l border-border pl-4 py-1">
-                                <li className="flex justify-between hover:translate-x-1 transition-transform"><span className="text-muted-foreground">MODE:</span> <span className="text-foreground">BROWSER_ENV</span></li>
+                                <li className="flex justify-between hover:translate-x-1 transition-transform"><span className="text-muted-foreground">{t('dashboard.status.mode')}:</span> <span className="text-foreground">BROWSER_ENV</span></li>
                                 <li className="flex justify-between hover:translate-x-1 transition-transform"><span className="text-muted-foreground">ENGINE:</span> <span className="text-foreground font-bold">MULTI_AGENT</span></li>
-                                <li className="flex justify-between hover:translate-x-1 transition-transform"><span className="text-muted-foreground">UPTIME:</span> <span className="text-primary">{metrics.uptime}</span></li>
+                                <li className="flex justify-between hover:translate-x-1 transition-transform"><span className="text-muted-foreground">{t('dashboard.terminal.uptime')}:</span> <span className="text-primary">{metrics.uptime}</span></li>
                             </ul>
                         </div>
                         <div>
                             <div className="font-bold text-muted-foreground mb-2 flex items-center text-[10px] uppercase tracking-wider">
                                 <span className="w-1 h-3 bg-muted-foreground/30 mr-2 rounded-full"></span>
-                                Active Subsystems
+                                {t('dashboard.terminal.processes')}
                             </div>
                             <ul className="space-y-2.5 ml-3 border-l border-border pl-4 py-1">
-                                <li className="flex justify-between"><span className="text-muted-foreground">Chronos:</span> <span className="text-primary/80">ONLINE</span></li>
-                                <li className="flex justify-between"><span className="text-muted-foreground">Agents:</span> <span className="text-foreground font-medium">READY ({metrics.queueCount})</span></li>
+                                <li className="flex justify-between"><span className="text-muted-foreground">Chronos:</span> <span className="text-primary/80">{t('dashboard.status.online')}</span></li>
+                                <li className="flex justify-between"><span className="text-muted-foreground">Agents:</span> <span className="text-foreground font-medium">{t('dashboard.status.ready')} ({metrics.queueCount})</span></li>
                                 <li className="flex justify-between whitespace-nowrap overflow-hidden text-ellipsis"><span className="text-muted-foreground">Last:</span> <span className="text-muted-foreground text-[10px]">{metrics.lastSchedule}</span></li>
                             </ul>
                         </div>
@@ -242,7 +244,7 @@ export default function TerminalPage() {
                     <div className="px-4 py-2.5 bg-muted/20 border-b border-border flex items-center justify-between">
                         <div className="flex items-center space-x-2">
                             <span className="text-amber-600 dark:text-amber-400">⏰</span>
-                            <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">時序雷達 (Chronos Radar)</span>
+                            <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">{t('dashboard.memory_page.chronos_engine')}</span>
                         </div>
                     </div>
                     <LogStream className="border-0 rounded-none p-3 bg-transparent text-[10px] font-mono leading-relaxed" types={['chronos']} />
@@ -253,7 +255,7 @@ export default function TerminalPage() {
                     <div className="px-4 py-2.5 bg-muted/20 border-b border-border flex items-center justify-between">
                         <div className="flex items-center space-x-2">
                             <span className="text-purple-600 dark:text-purple-400">🚦</span>
-                            <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">隊列交通 (Traffic & Agents)</span>
+                            <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">{t('dashboard.metrics.queue')}</span>
                         </div>
                     </div>
                     <LogStream className="border-0 rounded-none p-3 bg-transparent text-[10px] font-mono leading-relaxed" types={['queue', 'agent']} autoScroll={false} />
@@ -264,7 +266,7 @@ export default function TerminalPage() {
                     <div className="px-5 py-3 bg-muted/30 border-b border-border flex items-center justify-between">
                         <div className="flex items-center space-x-2">
                             <span className="text-foreground">📝</span>
-                            <span className="text-[10px] font-black uppercase tracking-[0.3em] text-foreground">核心日誌 (Neuro-Link Stream)</span>
+                            <span className="text-[10px] font-black uppercase tracking-[0.3em] text-foreground">{t('dashboard.logs.title')}</span>
                         </div>
                         <div className="flex space-x-2 text-[9px] font-bold text-muted-foreground uppercase">
                             <span>General</span>

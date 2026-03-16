@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { socket } from "@/lib/socket";
 import { User, Bot } from "lucide-react";
+import { useTranslation } from "@/components/I18nContext";
 
 interface AgentMessage {
     id: string;
@@ -15,6 +16,7 @@ interface AgentMessage {
 
 export function AgentChat() {
     const [messages, setMessages] = useState<AgentMessage[]>([]);
+    const { t } = useTranslation();
     const scrollRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
@@ -120,7 +122,7 @@ export function AgentChat() {
                 })}
                 {messages.length === 0 && (
                     <div className="flex items-center justify-center h-full text-muted-foreground italic">
-                        Waiting for agent activity...
+                        {t('dashboard.chat.waiting_activity')}
                     </div>
                 )}
             </div>

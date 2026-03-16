@@ -2,16 +2,18 @@
 
 import { AgentChat } from "@/components/AgentChat";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import { useTranslation } from "@/components/I18nContext";
 
 export default function AgentsPage() {
+    const { t } = useTranslation();
     return (
         <div className="p-6 h-full flex flex-col space-y-6">
             <div className="flex justify-between items-center">
-                <h1 className="text-2xl font-bold text-foreground tracking-tight">Agent War Room</h1>
+                <h1 className="text-2xl font-bold text-foreground tracking-tight">{t('dashboard.agents.title')}</h1>
                 <div className="flex space-x-2">
                     <span className="px-3 py-1 bg-primary/10 text-primary text-xs rounded-full border border-primary/20 flex items-center">
                         <span className="w-2 h-2 bg-primary rounded-full mr-2 animate-pulse"></span>
-                        Live Session
+                        {t('dashboard.status.connected')}
                     </span>
                 </div>
             </div>
@@ -24,7 +26,7 @@ export default function AgentsPage() {
                 <div className="space-y-4">
                     <Card className="bg-card border-border shadow-md">
                         <CardHeader>
-                            <CardTitle className="text-sm">Active Agents</CardTitle>
+                            <CardTitle className="text-sm">{t('dashboard.agents.active_agents')}</CardTitle>
                         </CardHeader>
                         <CardContent className="space-y-2">
                             <div className="flex items-center space-x-2 p-2 bg-secondary/50 rounded hover:bg-secondary transition-colors cursor-pointer">
@@ -44,7 +46,7 @@ export default function AgentsPage() {
 
                     <Card className="bg-card border-border shadow-md">
                         <CardHeader>
-                            <CardTitle className="text-sm">Session Stats</CardTitle>
+                            <CardTitle className="text-sm">{t('dashboard.agents.collaboration_stream')}</CardTitle>
                         </CardHeader>
                         <CardContent>
                             <div className="text-xs text-muted-foreground space-y-1">

@@ -253,6 +253,25 @@ class WebServer {
         }
 
 
+        // i18n API
+        this.app.get('/api/system/i18n', (req, res) => {
+            try {
+                const { locale } = req.query;
+                if (!locale) return res.status(400).json({ error: 'locale required' });
+
+                const localePath = path.join(__dirname, '..', 'src', 'i18n', 'locales', `${locale}.json`);
+                if (fs.existsSync(localePath)) {
+                    const data = JSON.parse(fs.readFileSync(localePath, 'utf8'));
+                    return res.json(data);
+                } else {
+                    return res.status(404).json({ error: 'Locale not found' });
+                }
+            } catch (e) {
+                console.error('Failed to fetch locale:', e);
+                return res.status(500).json({ error: e.message });
+            }
+        });
+
         // --- API Routes ---
 
         // Chat API (Direct Web Chat)

@@ -15,6 +15,7 @@ import { BookOpen, AlertCircle, CheckCircle2, RefreshCcw, ChevronRight, Zap, Tri
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
+import { useTranslation } from "@/components/I18nContext";
 
 // ── Inject Confirm Dialog ───────────────────────────────────────────────────
 function InjectConfirmDialog({
@@ -25,6 +26,7 @@ function InjectConfirmDialog({
     onConfirm: () => void;
     isLoading: boolean;
 }) {
+    const { t } = useTranslation();
     return (
         <Dialog open={open} onOpenChange={isLoading ? undefined : onOpenChange}>
             <DialogContent showCloseButton={!isLoading} className="bg-card border-border text-foreground max-w-sm">
@@ -32,33 +34,33 @@ function InjectConfirmDialog({
                     <div className="w-12 h-12 rounded-xl border bg-primary/10 border-primary/20 flex items-center justify-center mb-2">
                         <Zap className="w-5 h-5 text-primary" />
                     </div>
-                    <DialogTitle className="text-foreground text-base">注入技能書？</DialogTitle>
+                    <DialogTitle className="text-foreground text-base">{t('dashboard.skills.inject_title')}</DialogTitle>
                     <DialogDescription className="text-muted-foreground text-sm leading-relaxed">
-                        系統將依據目前配置，重新開啟全新的 Gemini 對話視窗進行注入。過往設定的人格與歷史記憶將會完整保留。
+                        {t('dashboard.skills.inject_desc')}
                     </DialogDescription>
                 </DialogHeader>
                 <div className="space-y-2">
                     <div className="flex items-start gap-2 rounded-lg bg-secondary/60 border border-border/50 px-3 py-2.5">
                         <TriangleAlert className="w-3.5 h-3.5 text-muted-foreground mt-0.5 flex-shrink-0" />
-                        <p className="text-xs text-muted-foreground">此動作將暫時開新視窗中斷目前對話，但人格設定與長期記憶不受影響。</p>
+                        <p className="text-xs text-muted-foreground">{t('dashboard.skills.inject_note')}</p>
                     </div>
                     <div className="rounded-lg bg-secondary/40 border border-border/30 px-3 py-2">
-                        <p className="text-[11px] text-muted-foreground mb-1 font-medium">確認後將自動執行：</p>
+                        <p className="text-[11px] text-muted-foreground mb-1 font-medium">{t('dashboard.skills.inject_steps_title')}</p>
                         <ol className="text-[11px] text-muted-foreground/80 space-y-0.5 list-decimal list-inside">
-                            <li>清除技能快取</li>
-                            <li>重新開啟 Gemini 通訊視窗</li>
-                            <li>自存檔載入人格，並注入所有技能記憶</li>
+                            <li>{t('dashboard.skills.inject_step_1')}</li>
+                            <li>{t('dashboard.skills.inject_step_2')}</li>
+                            <li>{t('dashboard.skills.inject_step_3')}</li>
                         </ol>
                     </div>
                 </div>
                 <DialogFooter className="gap-2 sm:gap-2">
                     <Button variant="outline" className="flex-1 bg-transparent border-border text-muted-foreground hover:bg-secondary hover:text-foreground"
-                        onClick={() => onOpenChange(false)} disabled={isLoading}>取消</Button>
+                        onClick={() => onOpenChange(false)} disabled={isLoading}>{t('common.cancel')}</Button>
                     <Button className="flex-1 bg-primary hover:bg-primary/90 text-primary-foreground" onClick={onConfirm} disabled={isLoading}>
                         {isLoading ? (
-                            <span className="flex items-center gap-1.5"><RefreshCcw className="w-3.5 h-3.5 animate-spin" />注入中...</span>
+                            <span className="flex items-center gap-1.5"><RefreshCcw className="w-3.5 h-3.5 animate-spin" />{t('common.loading')}</span>
                         ) : (
-                            <span className="flex items-center gap-1.5"><Zap className="w-3.5 h-3.5" />確認注入</span>
+                            <span className="flex items-center gap-1.5"><Zap className="w-3.5 h-3.5" />{t('dashboard.skills.inject_confirm')}</span>
                         )}
                     </Button>
                 </DialogFooter>
@@ -69,6 +71,7 @@ function InjectConfirmDialog({
 
 // ── Inject Done Dialog ──────────────────────────────────────────────────────
 function InjectDoneDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
+    const { t } = useTranslation();
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent className="bg-card border-border text-foreground max-w-sm" showCloseButton={false}>
@@ -76,9 +79,9 @@ function InjectDoneDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
                     <div className="w-12 h-12 rounded-xl border bg-green-500/10 border-green-500/20 flex items-center justify-center mb-2">
                         <CheckCircle2 className="w-5 h-5 text-green-500" />
                     </div>
-                    <DialogTitle className="text-foreground text-base">技能注入完成 ✅</DialogTitle>
+                    <DialogTitle className="text-foreground text-base">{t('dashboard.skills.inject_success')}</DialogTitle>
                     <DialogDescription className="text-muted-foreground text-sm">
-                        已於新的 Gemini 對話視窗中完成注入。人格設定與歷史記憶已從存檔完整還原，3 秒後自動關閉。
+                        {t('dashboard.skills.inject_success_desc')}
                     </DialogDescription>
                 </DialogHeader>
             </DialogContent>
@@ -97,6 +100,7 @@ function SkillEditorDialog({
     initialContent?: string;
     onSaved: () => void;
 }) {
+    const { t } = useTranslation();
     const [id, setId] = useState(initialId);
     const [content, setContent] = useState(initialContent);
     const [isLoading, setIsLoading] = useState(false);
@@ -105,10 +109,10 @@ function SkillEditorDialog({
     useEffect(() => {
         if (open) {
             setId(initialId);
-            setContent(initialContent || "# 新技能\n\n在這裡輸入 Markdown 格式的提示詞...");
+            setContent(initialContent || t('dashboard.skills.editor_placeholder_content'));
             setError(null);
         }
-    }, [open, initialId, initialContent]);
+    }, [open, initialId, initialContent, t]);
 
     const handleSubmit = async () => {
         if (!id.trim()) { setError("請填寫技能 ID"); return; }
@@ -144,10 +148,10 @@ function SkillEditorDialog({
                         {mode === "create" ? <Plus className="w-5 h-5 text-primary" /> : <Pencil className="w-5 h-5 text-primary" />}
                     </div>
                     <DialogTitle className="text-foreground text-base">
-                        {mode === "create" ? "新增自訂技能" : "編輯自訂技能"}
+                        {mode === "create" ? t('dashboard.skills.add_skill') : t('dashboard.skills.edit_skill')}
                     </DialogTitle>
                     <DialogDescription className="text-muted-foreground text-sm">
-                        編輯 Markdown 格式的技能提示詞。將自動存為 <code>src/skills/lib/{id || '<id>'}.md</code>
+                        {t('dashboard.skills.editor_desc', { id: id || '<id>' })}
                     </DialogDescription>
                 </DialogHeader>
 
@@ -181,14 +185,14 @@ function SkillEditorDialog({
 
                 <DialogFooter className="gap-2 sm:gap-2 flex-shrink-0 pt-2">
                     <Button variant="outline" className="flex-1 bg-transparent border-border text-muted-foreground hover:bg-secondary hover:text-foreground"
-                        onClick={() => onOpenChange(false)} disabled={isLoading}>取消</Button>
+                        onClick={() => onOpenChange(false)} disabled={isLoading}>{t('common.cancel')}</Button>
                     <Button className="flex-1 bg-primary hover:bg-primary/90 text-primary-foreground" onClick={handleSubmit} disabled={isLoading}>
                         {isLoading ? (
-                            <span className="flex items-center gap-1.5"><RefreshCcw className="w-3.5 h-3.5 animate-spin" />儲存中...</span>
+                            <span className="flex items-center gap-1.5"><RefreshCcw className="w-3.5 h-3.5 animate-spin" />{t('common.loading')}</span>
                         ) : (
                             <span className="flex items-center gap-1.5">
                                 {mode === "create" ? <Plus className="w-3.5 h-3.5" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
-                                儲存技能
+                                {t('common.save')}
                             </span>
                         )}
                     </Button>
@@ -205,6 +209,7 @@ function InstallSuccessDialog({
     open: boolean;
     onOpenChange: (v: boolean) => void;
 }) {
+    const { t } = useTranslation();
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent className="bg-card border-border text-foreground max-w-sm sm:max-w-[425px]">
@@ -212,12 +217,12 @@ function InstallSuccessDialog({
                     <div className="w-14 h-14 rounded-full bg-primary/10 border border-primary/20 flex flex-col items-center justify-center">
                         <CheckCircle2 className="w-8 h-8 text-primary" />
                     </div>
-                    <DialogTitle className="text-foreground text-lg mt-2 font-bold">技能已安裝成功</DialogTitle>
+                    <DialogTitle className="text-foreground text-lg mt-2 font-bold">{t('dashboard.skills.install_success')}</DialogTitle>
                     <DialogDescription className="text-muted-foreground text-sm text-center leading-relaxed mt-2" asChild>
                         <div>
-                            新技能已經加入「已載入模組」標籤中囉！<br />
-                            請記得切換至 <strong>「已載入模組」</strong> 並將其 <strong>手動啟用</strong>，<br />
-                            最後再點擊右上角的 <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20 mx-1 font-medium"><Zap className="w-3 h-3" />注入技能書</span> 即可。
+                            {t('dashboard.skills.install_success_note_1')}<br />
+                            {t('dashboard.skills.install_success_note_2')}<br />
+                            {t('dashboard.skills.install_success_note_3')}
                         </div>
                     </DialogDescription>
                 </DialogHeader>
@@ -226,7 +231,7 @@ function InstallSuccessDialog({
                         className="bg-primary hover:bg-primary/90 text-primary-foreground w-full focus:ring-2 focus:ring-primary/50 outline-none"
                         onClick={() => onOpenChange(false)}
                     >
-                        我知道了
+                        {t('common.confirm')}
                     </Button>
                 </div>
             </DialogContent>
@@ -244,6 +249,7 @@ function DeleteConfirmDialog({
     isLoading: boolean;
     skillTitle: string;
 }) {
+    const { t } = useTranslation();
     return (
         <Dialog open={open} onOpenChange={isLoading ? undefined : onOpenChange}>
             <DialogContent showCloseButton={!isLoading} className="bg-card border-border text-foreground max-w-sm">
@@ -251,19 +257,19 @@ function DeleteConfirmDialog({
                     <div className="w-12 h-12 rounded-xl border bg-red-500/10 border-red-500/20 flex items-center justify-center mb-2">
                         <Trash2 className="w-5 h-5 text-red-500" />
                     </div>
-                    <DialogTitle className="text-foreground text-base">刪除技能？</DialogTitle>
+                    <DialogTitle className="text-foreground text-base">{t('dashboard.skills.delete_title')}</DialogTitle>
                     <DialogDescription className="text-muted-foreground text-sm leading-relaxed">
-                        您確定要刪除「<span className="text-red-500 font-medium">{skillTitle}</span>」嗎？此動作將永久移除該技能的 Markdown 檔案，且無法復原。
+                        {t('dashboard.skills.delete_desc', { title: skillTitle })}
                     </DialogDescription>
                 </DialogHeader>
                 <DialogFooter className="gap-2 sm:gap-2">
                     <Button variant="outline" className="flex-1 bg-transparent border-border text-muted-foreground hover:bg-secondary hover:text-foreground"
-                        onClick={() => onOpenChange(false)} disabled={isLoading}>取消</Button>
+                        onClick={() => onOpenChange(false)} disabled={isLoading}>{t('common.cancel')}</Button>
                     <Button className="flex-1 bg-destructive hover:bg-destructive/90 text-destructive-foreground" onClick={onConfirm} disabled={isLoading}>
                         {isLoading ? (
-                            <span className="flex items-center gap-1.5"><RefreshCcw className="w-3.5 h-3.5 animate-spin" />刪除中...</span>
+                            <span className="flex items-center gap-1.5"><RefreshCcw className="w-3.5 h-3.5 animate-spin" />{t('common.loading')}</span>
                         ) : (
-                            <span className="flex items-center gap-1.5"><Trash2 className="w-3.5 h-3.5" />確認刪除</span>
+                            <span className="flex items-center gap-1.5"><Trash2 className="w-3.5 h-3.5" />{t('common.confirm_delete')}</span>
                         )}
                     </Button>
                 </DialogFooter>
@@ -309,6 +315,8 @@ const MARKET_CATEGORIES = [
 
 // ── Main Page ───────────────────────────────────────────────────────────────
 export default function SkillsPage() {
+    const { t, i18n } = useTranslation();
+    const isEn = i18n.language === 'en';
     const [activeTab, setActiveTab] = useState<"installed" | "marketplace">("installed");
 
     // Installed Skills
@@ -563,9 +571,9 @@ export default function SkillsPage() {
                             </div>
                             <div>
                                 <h1 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-foreground via-foreground/80 to-primary tracking-tight">
-                                    技能說明書 (Skills)
+                                    {t('dashboard.nav.skills')}
                                 </h1>
-                                <p className="text-sm text-muted-foreground mt-0.5">管理 Golem 的核心能力與開放技能市場</p>
+                                <p className="text-sm text-muted-foreground mt-0.5">{t('dashboard.skills.subtitle')}</p>
                             </div>
                         </div>
  
@@ -578,7 +586,7 @@ export default function SkillsPage() {
                                     }`}
                             >
                                 <BookOpen className="w-4 h-4" />
-                                已載入模組
+                                {t('dashboard.skills.tab_installed')}
                             </button>
                             <button
                                 onClick={() => setActiveTab("marketplace")}
@@ -588,7 +596,7 @@ export default function SkillsPage() {
                                     }`}
                             >
                                 <Store className="w-4 h-4" />
-                                技能市場
+                                {t('dashboard.skills.tab_marketplace')}
                             </button>
                         </div>
 
@@ -598,7 +606,7 @@ export default function SkillsPage() {
                                 className="px-4 py-2 text-sm font-medium rounded-lg flex items-center gap-2 transition-all bg-secondary text-muted-foreground border border-border hover:bg-accent hover:text-foreground"
                             >
                                 <Plus className="w-4 h-4" />
-                                新增技能
+                                {t('dashboard.skills.add_skill')}
                             </button>
                             <button
                                 onClick={() => setShowConfirm(true)}
@@ -609,7 +617,7 @@ export default function SkillsPage() {
                                     } ${isInjecting ? "opacity-60 cursor-not-allowed" : ""}`}
                             >
                                 <Zap className={`w-4 h-4 ${isInjecting ? "animate-pulse" : ""}`} />
-                                {isInjecting ? "注入中..." : "注入技能書"}
+                                {isInjecting ? t('dashboard.skills.injecting') : t('dashboard.skills.inject_skillbook')}
                             </button>
                         </div>
                     </div>
@@ -639,7 +647,7 @@ export default function SkillsPage() {
                                                 {!selectedSkill.isOptional && (
                                                     <div className="flex items-center gap-1.5 px-3 py-1 bg-secondary border border-border text-muted-foreground text-[11px] uppercase tracking-wider font-bold rounded-lg select-none">
                                                         <AlertCircle className="w-3.5 h-3.5 opacity-70" />
-                                                        常駐核心技能
+                                                        {t('dashboard.skills.core_skill')}
                                                     </div>
                                                 )}
                                                 {selectedSkill.isOptional && (
@@ -648,13 +656,13 @@ export default function SkillsPage() {
                                                             onClick={() => setShowDeleteConfirm(true)}
                                                             className="flex items-center gap-1.5 px-3 py-1.5 bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400 hover:text-red-500 hover:bg-red-500/20 text-xs font-medium rounded-lg transition-colors"
                                                         >
-                                                            <Trash2 className="w-3.5 h-3.5" /> 刪除
+                                                            <Trash2 className="w-3.5 h-3.5" /> {t('common.delete')}
                                                         </button>
                                                         <button
                                                             onClick={(e) => handleEditSkill(e, selectedSkill)}
                                                             className="flex items-center gap-1.5 px-3 py-1.5 bg-secondary border border-border text-muted-foreground hover:text-foreground hover:bg-accent text-xs font-medium rounded-lg transition-colors"
                                                         >
-                                                            <Pencil className="w-3.5 h-3.5" /> 編輯
+                                                            <Pencil className="w-3.5 h-3.5" /> {t('common.edit')}
                                                         </button>
                                                     </div>
                                                 )}
@@ -672,7 +680,7 @@ export default function SkillsPage() {
                                             </div>
                                         </div>
                                     ) : (
-                                        <div className="h-[46px] flex items-center text-muted-foreground text-sm">請選擇一個技能以檢視內容</div>
+                                        <div className="h-[46px] flex items-center text-muted-foreground text-sm">{t('dashboard.skills.select_skill')}</div>
                                     )
                                 ) : (
                                     selectedMarketSkill ? (
@@ -694,7 +702,7 @@ export default function SkillsPage() {
                                                 {skills.some(s => s.id === selectedMarketSkill.id) ? (
                                                     <div className="flex items-center gap-1.5 px-3 py-1.5 bg-green-500/10 border border-green-500/30 text-green-600 dark:text-green-400 text-xs tracking-wider font-bold rounded-lg cursor-default">
                                                         <CheckCircle2 className="w-4 h-4" />
-                                                        已安裝
+                                                        {t('dashboard.skills.installed')}
                                                     </div>
                                                 ) : (
                                                     <button
@@ -703,16 +711,16 @@ export default function SkillsPage() {
                                                         className="flex items-center gap-1.5 px-4 py-2 bg-primary border border-primary/20 hover:bg-primary/90 text-primary-foreground text-sm font-medium rounded-lg transition-colors shadow-lg disabled:opacity-50"
                                                     >
                                                         {installingId === selectedMarketSkill.id ? (
-                                                            <><RefreshCcw className="w-4 h-4 animate-spin" /> 安裝中...</>
+                                                            <><RefreshCcw className="w-4 h-4 animate-spin" /> {t('dashboard.skills.installing')}</>
                                                         ) : (
-                                                            <><Download className="w-4 h-4" /> 一鍵安裝</>
+                                                            <><Download className="w-4 h-4" /> {t('dashboard.skills.install_btn')}</>
                                                         )}
                                                     </button>
                                                 )}
                                             </div>
                                         </div>
                                     ) : (
-                                        <div className="h-[46px] flex items-center text-muted-foreground text-sm">請在右側選擇技能以檢視詳細</div>
+                                        <div className="h-[46px] flex items-center text-muted-foreground text-sm">{t('dashboard.skills.select_market_skill')}</div>
                                     )
                                 )}
                             </CardHeader>
@@ -733,7 +741,7 @@ export default function SkillsPage() {
                                     ) : (
                                         <div className="h-full flex flex-col items-center justify-center text-muted-foreground/50 space-y-4">
                                             <BookOpen className="w-12 h-12 opacity-20" />
-                                            <p>在右側列表中選擇技能</p>
+                                            <p>{t('dashboard.skills.select_skill')}</p>
                                         </div>
                                     )
                                 ) : (
@@ -747,7 +755,7 @@ export default function SkillsPage() {
                                                     <h2 className="text-2xl font-bold text-foreground mb-2">{selectedMarketSkill.title}</h2>
                                                     <div className="flex gap-2">
                                                         <span className="flex items-center gap-1 text-xs px-2.5 py-1 bg-secondary text-muted-foreground rounded-md border border-border">
-                                                            <Tags className="w-3 h-3 text-primary" /> {selectedMarketSkill.category_name?.zh || selectedMarketSkill.category}
+                                                            <Tags className="w-3 h-3 text-primary" /> {isEn ? (selectedMarketSkill.category_name?.en || selectedMarketSkill.category) : (selectedMarketSkill.category_name?.zh || selectedMarketSkill.category)}
                                                         </span>
                                                         <a href={selectedMarketSkill.repoUrl} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-xs px-2.5 py-1 bg-secondary text-muted-foreground rounded-md border border-border hover:text-foreground hover:border-accent-foreground/30 transition-colors">
                                                             View on GitHub
@@ -756,11 +764,11 @@ export default function SkillsPage() {
                                                 </div>
                                             </div>
                                             <div className="prose prose-slate dark:prose-invert prose-cyan max-w-none text-foreground/80 text-[15px] leading-relaxed">
-                                                <h3>Description</h3>
-                                                {selectedMarketSkill.description_zh && (
+                                                <h3>{t('dashboard.skills.market_desc')}</h3>
+                                                {selectedMarketSkill.description_zh && !isEn && (
                                                     <p className="font-medium text-foreground mb-2">{selectedMarketSkill.description_zh}</p>
                                                 )}
-                                                <p className={selectedMarketSkill.description_zh ? "text-muted-foreground text-sm italic" : "text-foreground/70"}>
+                                                <p className={selectedMarketSkill.description_zh && !isEn ? "text-muted-foreground text-sm italic" : "text-foreground/70"}>
                                                     {selectedMarketSkill.description}
                                                 </p>
                                                 <div className="p-4 mt-6 bg-secondary border border-border rounded-xl relative overflow-hidden">
@@ -775,7 +783,7 @@ export default function SkillsPage() {
                                     ) : (
                                         <div className="h-full flex flex-col items-center justify-center text-muted-foreground/50 space-y-4">
                                             <Store className="w-12 h-12 opacity-20" />
-                                            <p>在市場列表中選擇技能</p>
+                                            <p>{t('dashboard.skills.select_market_skill')}</p>
                                         </div>
                                     )
                                 )}
@@ -789,7 +797,7 @@ export default function SkillsPage() {
                                     <div className="p-4 border-b border-border bg-card/50 backdrop-blur-sm flex justify-between items-center shrink-0">
                                         <h2 className="text-sm font-bold text-foreground uppercase tracking-widest flex items-center gap-2">
                                             <div className="w-1.5 h-1.5 rounded-full bg-primary shadow-[0_0_8px_rgba(var(--primary),0.8)]"></div>
-                                            已載入模組 ({skills.length})
+                                            {t('dashboard.skills.tab_installed')} ({skills.length})
                                         </h2>
                                     </div>
                                     <div className="flex-1 overflow-y-auto p-2 space-y-1 scroll-smooth">

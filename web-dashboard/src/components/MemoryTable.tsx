@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Copy, Plus, RefreshCw, Trash2, Search, Filter, Database, Download, Upload } from "lucide-react";
 import { useGolem } from "@/components/GolemContext";
 import { cn } from "@/lib/utils";
+import { useTranslation } from "@/components/I18nContext";
 
 interface MemoryItem {
     text: string;
@@ -14,6 +15,7 @@ interface MemoryItem {
 
 export function MemoryTable() {
     const { activeGolem } = useGolem();
+    const { t } = useTranslation();
     const [memories, setMemories] = useState<MemoryItem[]>([]);
     const [loading, setLoading] = useState(false);
     const [newMemory, setNewMemory] = useState("");
@@ -58,7 +60,7 @@ export function MemoryTable() {
 
     const wipeMemory = async () => {
         if (!activeGolem) return;
-        if (!confirm(`CRITICAL WARNING: Are you sure you want to WIPE all memories for ${activeGolem}? This action cannot be undone.`)) {
+        if (!confirm(t('dashboard.actions.wipe_confirm', { id: activeGolem }))) {
             return;
         }
         setIsWiping(true);
@@ -112,14 +114,14 @@ export function MemoryTable() {
             });
             const data = await res.json();
             if (res.ok) {
-                alert(`Successfully imported ${data.count} memories.`);
+                alert(t('dashboard.actions.import_success', { count: data.count }));
                 fetchMemories();
             } else {
-                alert(`Import failed: ${data.error}`);
+                alert(t('dashboard.actions.import_failed', { error: data.error }));
             }
         } catch (e: any) {
             console.error("Import failed:", e);
-            alert(`Import error: ${e.message}`);
+            alert(`${t('common.error')}: ${e.message}`);
         } finally {
             setIsImporting(false);
             if (fileInputRef.current) fileInputRef.current.value = "";
@@ -148,7 +150,7 @@ export function MemoryTable() {
     }, [memories, searchQuery, filterType]);
 
     if (!activeGolem) {
-        return <div className="text-muted-foreground italic p-4 text-sm animate-pulse">Awaiting active node target...</div>;
+        return <div className="text-muted-foreground italic p-4 text-sm animate-pulse">{t('dashboard.status.waiting_node')}</div>;
     }
 
     return (
@@ -162,7 +164,7 @@ export function MemoryTable() {
                         type="text"
                         value={newMemory}
                         onChange={(e) => setNewMemory(e.target.value)}
-                        placeholder="Inject new memory context..."
+                        placeholder={t('dashboard.memory_page.input_placeholder')}
                         className="flex-1 bg-transparent border-none px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-0"
                         onKeyDown={(e) => e.key === 'Enter' && addMemory()}
                     />
@@ -173,7 +175,7 @@ export function MemoryTable() {
                         size="sm"
                     >
                         <Plus className="w-4 h-4 mr-1" />
-                        Inject
+                        {t('dashboard.actions.inject')}
                     </Button>
                 </div>
 
@@ -185,7 +187,7 @@ export function MemoryTable() {
                             type="text"
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
-                            placeholder="Filter records..."
+                            placeholder={t('common.search')}
                             className="w-full bg-secondary/30 border border-border rounded-lg pl-9 pr-3 py-1.5 text-sm text-foreground focus:outline-none focus:border-primary/50 transition-colors h-10 shadow-inner"
                         />
                     </div>
@@ -196,7 +198,7 @@ export function MemoryTable() {
                             onChange={(e) => setFilterType(e.target.value)}
                             className="appearance-none bg-secondary/30 border border-border rounded-lg pl-9 pr-8 py-1.5 text-sm text-foreground focus:outline-none focus:border-primary/50 transition-colors h-10 shadow-inner cursor-pointer"
                         >
-                            <option value="all">All Types</option>
+                            <option value="all">{t('common.all')}</option>
                             {uniqueTypes.map(t => (
                                 <option key={t} value={t}>{t}</option>
                             ))}
@@ -221,10 +223,10 @@ export function MemoryTable() {
                     <table className="w-full text-sm text-left text-muted-foreground relative">
                         <thead className="text-xs text-muted-foreground uppercase bg-secondary/80 sticky top-0 backdrop-blur-md z-10 border-b border-border">
                             <tr>
-                                <th scope="col" className="px-5 py-3 font-medium tracking-wider w-8">#</th>
-                                <th scope="col" className="px-4 py-3 font-medium tracking-wider w-32 text-center">Type</th>
-                                <th scope="col" className="px-4 py-3 font-medium tracking-wider">Content</th>
-                                <th scope="col" className="px-4 py-3 font-medium tracking-wider w-16 text-center">Action</th>
+                                <th scope="col" className="px-5 py-3 font-medium tracking-wider w-8">{t('dashboard.memory_page.items.index')}</th>
+                                <th scope="col" className="px-4 py-3 font-medium tracking-wider w-32 text-center">{t('dashboard.memory_page.items.type')}</th>
+                                <th scope="col" className="px-4 py-3 font-medium tracking-wider">{t('dashboard.memory_page.items.content')}</th>
+                                <th scope="col" className="px-4 py-3 font-medium tracking-wider w-16 text-center">{t('dashboard.memory_page.items.action')}</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-border/50">
@@ -232,7 +234,7 @@ export function MemoryTable() {
                                 <tr>
                                     <td colSpan={4} className="px-6 py-12 text-center text-muted-foreground/50">
                                         <Database className="w-8 h-8 mx-auto mb-3 opacity-20" />
-                                        <p>No memory records found.</p>
+                                        <p>{t('common.no_data')}</p>
                                     </td>
                                 </tr>
                             ) : (
@@ -259,7 +261,7 @@ export function MemoryTable() {
                                         <td className="px-4 py-3 text-center">
                                             <button
                                                 className="text-muted-foreground hover:text-primary transition-colors opacity-0 group-hover:opacity-100"
-                                                title="Copy to clipboard"
+                                                title={t('dashboard.actions.copy')}
                                                 onClick={() => navigator.clipboard.writeText(mem.text)}
                                             >
                                                 <Copy className="w-4 h-4 mx-auto" />
@@ -276,7 +278,7 @@ export function MemoryTable() {
             {/* Footer Toolbar */}
             <div className="flex justify-between items-center pt-2 border-t border-border/50">
                 <div className="text-xs text-muted-foreground font-mono flex items-center">
-                    Total Records: {filteredMemories.length} {searchQuery && `(Filtered from ${memories.length})`}
+                    {t('dashboard.memory_page.items.total')}: {filteredMemories.length} {searchQuery && t('dashboard.memory_page.items.filtered', { total: memories.length })}
                 </div>
 
                 <div className="flex space-x-2">
@@ -295,7 +297,7 @@ export function MemoryTable() {
                         size="sm"
                     >
                         <Upload className={cn("w-3.5 h-3.5 mr-1.5", isImporting && "animate-bounce")} />
-                        {isImporting ? "Importing..." : "Import DB"}
+                        {isImporting ? t('common.loading') : t('dashboard.actions.import')}
                     </Button>
                     <Button
                         variant="ghost"
@@ -305,7 +307,7 @@ export function MemoryTable() {
                         size="sm"
                     >
                         <Download className="w-3.5 h-3.5 mr-1.5" />
-                        Export DB
+                        {t('dashboard.actions.export')}
                     </Button>
                     <Button
                         variant="ghost"
@@ -315,7 +317,7 @@ export function MemoryTable() {
                         size="sm"
                     >
                         <Trash2 className="w-3.5 h-3.5 mr-1.5" />
-                        {isWiping ? "Purging..." : "Wipe Database"}
+                        {isWiping ? t('common.loading') : t('dashboard.actions.wipe')}
                     </Button>
                 </div>
             </div>

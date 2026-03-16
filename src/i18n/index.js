@@ -14,7 +14,7 @@ const path = require('path');
 
 // Supported locales
 const SUPPORTED_LOCALES = ['zh-TW', 'en', 'ja'];
-const DEFAULT_LOCALE = 'zh-TW';
+const DEFAULT_LOCALE = 'en';
 
 // Cache loaded translations
 const _cache = {};
@@ -40,49 +40,19 @@ function loadLocale(locale) {
     }
 }
 
-/**
- * Get nested value from object by dot-path
- * e.g., resolve(obj, 'system.boot.starting')
- */
-function resolve(obj, keyPath) {
-    return keyPath.split('.').reduce((acc, key) => {
-        return acc && typeof acc === 'object' ? acc[key] : undefined;
-    }, obj);
-}
+const { resolve, translate } = require('./i18n-core');
 
 /**
  * Translate a key with optional variable substitution
  * @param {string} key - Dot-separated key path (e.g., 'system.boot.starting')
  * @param {object} vars - Variables for substitution (e.g., { name: 'Golem' })
  * @returns {string} Translated string or key as fallback
- *
- * @example
- *   t('system.boot.starting')
- *   t('system.boot.model_loaded', { model: 'Gemini 2.5' })
  */
 function t(key, vars = {}) {
     const messages = loadLocale(_currentLocale);
-    let text = resolve(messages, key);
-
-    // Fallback to default locale
-    if (text === undefined && _currentLocale !== DEFAULT_LOCALE) {
-        const fallback = loadLocale(DEFAULT_LOCALE);
-        text = resolve(fallback, key);
-    }
-
-    // Fallback to key itself
-    if (text === undefined) {
-        return key;
-    }
-
-    // Variable substitution: {{varName}}
-    if (typeof text === 'string' && Object.keys(vars).length > 0) {
-        text = text.replace(/\{\{(\w+)\}\}/g, (_, name) => {
-            return vars[name] !== undefined ? String(vars[name]) : `{{${name}}}`;
-        });
-    }
-
-    return text;
+    const fallbackMessages = _currentLocale !== DEFAULT_LOCALE ? loadLocale(DEFAULT_LOCALE) : null;
+    
+    return translate(messages, fallbackMessages, key, vars);
 }
 
 /**

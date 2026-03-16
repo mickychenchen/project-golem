@@ -6,6 +6,7 @@ import { socket } from "@/lib/socket";
 import { User, Bot, Send } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Typewriter } from "@/components/Typewriter";
+import { useTranslation } from "@/components/I18nContext";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -22,6 +23,7 @@ interface ChatMessage {
 
 export default function DirectChatPage() {
     const { activeGolem, isSingleNode } = useGolem();
+    const { t } = useTranslation();
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [completedTypingMsgs, setCompletedTypingMsgs] = useState<Set<string>>(new Set());
     const [input, setInput] = useState("");
@@ -191,10 +193,10 @@ export default function DirectChatPage() {
             <div className="flex justify-between items-center mb-6 flex-shrink-0">
                 <div>
                     <h2 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-primary to-blue-500">
-                        直接交談 (Direct Chat)
+                        {t('dashboard.chat.title')}
                     </h2>
                     <p className="text-sm text-muted-foreground mt-1">
-                        與目前活躍的 Golem ({activeGolem || "未選擇"}) 進行對話測試。不須透過外部通訊軟體。
+                        {t('dashboard.chat.subtitle', { id: activeGolem || t('dashboard.chat.no_golem') })}
                     </p>
                 </div>
             </div>
@@ -204,7 +206,7 @@ export default function DirectChatPage() {
                 <div className="flex-1 overflow-y-auto p-4 space-y-4" ref={scrollRef}>
                     {messages.length === 0 ? (
                         <div className="flex items-center justify-center h-full text-muted-foreground/60 italic">
-                            請在下方輸入訊息開始交談...
+                            {t('dashboard.chat.empty')}
                         </div>
                     ) : (
                         messages.map((msg, index) => {
@@ -243,7 +245,7 @@ export default function DirectChatPage() {
                                                         : "bg-primary/10 text-foreground font-medium border border-primary/20 rounded-tl-none shadow-sm"
                                         )}
                                     >
-                                        {msg.isThinking ? "思考中..." : (msg.isSystem && !msg.isHistory ?
+                                        {msg.isThinking ? t('dashboard.chat.thinking') : (msg.isSystem && !msg.isHistory ?
                                             <Typewriter content={msg.content.replace(/\n{2,}/g, '\n\n').trim()} onComplete={() => handleTypingComplete(msg.id)} />
                                             : (msg.isSystem ?
                                                 <div className="prose dark:prose-invert prose-sm max-w-none prose-p:m-0 prose-headings:my-1 prose-pre:my-1 prose-pre:bg-zinc-950 dark:prose-pre:bg-gray-950 prose-pre:border prose-pre:border-border dark:prose-pre:border-gray-800 prose-ul:list-disc prose-ul:ml-4 prose-ol:list-decimal prose-ol:ml-4 prose-li:m-0 leading-snug [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
@@ -290,7 +292,7 @@ export default function DirectChatPage() {
                     <div className="relative flex items-center">
                         <textarea
                             className="flex-1 max-h-32 min-h-[44px] bg-secondary/50 border border-border rounded-lg px-4 py-3 pr-12 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/50 resize-none transition-all"
-                            placeholder={activeGolem ? `傳送訊息給 ${activeGolem}...` : "請先選擇一個 Golem..."}
+                            placeholder={activeGolem ? t('dashboard.chat.placeholder', { id: activeGolem }) : t('dashboard.chat.no_golem')}
                             value={input}
                             onChange={(e) => setInput(e.target.value)}
                             onKeyDown={(e) => {

@@ -7,6 +7,8 @@ import { cn } from "@/lib/utils";
 import { LayoutDashboard, Users, Database, Globe, ChevronLeft, ChevronRight, Terminal, BrainCircuit, BookOpen, Settings, User, UserPlus, MessageSquare } from "lucide-react";
 import { GolemProvider, useGolem } from "@/components/GolemContext";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { useTranslation } from "@/components/I18nContext";
+import { LanguageSelector } from "@/components/LanguageSelector";
 
 function DashboardSidebar({
     isSidebarOpen,
@@ -17,17 +19,18 @@ function DashboardSidebar({
 }) {
     const pathname = usePathname();
     const { activeGolem, setActiveGolem, golems, isSingleNode, version } = useGolem();
+    const { t } = useTranslation();
 
     const navItems = [
-        { name: "戰術控制台", href: "/dashboard", icon: LayoutDashboard },
-        { name: "終端機控制台", href: "/dashboard/terminal", icon: Terminal },
-        { name: "直接交談", href: "/dashboard/chat", icon: MessageSquare },
-        { name: "技能說明書", href: "/dashboard/skills", icon: BookOpen },
-        { name: "人格設定", href: "/dashboard/persona", icon: User },
-        { name: "Agent 會議室", href: "/dashboard/agents", icon: Users },
-        { name: "辦公室模式", href: "/dashboard/office", icon: Users },
-        { name: "記憶核心", href: "/dashboard/memory", icon: BrainCircuit },
-        { name: "系統總表", href: "/dashboard/settings", icon: Settings },
+        { name: t('dashboard.nav.tactical'), href: "/dashboard", icon: LayoutDashboard },
+        { name: t('dashboard.nav.terminal'), href: "/dashboard/terminal", icon: Terminal },
+        { name: t('dashboard.nav.chat'), href: "/dashboard/chat", icon: MessageSquare },
+        { name: t('dashboard.nav.skills'), href: "/dashboard/skills", icon: BookOpen },
+        { name: t('dashboard.nav.persona'), href: "/dashboard/persona", icon: User },
+        { name: t('dashboard.nav.agents'), href: "/dashboard/agents", icon: Users },
+        { name: t('dashboard.nav.office'), href: "/dashboard/office", icon: Users },
+        { name: t('dashboard.nav.memory'), href: "/dashboard/memory", icon: BrainCircuit },
+        { name: t('dashboard.nav.settings'), href: "/dashboard/settings", icon: Settings },
     ];
 
     return (
@@ -42,14 +45,14 @@ function DashboardSidebar({
                             Golem {version}
                         </h1>
                         <p className="text-xs text-muted-foreground mt-1 whitespace-nowrap">
-                            Bot Control Center
+                            {t('dashboard.nav.bot_control')}
                         </p>
                     </div>
                 )}
                 <button
                     onClick={() => setIsSidebarOpen(!isSidebarOpen)}
                     className="p-1 hover:bg-accent rounded text-muted-foreground hover:text-accent-foreground flex-shrink-0"
-                    title={isSidebarOpen ? "Collapse Sidebar" : "Expand Sidebar"}
+                    title={isSidebarOpen ? t('dashboard.nav.collapse_sidebar') : t('dashboard.nav.expand_sidebar')}
                 >
                     {isSidebarOpen ? <ChevronLeft size={20} /> : <ChevronRight size={20} />}
                 </button>
@@ -58,7 +61,7 @@ function DashboardSidebar({
             {/* Golem Switcher - Only show if there are multiple golems */}
             {isSidebarOpen && golems.length > 1 && (
                 <div className="px-4 py-3 border-b border-border">
-                    <label className="text-xs text-muted-foreground mb-1 block">Active Golem</label>
+                    <label className="text-xs text-muted-foreground mb-1 block">{t('dashboard.nav.active_golem')}</label>
                     <select
                         value={activeGolem}
                         onChange={(e) => setActiveGolem(e.target.value)}
@@ -100,11 +103,16 @@ function DashboardSidebar({
                 })}
             </nav>
 
-            <div className="p-4 border-t border-border flex flex-col items-center gap-4">
-                <ThemeToggle />
-                <div className="flex items-center text-xs text-muted-foreground overflow-hidden text-center whitespace-nowrap h-4">
-                    <Globe className="w-4 h-4 flex-shrink-0" />
-                    {isSidebarOpen && <span className="ml-2">Web Gemini: Online</span>}
+            <div className="p-4 border-t border-border flex flex-col items-center gap-3">
+                <LanguageSelector isSidebarOpen={isSidebarOpen} />
+                <div className="w-full flex items-center justify-between gap-2">
+                    <ThemeToggle />
+                    {isSidebarOpen && (
+                        <div className="flex items-center text-[10px] text-muted-foreground overflow-hidden whitespace-nowrap">
+                            <Globe className="w-3 h-3 flex-shrink-0" />
+                            <span className="ml-1.5">Web Gemini: {t('dashboard.status.online')}</span>
+                        </div>
+                    )}
                 </div>
             </div>
         </aside>
