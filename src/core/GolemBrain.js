@@ -7,6 +7,7 @@ const DOMDoctor = require('../services/DOMDoctor');
 const BrowserMemoryDriver = require('../memory/BrowserMemoryDriver');
 const SystemQmdDriver = require('../memory/SystemQmdDriver');
 const SystemNativeDriver = require('../memory/SystemNativeDriver');
+const LanceDBMemoryDriver = require('../memory/LanceDBMemoryDriver');
 
 const BrowserLauncher = require('./BrowserLauncher');
 const ProtocolFormatter = require('../services/ProtocolFormatter');
@@ -27,7 +28,7 @@ class GolemBrain {
         this.skillIndex = new SkillIndexManager(this.userDataDir);
 
         // ── 瀏覽器狀態 ──
-        this.browser = null;
+        this.context = null; // Playwright BrowserContext
         this.page = null;
         this.memoryPage = null;
         this.cdpSession = null;
@@ -40,6 +41,7 @@ class GolemBrain {
         const mode = ConfigManager.cleanEnv(process.env.GOLEM_MEMORY_MODE || 'browser').toLowerCase();
         console.log(`⚙️ [System] 記憶引擎模式: ${mode.toUpperCase()} (Golem: ${this.golemId})`);
         if (mode === 'qmd') this.memoryDriver = new SystemQmdDriver();
+        else if (mode === 'lancedb') this.memoryDriver = new LanceDBMemoryDriver();
         else if (mode === 'native' || mode === 'system') this.memoryDriver = new SystemNativeDriver();
         else this.memoryDriver = new BrowserMemoryDriver(this);
 
@@ -61,18 +63,18 @@ class GolemBrain {
      */
     async init(forceReload = false) {
         console.log(`🎬 [Brain] 啟動初始化程序 (forceReload: ${forceReload})...`);
-        if (this.browser && !forceReload) {
+        if (this.context && !forceReload) {
             console.log("✅ [Brain] 瀏覽器實體已存在且無須強制重新載入，跳過啟動。");
             return;
         }
 
         let isNewSession = false;
 
-        // 1. 啟動 / 連線瀏覽器
-        if (!this.browser) {
+        // 1. 啟動 / 連線瀏覽器 (Playwright 回傳 Context)
+        if (!this.context) {
             console.log(`📂 [System] Browser User Data Dir: ${this.userDataDir} (Golem: ${this.golemId})`);
 
-            this.browser = await BrowserLauncher.launch({
+            this.context = await BrowserLauncher.launch({
                 userDataDir: this.userDataDir,
                 headless: process.env.PUPPETEER_HEADLESS,
             });
@@ -81,14 +83,14 @@ class GolemBrain {
         // 2. 取得或建立頁面
         if (!this.page) {
             console.log(`🚀 [System] 正在建立瀏覽子頁面...`);
-            const pages = await this.browser.pages();
-            this.page = pages.length > 0 ? pages[0] : await this.browser.newPage();
+            const pages = this.context.pages();
+            this.page = pages.length > 0 ? pages[0] : await this.context.newPage();
             isNewSession = true;
         }
 
         const targetUrl = this.backend === 'perplexity' ? URLS.PERPLEXITY_APP : URLS.GEMINI_APP;
         console.log(`📡 [Brain] 導航至目標頁面: ${targetUrl}`);
-        await this.page.goto(targetUrl, { waitUntil: 'networkidle2' });
+        await this.page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
         console.log(`🚀 [System] ${this.backend === 'perplexity' ? 'Perplexity' : 'Gemini'} 頁面載入完成 (Golem: ${this.golemId})`);
         // isNewSession is already set above if a new page was created.
 
@@ -131,7 +133,8 @@ class GolemBrain {
     async setupCDP() {
         if (this.cdpSession) return;
         try {
-            this.cdpSession = await this.page.target().createCDPSession();
+            // Playwright CDP 連線方式
+            this.cdpSession = await this.page.context().newCDPSession(this.page);
             await this.cdpSession.send('Network.enable');
             console.log("🔌 [CDP] 網路神經連結已建立 (Neuro-Link Active)");
         } catch (e) {
@@ -251,7 +254,7 @@ class GolemBrain {
      */
     async sendMessage(text, isSystem = false, options = {}) {
         await this._ensureBrowserHealth();
-        if (!this.browser) await this.init();
+        if (!this.context) await this.init();
         try { await this.page.bringToFront(); } catch (e) { }
         await this.setupCDP();
 
@@ -504,10 +507,12 @@ class GolemBrain {
     async _ensureBrowserHealth() {
         let isHealthy = true;
         try {
-            if (!this.browser) return; // 尚未啟動不視為故障，由 sendMessage 的 init() 處理
+            if (!this.context) return; // 尚未啟動不視為故障，由 sendMessage 的 init() 處理
 
             // 1. 檢查連線狀態
-            if (!this.browser.isConnected()) {
+            // Playwright 中，如果 context.browser 存在，則檢查連線
+            const browser = this.context.browser();
+            if (browser && !browser.isConnected()) {
                 console.warn("📡 [Brain] 偵測到瀏覽器連線斷開，啟動自癒程序...");
                 isHealthy = false;
             }
@@ -530,16 +535,16 @@ class GolemBrain {
             console.warn("🩹 [Brain] 偵測到失效狀態，正在執行物理清理並重新初始化...");
             // 清理舊實體 (確保清理乾淨，防止殘留 Lock)
             try {
-                if (this.browser) {
-                    console.log("🧹 [Brain] 正在強制關閉舊瀏覽器...");
+                if (this.context) {
+                    console.log("掃描 [Brain] 正在強制關閉舊瀏覽器...");
                     await Promise.race([
-                        this.browser.close(),
+                        this.context.close(),
                         new Promise((_, reject) => setTimeout(() => reject(new Error('CLOSE_TIMEOUT')), 5000))
                     ]).catch(e => console.warn(`⚠️ [Brain] 關閉舊瀏覽器超時或失敗: ${e.message}`));
                 }
             } catch (e) { }
 
-            this.browser = null;
+            this.context = null;
             this.page = null;
             this.memoryPage = null;
             this.cdpSession = null;

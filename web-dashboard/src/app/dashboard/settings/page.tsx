@@ -4,10 +4,11 @@ import React, { useState, useEffect } from "react";
 import {
     Settings, Save, RefreshCw, AlertTriangle, CheckCircle2,
     Eye, EyeOff, Lock, Users, Server, Activity, Cpu, HardDrive,
-    DownloadCloud, Loader2
+    DownloadCloud, Loader2, Sparkles, ArrowRight
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { io } from "socket.io-client";
+import { ConfirmModal } from "@/components/ConfirmModal";
 
 type GolemConfig = {
     id: string;
@@ -183,6 +184,75 @@ const SettingField = ({
         </div>
     );
 };
+
+const SettingSelectField = ({
+    label, desc = "", value = "", onChange, options = []
+}: {
+    label: string,
+    desc?: string,
+    value?: string,
+    onChange?: (val: string) => void,
+    options: { value: string, label: string }[]
+}) => {
+    return (
+        <div className="flex flex-col mb-4">
+            <label className="text-sm font-medium text-muted-foreground mb-1 flex items-center justify-between gap-1 overflow-hidden">
+                <span className="truncate mr-1" title={label}>{label}</span>
+                <span className="text-[10px] bg-amber-500/10 text-amber-600 dark:text-orange-400 px-1.5 py-0.5 rounded border border-amber-500/20 whitespace-nowrap">需重啟</span>
+            </label>
+            <select
+                value={value}
+                onChange={(e) => {
+                    if (onChange) onChange(e.target.value);
+                }}
+                className="w-full bg-secondary/30 border border-border focus:border-primary rounded-lg px-3 py-2 text-sm text-foreground transition-colors"
+            >
+                {options.map(opt => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+            </select>
+            {desc && <p className="text-xs text-muted-foreground mt-1">{desc}</p>}
+        </div>
+    );
+};
+
+const LOCAL_MODELS = [
+    {
+        id: "Xenova/bge-small-zh-v1.5",
+        name: "BGE-Small (繁簡中文最佳，推薦)",
+        features: "🏆 中文王者：開序社群中文檢索榜首，語義捕捉極佳。",
+        notes: "體積約 90MB，推論極快，適合大部分中文場景。",
+        recommendation: "Golem 記憶體高達 80% 以上是中文時首選。"
+    },
+    {
+        id: "Xenova/bge-base-zh-v1.5",
+        name: "BGE-Base (高精確度版)",
+        features: "精準細膩：比 Small 版本有更深層的語義理解能力。",
+        notes: "體積較大，對硬體資源要求略高，載入較慢。",
+        recommendation: "需要極高語義精確度且記憶體資源充裕時使用。"
+    },
+    {
+        id: "Xenova/paraphrase-multilingual-MiniLM-L12-v2",
+        name: "MiniLM-L12 (多語系守門員)",
+        features: "🥈 跨語言專家：支援 50+ 語言，對中英夾雜句子理解極佳。",
+        notes: "支援「蘋果」與「Apple」的跨語言語義對齊。",
+        recommendation: "對話中頻繁夾雜程式碼、英文術語時推薦。"
+    },
+    {
+        id: "Xenova/nomic-embed-text-v1.5",
+        name: "Nomic Embed (長文本專家)",
+        features: "🥉 超大視窗：支援高達 8192 Token 長度，不截斷訊息。",
+        notes: "能將整篇長文壓縮成向量而不遺失細節。",
+        recommendation: "記憶單位多為長篇大論或完整網頁草稿時推薦。"
+    },
+    {
+        id: "Xenova/all-MiniLM-L6-v2",
+        name: "MiniLM-L6 (輕量多語)",
+        features: "極致輕快：最經典的嵌入模型，效能與速度平衡。",
+        notes: "支援多國語言，是大多數向量應用的基準模型。",
+        recommendation: "一般性用途且希望資源消耗最小化時使用。"
+    }
+];
 
 const SystemUpdateSection = () => {
     const [updateInfo, setUpdateInfo] = useState<{ currentVersion: string, remoteVersion?: string, isOutdated?: boolean, installMode: string, gitInfo?: { currentBranch: string, currentCommit: string, latestCommit: string, behindCount: number } } | null>(null);
@@ -461,6 +531,7 @@ export default function SettingsPage() {
     const [isSaving, setIsSaving] = useState(false);
     const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error' | 'warning', text: string } | null>(null);
     const [logInfo, setLogInfo] = useState<{ size: string, bytes: number } | null>(null);
+    const [isRestartConfirmOpen, setIsRestartConfirmOpen] = useState(false);
 
     useEffect(() => {
         fetchConfig();
@@ -556,7 +627,11 @@ export default function SettingsPage() {
     };
 
     const handleRestartSystem = async () => {
-        if (!confirm("確定要重啟 Golem 嗎？這將會中斷目前的對話。")) return;
+        setIsRestartConfirmOpen(true);
+    };
+
+    const executeRestart = async () => {
+        setIsRestartConfirmOpen(false);
         try {
             await fetch("/api/system/reload", { method: "POST" });
             setStatusMessage({ type: 'warning', text: "重新啟動指令已發送... 等待系統恢復中！" });
@@ -751,6 +826,17 @@ export default function SettingsPage() {
                             </div>
                         </div>
 
+                        <ConfirmModal
+                            isOpen={isRestartConfirmOpen}
+                            onClose={() => setIsRestartConfirmOpen(false)}
+                            onConfirm={executeRestart}
+                            variant="warning"
+                            title="確定要重啟 Golem 嗎？"
+                            description="重啟將會中斷目前的對話並重置系統狀態。任何未儲存的變更可能遺失。"
+                            confirmText="立即重啟"
+                            cancelText="先不要"
+                        />
+
                         {/* Section: Discord Config */}
                         <div className="bg-card border border-border hover:border-primary/20 transition-colors rounded-xl p-5 shadow-sm">
                             <h2 className="text-lg font-semibold text-foreground mb-4 flex items-center gap-2">
@@ -816,14 +902,60 @@ export default function SettingsPage() {
                                 onChange={(val) => handleChangeEnv("GOLEM_TEST_MODE", val)}
                             />
 
-                            <SettingField
+                            <SettingSelectField
                                 label="記憶引擎模式"
-                                keyName="GOLEM_MEMORY_MODE"
-                                placeholder="browser"
-                                desc="browser 或是 qmd 混合搜尋"
-                                value={config.env.GOLEM_MEMORY_MODE || ""}
+                                desc="browser: 內建 memory.html | lancedb: 高效向量資料庫 | qmd: 混合搜尋"
+                                value={config.env.GOLEM_MEMORY_MODE || "browser"}
                                 onChange={(val) => handleChangeEnv("GOLEM_MEMORY_MODE", val)}
+                                options={[
+                                    { value: "browser", label: "Browser (預設)" },
+                                    { value: "lancedb", label: "LanceDB (高效能 Pro 版)" },
+                                    { value: "qmd", label: "QMD (進階混合)" }
+                                ]}
                             />
+
+                            {config.env.GOLEM_MEMORY_MODE === "lancedb" && (
+                                <div className="bg-primary/5 p-4 rounded-xl border border-primary/20 space-y-4 mb-4 animate-in zoom-in-95">
+                                    <h4 className="text-xs font-bold text-primary flex items-center gap-2">
+                                        <Sparkles className="w-3 h-3" /> 本地向量模型配置 (Local Embedding)
+                                    </h4>
+                                    
+                                    <div className="space-y-4">
+                                        <SettingSelectField
+                                            label="模型選擇"
+                                            desc="本地端計算，具備極佳隱私性。"
+                                            value={config.env.GOLEM_LOCAL_EMBEDDING_MODEL || "Xenova/bge-small-zh-v1.5"}
+                                            onChange={(val) => {
+                                                handleChangeEnv("GOLEM_LOCAL_EMBEDDING_MODEL", val);
+                                                // 強制寫死 provider 為 local
+                                                handleChangeEnv("GOLEM_EMBEDDING_PROVIDER", "local");
+                                            }}
+                                            options={LOCAL_MODELS.map(m => ({ value: m.id, label: m.name }))}
+                                        />
+                                        
+                                        {(() => {
+                                            const activeModelInfo = LOCAL_MODELS.find(m => m.id === (config.env.GOLEM_LOCAL_EMBEDDING_MODEL || "Xenova/bge-small-zh-v1.5"));
+                                            if (!activeModelInfo) return null;
+                                            return (
+                                                <div className="bg-background/50 border border-border/40 rounded-lg p-3 space-y-2 animate-in fade-in slide-in-from-top-1">
+                                                    <div className="text-[11px] text-foreground/80 leading-relaxed">
+                                                        <span className="font-bold text-primary">特色：</span> {activeModelInfo.features}
+                                                    </div>
+                                                    <div className="text-[11px] text-foreground/80 leading-relaxed">
+                                                        <span className="font-bold text-primary">推薦：</span> {activeModelInfo.recommendation}
+                                                    </div>
+                                                    <div className="pt-2 border-t border-border/20">
+                                                        <p className="text-[10px] text-muted-foreground italic flex items-start gap-1">
+                                                            <span>💡</span>
+                                                            <span>注意事項：{activeModelInfo.notes}</span>
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })()}
+                                    </div>
+                                </div>
+                            )}
 
                             <SettingField
                                 label="系統維護推播通知"
@@ -1003,7 +1135,7 @@ export default function SettingsPage() {
                                 .filter(k => ![
                                     'GEMINI_API_KEYS', 'TELEGRAM_TOKEN', 'TG_AUTH_MODE', 'ADMIN_ID', 'TG_CHAT_ID',
                                     'DISCORD_TOKEN', 'DISCORD_ADMIN_ID', 'USER_DATA_DIR', 'GOLEM_TEST_MODE',
-                                    'GOLEM_MODE', 'GOLEM_MEMORY_MODE', 'GITHUB_REPO',
+                                    'GOLEM_MODE', 'GOLEM_MEMORY_MODE', 'GOLEM_EMBEDDING_PROVIDER', 'GOLEM_LOCAL_EMBEDDING_MODEL', 'GITHUB_REPO',
                                     'MOLTBOOK_API_KEY', 'MOLTBOOK_AGENT_NAME',
                                     'GOLEM_AWAKE_INTERVAL_MIN', 'GOLEM_AWAKE_INTERVAL_MAX',
                                     'GOLEM_SLEEP_START', 'GOLEM_SLEEP_END', 'USER_INTERESTS', 'COMMAND_WHITELIST', 'CUSTOM_COMMANDS',

@@ -1192,6 +1192,8 @@ class WebServer {
                     version,
                     userDataDir: envVars.USER_DATA_DIR || './golem_memory',
                     golemMemoryMode: envVars.GOLEM_MEMORY_MODE || 'browser',
+                    golemEmbeddingProvider: envVars.GOLEM_EMBEDDING_PROVIDER || 'gemini',
+                    golemLocalEmbeddingModel: envVars.GOLEM_LOCAL_EMBEDDING_MODEL || 'Xenova/bge-small-zh-v1.5',
                     golemMode: 'SINGLE'
                 });
             } catch (e) {
@@ -1202,7 +1204,7 @@ class WebServer {
 
         this.app.post('/api/system/config', (req, res) => {
             try {
-                const { geminiApiKeys, userDataDir, golemMemoryMode, golemMode } = req.body;
+                const { geminiApiKeys, userDataDir, golemMemoryMode, golemEmbeddingProvider, golemLocalEmbeddingModel, golemMode } = req.body;
                 const EnvManager = require('../src/utils/EnvManager');
                 const ConfigManager = require('../src/config/index');
 
@@ -1211,6 +1213,8 @@ class WebServer {
                 if (geminiApiKeys !== undefined) updates.GEMINI_API_KEYS = geminiApiKeys;
                 if (userDataDir) updates.USER_DATA_DIR = userDataDir;
                 if (golemMemoryMode) updates.GOLEM_MEMORY_MODE = golemMemoryMode;
+                if (golemEmbeddingProvider) updates.GOLEM_EMBEDDING_PROVIDER = golemEmbeddingProvider;
+                if (golemLocalEmbeddingModel) updates.GOLEM_LOCAL_EMBEDDING_MODEL = golemLocalEmbeddingModel;
                 updates.GOLEM_MODE = 'SINGLE';
 
                 if (Object.keys(updates).length > 0) {
