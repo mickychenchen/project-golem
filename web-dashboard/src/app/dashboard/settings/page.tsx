@@ -686,20 +686,11 @@ export default function SettingsPage() {
                                     className="w-full bg-secondary/30 border border-border focus:border-primary rounded-lg px-3 py-2 text-sm text-foreground transition-colors"
                                 >
                                     <option value="gemini">Web Gemini (自動化瀏覽器)</option>
-                                    <option value="perplexity">Web Perplexity (自動化瀏覽器)</option>
                                 </select>
                                 <p className="text-xs text-muted-foreground mt-1">
                                     切換後需重啟系統生效。此模式使用自動化瀏覽器，不需 API Key。
                                 </p>
                             </div>
-
-                            {config.env.GOLEM_BACKEND === 'perplexity' && (
-                                <div className="pt-4 border-t border-border mt-4">
-                                    <p className="text-xs text-muted-foreground italic">
-                                        ℹ️ Web Perplexity 模式下，請確保您已在自動化瀏覽器中登入 Perplexity 帳號以獲得最佳體驗。
-                                    </p>
-                                </div>
-                            )}
                         </div>
 
                         {/* Section: Gemini Brain */}
