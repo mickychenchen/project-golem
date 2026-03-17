@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { io } from "socket.io-client";
+import { ConfirmModal } from "@/components/ConfirmModal";
 
 type GolemConfig = {
     id: string;
@@ -530,6 +531,7 @@ export default function SettingsPage() {
     const [isSaving, setIsSaving] = useState(false);
     const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error' | 'warning', text: string } | null>(null);
     const [logInfo, setLogInfo] = useState<{ size: string, bytes: number } | null>(null);
+    const [isRestartConfirmOpen, setIsRestartConfirmOpen] = useState(false);
 
     useEffect(() => {
         fetchConfig();
@@ -625,7 +627,11 @@ export default function SettingsPage() {
     };
 
     const handleRestartSystem = async () => {
-        if (!confirm("確定要重啟 Golem 嗎？這將會中斷目前的對話。")) return;
+        setIsRestartConfirmOpen(true);
+    };
+
+    const executeRestart = async () => {
+        setIsRestartConfirmOpen(false);
         try {
             await fetch("/api/system/reload", { method: "POST" });
             setStatusMessage({ type: 'warning', text: "重新啟動指令已發送... 等待系統恢復中！" });
@@ -828,6 +834,17 @@ export default function SettingsPage() {
                                 />
                             </div>
                         </div>
+
+                        <ConfirmModal
+                            isOpen={isRestartConfirmOpen}
+                            onClose={() => setIsRestartConfirmOpen(false)}
+                            onConfirm={executeRestart}
+                            variant="warning"
+                            title="確定要重啟 Golem 嗎？"
+                            description="重啟將會中斷目前的對話並重置系統狀態。任何未儲存的變更可能遺失。"
+                            confirmText="立即重啟"
+                            cancelText="先不要"
+                        />
 
                         {/* Section: Discord Config */}
                         <div className="bg-card border border-border hover:border-primary/20 transition-colors rounded-xl p-5 shadow-sm">
