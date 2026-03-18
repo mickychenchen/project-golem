@@ -10,6 +10,7 @@ import {
 import { cn } from "@/lib/utils";
 import { io } from "socket.io-client";
 import { ConfirmModal } from "@/components/ConfirmModal";
+import UrlsTab from "./tabs/UrlsTab";
 
 type GolemConfig = {
     id: string;
@@ -785,6 +786,7 @@ export default function SettingsPage() {
                         { id: 'overview', name: '系統概況', icon: Activity },
                         { id: 'engine', name: '核心引擎', icon: Cpu },
                         { id: 'messaging', name: '通訊平台', icon: MessageSquare },
+                        { id: 'urls', name: '網址管理', icon: Server },
                         { id: 'schedule', name: '自動化作息', icon: Clock },
                         { id: 'security', name: '安全與指令', icon: ShieldCheck },
                         { id: 'advanced', name: '進階維護', icon: Settings2 }
@@ -1003,6 +1005,14 @@ export default function SettingsPage() {
                             </div>
                         </div>
                     </div>
+                )}
+
+                {/* URL Management Tab */}
+                {activeTab === 'urls' && (
+                    <UrlsTab 
+                        geminiUrls={config.env.GEMINI_URLS || ""} 
+                        onChange={(val) => handleChangeEnv("GEMINI_URLS", val)} 
+                    />
                 )}
 
                 {/* Schedule Tab */}

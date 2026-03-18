@@ -47,7 +47,8 @@ const CONFIG = {
     ARCHIVE_THRESHOLD_TODAY: Number(cleanEnv(process.env.ARCHIVE_THRESHOLD_TODAY)) || 1,
     // --- Embedding Config ---
     EMBEDDING_PROVIDER: cleanEnv(process.env.GOLEM_EMBEDDING_PROVIDER) || 'local',
-    LOCAL_EMBEDDING_MODEL: cleanEnv(process.env.GOLEM_LOCAL_EMBEDDING_MODEL) || 'Xenova/bge-small-zh-v1.5'
+    LOCAL_EMBEDDING_MODEL: cleanEnv(process.env.GOLEM_LOCAL_EMBEDDING_MODEL) || 'Xenova/bge-small-zh-v1.5',
+    GEMINI_URLS: (process.env.GEMINI_URLS || '').split(',').map(u => cleanEnv(u, true)).filter(u => u),
 };
 
 // 驗證關鍵 Token
@@ -120,6 +121,10 @@ const reloadConfig = () => {
     CONFIG.ARCHIVE_THRESHOLD_TODAY = Number(cleanEnv(process.env.ARCHIVE_THRESHOLD_TODAY)) || 1;
     CONFIG.EMBEDDING_PROVIDER = cleanEnv(process.env.GOLEM_EMBEDDING_PROVIDER) || 'local';
     CONFIG.LOCAL_EMBEDDING_MODEL = cleanEnv(process.env.GOLEM_LOCAL_EMBEDDING_MODEL) || 'Xenova/bge-small-zh-v1.5';
+
+    const newGeminiUrls = (process.env.GEMINI_URLS || '').split(',').map(u => cleanEnv(u, true)).filter(u => u);
+    CONFIG.GEMINI_URLS.length = 0;
+    CONFIG.GEMINI_URLS.push(...newGeminiUrls);
 
     // 重新載入 GOLEMS_CONFIG (固定為單機模式)
     GOLEMS_CONFIG.length = 0;
