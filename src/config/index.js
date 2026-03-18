@@ -44,7 +44,10 @@ const CONFIG = {
     ENABLE_LOG_NOTIFICATIONS: (process.env.ENABLE_LOG_NOTIFICATIONS === 'true'),
     ARCHIVE_CHECK_INTERVAL: Number(cleanEnv(process.env.ARCHIVE_CHECK_INTERVAL)) || 30,
     ARCHIVE_THRESHOLD_YESTERDAY: Number(cleanEnv(process.env.ARCHIVE_THRESHOLD_YESTERDAY)) || 3,
-    ARCHIVE_THRESHOLD_TODAY: Number(cleanEnv(process.env.ARCHIVE_THRESHOLD_TODAY)) || 1
+    ARCHIVE_THRESHOLD_TODAY: Number(cleanEnv(process.env.ARCHIVE_THRESHOLD_TODAY)) || 1,
+    // --- Embedding Config ---
+    EMBEDDING_PROVIDER: cleanEnv(process.env.GOLEM_EMBEDDING_PROVIDER) || 'local',
+    LOCAL_EMBEDDING_MODEL: cleanEnv(process.env.GOLEM_LOCAL_EMBEDDING_MODEL) || 'Xenova/bge-small-zh-v1.5'
 };
 
 // 驗證關鍵 Token
@@ -115,6 +118,8 @@ const reloadConfig = () => {
     CONFIG.ARCHIVE_CHECK_INTERVAL = Number(cleanEnv(process.env.ARCHIVE_CHECK_INTERVAL)) || 30;
     CONFIG.ARCHIVE_THRESHOLD_YESTERDAY = Number(cleanEnv(process.env.ARCHIVE_THRESHOLD_YESTERDAY)) || 3;
     CONFIG.ARCHIVE_THRESHOLD_TODAY = Number(cleanEnv(process.env.ARCHIVE_THRESHOLD_TODAY)) || 1;
+    CONFIG.EMBEDDING_PROVIDER = cleanEnv(process.env.GOLEM_EMBEDDING_PROVIDER) || 'local';
+    CONFIG.LOCAL_EMBEDDING_MODEL = cleanEnv(process.env.GOLEM_LOCAL_EMBEDDING_MODEL) || 'Xenova/bge-small-zh-v1.5';
 
     // 重新載入 GOLEMS_CONFIG (固定為單機模式)
     GOLEMS_CONFIG.length = 0;
