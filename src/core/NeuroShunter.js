@@ -90,6 +90,30 @@ class NeuroShunter {
         } else if (parsed.actions.length > 0 && shouldSuppressReply) {
             console.log(`🤫 [NeuroShunter] 靜默模式，跳過 ${parsed.actions.length} 個 Action 的執行。`);
         }
+
+        // 3. ✨ [新增] 處理 <CALL_AGENT> 跨分頁調用 (v9.2 路由器模式)
+        if (parsed.calls && parsed.calls.length > 0) {
+            for (const call of parsed.calls) {
+                console.log(`🎭 [NeuroShunter] 偵測到跨分頁 Agent 調用: ${call.name}`);
+                
+                try {
+                    // 執行子代理任務
+                    const agentResponse = await brain.multiAgentManager.executeCall(call.name, call.requirement);
+                    
+                    // 將結果包裝回系統回報，重新進入分流中樞 (遞迴)
+                    const feedback = `[系統回報 - 來自 ${call.name} 代理]:\n${agentResponse}`;
+                    console.log(`📥 [NeuroShunter] 已取得 ${call.name} 回應，正在將結果回傳給主核心...`);
+                    
+                    // 再次發送給主腦 (遞迴調用 dispatch)
+                    const nextResponse = await brain.sendMessage(feedback, false);
+                    await NeuroShunter.dispatch(ctx, nextResponse, brain, controller, options);
+                    
+                } catch (e) {
+                    console.error(`❌ [NeuroShunter] Agent [${call.name}] 調用失敗:`, e.message);
+                    await ctx.reply(`⚠️ 子代理 [${call.name}] 調用發生錯誤: ${e.message}`);
+                }
+            }
+        }
     }
 }
 

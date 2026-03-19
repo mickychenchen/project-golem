@@ -51,6 +51,9 @@ const CONFIG = {
     EMBEDDING_PROVIDER: cleanEnv(process.env.GOLEM_EMBEDDING_PROVIDER) || 'local',
     LOCAL_EMBEDDING_MODEL: cleanEnv(process.env.GOLEM_LOCAL_EMBEDDING_MODEL) || 'Xenova/bge-small-zh-v1.5',
     GEMINI_URLS: (process.env.GEMINI_URLS || '').split(',').map(u => cleanEnv(u, true)).filter(u => u),
+    // --- Multi-Agent (v9.2) ---
+    ENABLE_MULTI_AGENT: (process.env.ENABLE_MULTI_AGENT === 'true'),
+    MAX_SUB_AGENTS: Number(cleanEnv(process.env.MAX_SUB_AGENTS)) || 3,
 };
 
 // 驗證關鍵 Token
@@ -146,6 +149,9 @@ const reloadConfig = () => {
     const newGeminiUrls = (process.env.GEMINI_URLS || '').split(',').map(u => cleanEnv(u, true)).filter(u => u);
     CONFIG.GEMINI_URLS.length = 0;
     CONFIG.GEMINI_URLS.push(...newGeminiUrls);
+
+    CONFIG.ENABLE_MULTI_AGENT = (process.env.ENABLE_MULTI_AGENT === 'true');
+    CONFIG.MAX_SUB_AGENTS = Number(cleanEnv(process.env.MAX_SUB_AGENTS)) || 3;
 
     // 重新載入 GOLEMS_CONFIG (固定為單機模式)
     GOLEMS_CONFIG.length = 0;

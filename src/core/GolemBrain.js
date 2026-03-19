@@ -15,6 +15,7 @@ const PageInteractor = require('./PageInteractor');
 const ChatLogManager = require('../managers/ChatLogManager');
 const SkillIndexManager = require('../managers/SkillIndexManager');
 const NodeRouter = require('./NodeRouter');
+const MultiAgentManager = require('./MultiAgentManager');
 const { URLS } = require('./constants');
 
 // ============================================================
@@ -53,17 +54,25 @@ class GolemBrain {
 
         // ── Backend Selection ──
         this.backend = ConfigManager.CONFIG.GOLEM_BACKEND || 'gemini';
+
+        // ── [v9.2] Multi-Agent Manager ──
+        this.multiAgentManager = new MultiAgentManager(this);
     }
 
     // ─── Public API (向後相容) ─────────────────────────────
 
     /**
      * 初始化瀏覽器、記憶引擎、注入系統 Prompt
-     * @param {boolean} [forceReload=false] - 是否強制重新載入
+     * @param {Object|boolean} [initOptions=false] - 初始化選項或強置重載布林值
+     * @param {boolean} [initOptions.forceReload=false] - 是否強制重新載入
+     * @param {import('playwright').Page} [initOptions.injectedPage] - 外部注入的頁面實例 (用於多分頁 Agent)
      */
-    async init(forceReload = false) {
-        console.log(`🎬 [Brain] 啟動初始化程序 (forceReload: ${forceReload})...`);
-        if (this.context && !forceReload) {
+    async init(initOptions = false) {
+        const forceReload = typeof initOptions === 'object' ? initOptions.forceReload : initOptions;
+        const injectedPage = typeof initOptions === 'object' ? initOptions.injectedPage : null;
+
+        console.log(`🎬 [Brain] 啟動初始化程序 (forceReload: ${forceReload}, injected: ${!!injectedPage})...`);
+        if (this.context && !forceReload && !injectedPage) {
             console.log("✅ [Brain] 瀏覽器實體已存在且無須強制重新載入，跳過啟動。");
             return;
         }
@@ -81,7 +90,10 @@ class GolemBrain {
         }
 
         // 2. 取得或建立頁面
-        if (!this.page) {
+        if (injectedPage) {
+            this.page = injectedPage;
+            isNewSession = true; // 注入的新分頁視為新會話
+        } else if (!this.page) {
             console.log(`🚀 [System] 正在建立瀏覽子頁面...`);
             const pages = this.context.pages();
             this.page = pages.length > 0 ? pages[0] : await this.context.newPage();

@@ -579,8 +579,154 @@ const SystemUpdateSection = () => {
     );
 };
 
+const AgentsTab = ({ config, onChangeEnv, onSave }: { config: ConfigData, onChangeEnv: (k: string, v: string) => void, onSave: () => void }) => {
+    const [agents, setAgents] = useState<any[]>([]);
+    const [isLoaded, setIsLoaded] = useState(false);
+
+    useEffect(() => {
+        fetch('/api/multi-agent/agents')
+            .then(res => res.json())
+            .then(data => {
+                setAgents(data);
+                setIsLoaded(true);
+            })
+            .catch(err => console.error("Failed to fetch agents", err));
+    }, []);
+
+    const handleSaveAgents = async () => {
+        try {
+            const res = await fetch('/api/multi-agent/agents', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ agents })
+            });
+            if (res.ok) alert("🎉 代理設定已儲存！");
+        } catch (e) {
+            alert("❌ 儲存失敗");
+        }
+    };
+
+    const updateAgent = (id: string, updates: any) => {
+        setAgents(prev => prev.map(a => a.id === id ? { ...a, ...updates } : a));
+    };
+
+    return (
+        <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <Card className="bg-card border-border p-6 shadow-sm">
+                    <h3 className="text-sm font-bold flex items-center gap-2 mb-4">
+                        <Cpu className="w-4 h-4 text-primary" /> 全域路由設定
+                    </h3>
+                    <div className="space-y-4">
+                        <div className="flex items-center justify-between p-3 rounded-lg bg-secondary/30 border border-border">
+                            <div>
+                                <p className="text-sm font-medium">開啟多分頁 Multi-Agent</p>
+                                <p className="text-[10px] text-muted-foreground">啟用後，主腦可將任務委派給不同分頁的代理人格。</p>
+                            </div>
+                            <input
+                                type="checkbox"
+                                checked={config.env.ENABLE_MULTI_AGENT === 'true'}
+                                onChange={(e) => onChangeEnv('ENABLE_MULTI_AGENT', e.target.checked ? 'true' : 'false')}
+                                className="toggle"
+                            />
+                        </div>
+                        <SettingField
+                            label="最大併發分頁數 (Max Sub-Agents)"
+                            desc="同時允許開啟的子代理分頁數量 (建議 2-5)"
+                            value={config.env.MAX_SUB_AGENTS || "3"}
+                            onChange={(val) => onChangeEnv('MAX_SUB_AGENTS', val)}
+                            type="number"
+                        />
+                    </div>
+                </Card>
+
+                <Card className="bg-card border-border p-6 shadow-sm flex flex-col justify-center">
+                    <div className="flex items-center gap-4 text-muted-foreground italic text-xs">
+                        <AlertTriangle className="w-8 h-8 text-amber-500/50" />
+                        <p>注意：開啟過多分頁會顯著增加主機的 RAM 消耗。請確保您的伺服器有足夠的資源。</p>
+                    </div>
+                </Card>
+            </div>
+
+            <Card className="bg-card border-border shadow-sm overflow-hidden">
+                <div className="p-4 border-b border-border flex justify-between items-center bg-muted/20">
+                    <h3 className="text-sm font-bold flex items-center gap-2">
+                        <Users className="w-4 h-4 text-primary" /> 子代理註冊表 (Sub-Agent Registry)
+                    </h3>
+                    <button
+                        onClick={handleSaveAgents}
+                        className="text-xs bg-primary/10 text-primary hover:bg-primary/20 px-3 py-1 rounded border border-primary/20 transition-all font-bold"
+                    >
+                        儲存代理定義
+                    </button>
+                </div>
+                <div className="divide-y divide-border">
+                    {agents.map(agent => (
+                        <div key={agent.id} className="p-6 grid grid-cols-1 md:grid-cols-3 gap-6 hover:bg-muted/10 transition-colors">
+                            <div className="space-y-3">
+                                <div className="flex items-center gap-2">
+                                    <span className="w-2 h-2 rounded-full bg-primary animate-pulse" />
+                                    <input
+                                        className="bg-transparent border-b border-border focus:border-primary text-sm font-bold w-full outline-none"
+                                        value={agent.name}
+                                        onChange={(e) => updateAgent(agent.id, { name: e.target.value })}
+                                    />
+                                </div>
+                                <p className="text-[10px] text-muted-foreground uppercase tracking-widest font-mono">ID: {agent.id}</p>
+                                <div className="flex items-center gap-2">
+                                    <input
+                                        type="checkbox"
+                                        checked={agent.enabled}
+                                        onChange={(e) => updateAgent(agent.id, { enabled: e.target.checked })}
+                                    />
+                                    <span className="text-xs text-muted-foreground">啟用此代理</span>
+                                </div>
+                            </div>
+                            <div className="space-y-4 md:col-span-2">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                    <div className="space-y-1">
+                                        <label className="text-[10px] font-bold text-muted-foreground uppercase">角色定義 (Role)</label>
+                                        <input
+                                            className="w-full bg-secondary/50 border border-border rounded px-2 py-1.5 text-xs outline-none focus:border-primary"
+                                            value={agent.role}
+                                            onChange={(e) => updateAgent(agent.id, { role: e.target.value })}
+                                        />
+                                    </div>
+                                    <div className="space-y-1">
+                                        <label className="text-[10px] font-bold text-muted-foreground uppercase">能力標籤 (Skills)</label>
+                                        <input
+                                            className="w-full bg-secondary/50 border border-border rounded px-2 py-1.5 text-xs outline-none focus:border-primary"
+                                            value={agent.skills.join(', ')}
+                                            onChange={(e) => updateAgent(agent.id, { skills: e.target.value.split(',').map((s: string) => s.trim()) })}
+                                        />
+                                    </div>
+                                </div>
+                                <div className="space-y-1">
+                                    <label className="text-[10px] font-bold text-muted-foreground uppercase">人格特質 (Personality)</label>
+                                    <textarea
+                                        className="w-full bg-secondary/50 border border-border rounded px-2 py-1.5 text-xs outline-none focus:border-primary h-20 resize-none"
+                                        value={agent.personality}
+                                        onChange={(e) => updateAgent(agent.id, { personality: e.target.value })}
+                                    />
+                                </div>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            </Card>
+        </div>
+    );
+};
+
+const Card = ({ children, className }: { children: React.ReactNode, className?: string }) => (
+    <div className={cn("rounded-xl border bg-card text-card-foreground shadow", className)}>
+        {children}
+    </div>
+);
+
 export default function SettingsPage() {
     const [config, setConfig] = useState<ConfigData>({ env: {}, golems: [] });
+    // ... (rest of the component)
     const [originalConfig, setOriginalConfig] = useState<ConfigData>({ env: {}, golems: [] });
     const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
     const [isLoading, setIsLoading] = useState(true);

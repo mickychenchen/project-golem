@@ -100,7 +100,10 @@ class InteractiveMultiAgent {
         try {
             await ctx.sendTyping();
             const rolePrompt = this._buildProtocolPrompt(agent, round);
-            const rawResponse = await this.brain.sendMessage(rolePrompt);
+            
+            // 🚀 [v9.2] 切換為真實多分頁路由模式
+            const rawResponse = await this.brain.multiAgentManager.executeCall(agent.name, rolePrompt);
+            
             const parsed = await this._parseAgentOutput(rawResponse, agent);
 
             if (parsed.memories.length > 0) {

@@ -852,6 +852,34 @@ class WebServer {
             }
         });
 
+        // --- Multi-Agent (v9.2) APIs ---
+
+        this.app.get('/api/multi-agent/agents', (req, res) => {
+            try {
+                const dataPath = path.join(process.cwd(), 'data', 'sub_agents.json');
+                if (!fs.existsSync(dataPath)) return res.json([]);
+                const data = JSON.parse(fs.readFileSync(dataPath, 'utf8'));
+                res.json(data);
+            } catch (e) {
+                res.status(500).json({ error: e.message });
+            }
+        });
+
+        this.app.post('/api/multi-agent/agents', (req, res) => {
+            try {
+                const { agents } = req.body;
+                if (!Array.isArray(agents)) return res.status(400).json({ error: 'Agents must be an array' });
+
+                const dataPath = path.join(process.cwd(), 'data', 'sub_agents.json');
+                fs.writeFileSync(dataPath, JSON.stringify(agents, null, 2), 'utf8');
+
+                console.log(`🎭 [WebServer] Sub-agents configuration updated.`);
+                res.json({ success: true });
+            } catch (e) {
+                res.status(500).json({ error: e.message });
+            }
+        });
+
         // ➕ 新增技能 API
         this.app.post('/api/skills/create', (req, res) => {
             try {

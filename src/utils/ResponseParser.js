@@ -109,6 +109,17 @@ class ResponseParser {
             parsed.reply = replyMatch[1].trim();
         }
 
+        // 4. ✨ [新增] 擷取 <CALL_AGENT> 標籤 (支援多分頁路由)
+        parsed.calls = [];
+        const callRegex = /<CALL_AGENT\s+name=["']?([^"'>]+)["']?>(.*?)<\/CALL_AGENT>/gi;
+        let match;
+        while ((match = callRegex.exec(raw)) !== null) {
+            parsed.calls.push({
+                name: match[1],
+                requirement: match[2].trim()
+            });
+        }
+
         // ✨ [防呆機制] 如果完全沒有抓到任何結構化標籤，就把整段文字 (過濾掉雜訊) 當作 Reply
         if (!parsed.memory && parsed.actions.length === 0 && !parsed.reply) {
             // 濾掉 Thinking Mode 常見的雜訊字眼
