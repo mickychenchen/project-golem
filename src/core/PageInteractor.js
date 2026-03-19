@@ -92,8 +92,11 @@ class PageInteractor {
                 console.log("⏩ [PageInteractor] 此次對話無擴充功能，跳過幽靈掃描，極速返回！");
             }
 
-            console.log(`🏁 [Brain] 捕獲: ${finalResponse.status} | 長度: ${finalResponse.text.length}`);
-            return ResponseExtractor.cleanResponse(finalResponse.text, startTag, endTag);
+            console.log(`🏁 [Brain] 捕獲: ${finalResponse.status} | 長度: ${finalResponse.text.length} | 附件: ${finalResponse.attachments?.length || 0}`);
+            return {
+                text: ResponseExtractor.cleanResponse(finalResponse.text, startTag, endTag),
+                attachments: finalResponse.attachments || []
+            };
 
         } catch (e) {
             console.warn(`⚠️ [Brain] 互動失敗: ${e.message}`);

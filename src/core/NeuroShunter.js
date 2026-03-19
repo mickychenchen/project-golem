@@ -8,11 +8,20 @@ const CommandHandler = require('./action_handlers/CommandHandler');
 // ============================================================
 class NeuroShunter {
     static async dispatch(ctx, rawResponse, brain, controller, options = {}) {
-        const parsed = ResponseParser.parse(rawResponse);
+        let textToParse = rawResponse;
+        let attachments = options.attachments || [];
+
+        // 📥 [v9.1.10] 支援結構化回應物件 { text, attachments }
+        if (rawResponse && typeof rawResponse === 'object' && !Array.isArray(rawResponse)) {
+            textToParse = rawResponse.text || "";
+            attachments = [...attachments, ...(rawResponse.attachments || [])];
+        }
+
+        const parsed = ResponseParser.parse(textToParse);
         let shouldSuppressReply = options.suppressReply === true;
 
         // 核心：偵測 [INTERVENE] 標籤以實現觀察者模式自主介入
-        if (rawResponse.includes('[INTERVENE]')) {
+        if (textToParse.includes('[INTERVENE]')) {
             console.log(`🚀 [NeuroShunter] 偵測到 AI 自主介入請求 [INTERVENE]！`);
             shouldSuppressReply = false;
         }
@@ -33,7 +42,7 @@ class NeuroShunter {
             if (ctx.platform === 'telegram' && ctx.shouldMentionSender) {
                 finalReply = `${ctx.senderMention} ${parsed.reply}`;
             }
-            console.log(`[TERMINAL] 🤖 [Golem] 說: ${finalReply}`);
+            console.log(`[TERMINAL] 🤖 [Golem] 說: ${finalReply}${attachments.length > 0 ? ' 📎 含有附件' : ''}`);
 
             // ✨ [Log] 記錄 AI 回應
             if (brain && typeof brain._appendChatLog === 'function') {
@@ -42,11 +51,13 @@ class NeuroShunter {
                     content: finalReply,
                     type: 'ai',
                     role: 'Assistant',
-                    isSystem: false
+                    isSystem: false,
+                    attachments: attachments
                 });
             }
 
-            await ctx.reply(finalReply);
+            // 附件處理：若是 Dashbaord 或有支援 attachments 的平台
+            await ctx.reply(finalReply, { attachments: attachments });
         } else if (parsed.reply && shouldSuppressReply) {
             console.log(`🤫 [NeuroShunter] 檢測到靜默模式，已攔截回覆內容。`);
         }

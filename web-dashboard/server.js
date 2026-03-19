@@ -53,6 +53,9 @@ class WebServer {
         this.app.use(express.urlencoded({ limit: '50mb', extended: true }));
         this.server = http.createServer(this.app);
 
+        // 🎯 [v9.1.13] Set a generous timeout (120s) for long-running tasks like skill injection
+        this.server.timeout = 300000;
+
         // Security & Cleanup Middleware
         this.app.use((req, res, next) => {
             // Set a sensible CSP to avoid Chrome defaults blocking things during redirects
@@ -1540,7 +1543,7 @@ class WebServer {
                 if (!id) return res.status(400).json({ error: 'Missing Golem ID' });
 
                 console.log(`🛑 [WebServer] Stopping Golem: ${id}`);
-                
+
                 if (typeof global.stopGolem === 'function') {
                     await global.stopGolem(id);
                     // Explicitly remove from local contexts to ensure status update

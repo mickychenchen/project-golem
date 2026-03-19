@@ -60,6 +60,7 @@ const ConversationManager = require('./src/core/ConversationManager');
 const NeuroShunter = require('./src/core/NeuroShunter');
 const NodeRouter = require('./src/core/NodeRouter');
 const UniversalContext = require('./src/core/UniversalContext');
+const { downloadFile } = require('./src/utils/HttpUtils');
 const OpticNerve = require('./src/services/OpticNerve');
 const SystemUpgrader = require('./src/managers/SystemUpgrader');
 const https = require('https');
@@ -67,33 +68,6 @@ const InteractiveMultiAgent = require('./src/core/InteractiveMultiAgent');
 const introspection = require('./src/services/Introspection');
 const ActionQueue = require('./src/core/ActionQueue'); // ✨ [v9.1] Dual-Queue Architecture
 
-/**
- * 📥 下載檔案工具 (用於 Telegram/Discord 圖片轉原生附件)
- */
-async function downloadFile(url, dest) {
-    const fs = require('fs');
-    const path = require('path');
-    const dir = path.dirname(dest);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-
-    return new Promise((resolve, reject) => {
-        https.get(url, (res) => {
-            if (res.statusCode !== 200) {
-                reject(new Error(`下載失敗，狀態碼: ${res.statusCode}`));
-                return;
-            }
-            const fileStream = fs.createWriteStream(dest);
-            res.pipe(fileStream);
-            fileStream.on('finish', () => {
-                fileStream.close();
-                resolve(dest);
-            });
-            fileStream.on('error', (err) => {
-                fs.unlink(dest, () => reject(err));
-            });
-        }).on('error', reject);
-    });
-}
 
 // 🎯 v9.1.5 解耦：不再於啟動時遍歷配置建立 Bot 與實體
 // TelegramBot 與 Golem 實體將由 Web Dashboard 透過 golemFactory 動態建立

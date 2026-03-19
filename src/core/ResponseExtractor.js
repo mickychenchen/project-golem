@@ -43,10 +43,45 @@ class ResponseExtractor {
                         const startIndex = rawText.indexOf(sTag);
                         const endIndex = rawText.indexOf(eTag);
 
+                        // 📸 [v9.1.10] 提取容器內的圖片與其他附件
+                        const attachments = [];
+                        
+                        // 1. 圖片偵測
+                        container.querySelectorAll('img').forEach(img => {
+                            if (img.src && img.src.startsWith('http')) {
+                                attachments.push({ url: img.src, mimeType: 'image/png' });
+                            }
+                        });
+
+                        // 2. 連結/下載偵測 (例如生成的檔案、PDF 等)
+                        container.querySelectorAll('a').forEach(a => {
+                            // 排除常見導覽連結，僅抓取看起來像是下載或附件的內容
+                            const href = a.href || "";
+                            if (!href || !href.startsWith('http')) return;
+                            
+                            const isDownload = a.hasAttribute('download');
+                            const hasFileExt = /\.(pdf|docx|xlsx|txt|zip|md|js|py)$/i.test(href);
+                            const isGoogleContent = href.includes('googleusercontent.com') || href.includes('blob:');
+                            
+                            if (isDownload || hasFileExt || isGoogleContent) {
+                                // 嘗試推斷 MIME Type
+                                let mime = 'application/octet-stream';
+                                if (href.endsWith('.pdf')) mime = 'application/pdf';
+                                else if (href.endsWith('.md')) mime = 'text/markdown';
+                                else if (href.endsWith('.txt')) mime = 'text/plain';
+                                
+                                attachments.push({ url: href, mimeType: mime });
+                            }
+                        });
+
                         // ✨ [條件 1：完美信封] 看到 END 標籤，瞬間打包回傳
                         if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
                             const content = rawText.substring(startIndex + sTag.length, endIndex).trim();
-                            resolve({ status: 'ENVELOPE_COMPLETE', text: content });
+                            resolve({ 
+                                status: 'ENVELOPE_COMPLETE', 
+                                text: content,
+                                attachments: attachments
+                            });
                             return;
                         }
 
@@ -63,21 +98,29 @@ class ResponseExtractor {
                             // 只要畫面停頓超過 5 秒 (10 次檢查) 沒動靜，就強制截斷回傳，不等 30 秒！
                             if (stableCount > _stableComplete) {
                                 const content = rawText.substring(startIndex + sTag.length).trim();
-                                resolve({ status: 'ENVELOPE_TRUNCATED', text: content });
+                                resolve({ 
+                                    status: 'ENVELOPE_TRUNCATED', 
+                                    text: content,
+                                    attachments: attachments
+                                });
                                 return;
                             }
                         } else if (rawText !== oldText && !rawText.includes('SYSTEM: Please WRAP')) {
                             // ✨ [條件 3：Thinking Mode] 還沒看到 BEGIN，可能在深思
                             // 給予最高 30 秒 (60 次檢查) 的容忍度，等它想完
                             if (stableCount > _stableThinking) {
-                                resolve({ status: 'FALLBACK_DIFF', text: rawText });
+                                resolve({ 
+                                    status: 'FALLBACK_DIFF', 
+                                    text: rawText,
+                                    attachments: attachments
+                                });
                                 return;
                             }
                         }
 
                         // 總超時時間上限 5 分鐘 (300,000 ms)
                         if (Date.now() - startTime > _timeout) {
-                            resolve({ status: 'TIMEOUT', text: '' });
+                            resolve({ status: 'TIMEOUT', text: '', attachments: [] });
                             return;
                         }
                         setTimeout(check, _pollInterval);

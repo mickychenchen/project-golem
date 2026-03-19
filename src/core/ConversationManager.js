@@ -167,12 +167,18 @@ class ConversationManager {
                 console.log(`📢 [Dialogue Queue:${this.golemId}] 模式中偵測到標記，強制恢復回應。`);
             }
 
-            const raw = await this.brain.sendMessage(finalInput, false, {
+            const brainResponse = await this.brain.sendMessage(finalInput, false, {
                 isObserver: this.observerMode,
                 interventionLevel: this.interventionLevel,
                 attachment: task.attachment
             });
-            await this.NeuroShunter.dispatch(task.ctx, raw, this.brain, this.controller, { suppressReply: shouldSuppressReply });
+
+            const { text: raw, attachments: responseAttachments } = brainResponse;
+
+            await this.NeuroShunter.dispatch(task.ctx, raw, this.brain, this.controller, { 
+                suppressReply: shouldSuppressReply,
+                attachments: responseAttachments 
+            });
         } catch (e) {
             console.error(`❌ [Dialogue Queue:${this.golemId}] 處理失敗:`, e);
             // ✅ [M-4 Fix] 對外只顯示友善錯誤，避免洩露路徑/Selector 等內部資訊
