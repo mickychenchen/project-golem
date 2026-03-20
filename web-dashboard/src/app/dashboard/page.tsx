@@ -12,7 +12,7 @@ import { SystemActionDialogs } from "@/components/SystemActionDialogs";
 
 // ── 主頁面 ─────────────────────────────────────────────────────────────────
 export default function DashboardPage() {
-    const { hasGolems, isLoadingGolems, isSingleNode, isBooting } = useGolem();
+    const { hasGolems, isLoadingGolems, isSingleNode, isBooting, allowRemote, localIp, dashboardPort } = useGolem();
     const [metrics, setMetrics] = useState({
         uptime: "0h 0m",
         queueCount: 0,
@@ -184,6 +184,14 @@ export default function DashboardPage() {
                                     Single Node
                                 </span>
                             </div>
+                            {allowRemote && (
+                                <div className="flex justify-between items-center text-sm border-b border-border pb-2">
+                                    <span className="text-muted-foreground">Access URL</span>
+                                    <span className="text-cyan-500 font-bold">
+                                        http://{localIp}:{dashboardPort}
+                                    </span>
+                                </div>
+                            )}
                             <div className="flex justify-between items-center text-sm border-b border-border pb-2">
                                 <span className="text-muted-foreground">Backend</span>
                                 <span className={isConnected ? "text-green-600 dark:text-green-400" : "text-destructive animate-pulse"}>

@@ -34,6 +34,9 @@ type SystemStatus = {
     runtime?: { node: string; npm: string; platform: string; arch: string; uptime: number; osName: string };
     health?: { node: boolean; env: boolean; keys: boolean; deps: boolean; core: boolean; dashboard: boolean };
     system?: { totalMem: string; freeMem: string; diskAvail: string };
+    allowRemote?: boolean;
+    localIp?: string;
+    dashboardPort?: string | number;
 };
 
 const SystemHealthDashboard = ({ systemStatus }: { systemStatus: SystemStatus | null }) => {
@@ -136,6 +139,12 @@ const SystemHealthDashboard = ({ systemStatus }: { systemStatus: SystemStatus | 
                             <span className="text-muted-foreground">Uptime</span>
                             <span className="text-foreground">{Math.floor((runtime?.uptime || 0) / 3600)}h {Math.floor(((runtime?.uptime || 0) % 3600) / 60)}m</span>
                         </div>
+                        {systemStatus?.allowRemote && (
+                            <div className="flex justify-between text-xs pt-1 border-t border-border/50 mt-1">
+                                <span className="text-cyan-500 font-bold">Access URL</span>
+                                <span className="text-cyan-500 font-mono font-bold">http://{systemStatus.localIp}:{systemStatus.dashboardPort}</span>
+                            </div>
+                        )}
                     </div>
                 </div>
 

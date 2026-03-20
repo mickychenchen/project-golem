@@ -23,7 +23,13 @@ try {
 }
 
 process.on('uncaughtException', (err) => {
-    console.error('🔥 [CRITICAL] Uncaught Exception:', err);
+    // ✨ [新增] 避免無限循環：如果 SystemLogger 已掛載，使用原始的 Error 輸出
+    const SystemLogger = require('./src/utils/SystemLogger');
+    if (SystemLogger && SystemLogger.originalError) {
+        SystemLogger.originalError('🔥 [CRITICAL] Uncaught Exception:', err);
+    } else {
+        console.error('🔥 [CRITICAL] Uncaught Exception:', err);
+    }
 });
 
 process.on('unhandledRejection', (reason, promise) => {

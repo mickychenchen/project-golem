@@ -40,6 +40,19 @@ function maskValue(val) {
     return val.slice(0, 4) + '****' + val.slice(-4);
 }
 
+function getLocalIp() {
+    const os = require('os');
+    const interfaces = os.networkInterfaces();
+    for (const name of Object.keys(interfaces)) {
+        for (const iface of interfaces[name]) {
+            if (iface.family === 'IPv4' && !iface.internal) {
+                return iface.address;
+            }
+        }
+    }
+    return '127.0.0.1';
+}
+
 class WebServer {
     constructor(dashboard) {
         this.dashboard = dashboard; // Reference to main dashboard if needed for initial state
@@ -49,8 +62,8 @@ class WebServer {
         // ─── Remote Access Config ────────────────────────────────────────────────────
         // When ALLOW_REMOTE_ACCESS=true, open CORS to all origins so remote clients
         // (e.g. LAN IP / reverse-proxy) can connect. Otherwise, restrict to localhost.
-        const allowRemote = (process.env.ALLOW_REMOTE_ACCESS || '').trim() === 'true';
-        const corsOrigin = allowRemote
+        this.allowRemote = (process.env.ALLOW_REMOTE_ACCESS || '').trim() === 'true';
+        const corsOrigin = this.allowRemote
             ? true // allow all origins
             : ["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:3001", "http://127.0.0.1:3001"];
 
@@ -69,7 +82,7 @@ class WebServer {
         this.app.use((req, res, next) => {
             // CSP: allow WebSocket connections from any host when remote access is on
             // 🎯 [v9.1.10] Relax CSP for images to support diverse sources and prevent broken icons
-            const connectSrc = allowRemote
+            const connectSrc = this.allowRemote
                 ? "default-src 'self' *; connect-src * ws: wss:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: *;"
                 : "default-src 'self'; connect-src 'self' ws: wss:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: *;";
             res.setHeader('Content-Security-Policy', connectSrc);
@@ -1271,6 +1284,9 @@ class WebServer {
                     configuredCount,
                     isSystemConfigured,
                     isBooting: this.isBooting,
+                    allowRemote: this.allowRemote,
+                    localIp: getLocalIp(),
+                    dashboardPort: process.env.DASHBOARD_PORT || 3000,
                     runtime,
                     health,
                     system

@@ -45,30 +45,43 @@ class ConsoleInterceptor {
         this.onError = callbacks.onError;
 
         console.log = (...args) => {
-            if (this.jsonMode) {
-                this.originalLog.call(console, this._format('INFO', args));
-            } else {
-                this.originalLog.call(console, this._format('INFO', args), ...args);
+            try {
+                if (this.jsonMode) {
+                    this.originalLog.call(console, this._format('INFO', args));
+                } else {
+                    this.originalLog.call(console, this._format('INFO', args), ...args);
+                }
+                if (this.onLog) this.onLog(args);
+            } catch (e) {
+                if (this.originalError) this.originalError('❌ [Interceptor Log Error]', e);
             }
-            if (this.onLog) this.onLog(args);
         };
 
         console.warn = (...args) => {
-            if (this.jsonMode) {
-                this.originalWarn.call(console, this._format('WARN', args));
-            } else {
-                this.originalWarn.call(console, this._format('WARN', args), ...args);
+            try {
+                if (this.jsonMode) {
+                    this.originalWarn.call(console, this._format('WARN', args));
+                } else {
+                    this.originalWarn.call(console, this._format('WARN', args), ...args);
+                }
+                if (this.onLog) this.onLog(args);
+            } catch (e) {
+                if (this.originalError) this.originalError('❌ [Interceptor Warn Error]', e);
             }
-            if (this.onLog) this.onLog(args);
         };
 
         console.error = (...args) => {
-            if (this.jsonMode) {
-                this.originalError.call(console, this._format('ERROR', args));
-            } else {
-                this.originalError.call(console, this._format('ERROR', args), ...args);
+            try {
+                if (this.jsonMode) {
+                    this.originalError.call(console, this._format('ERROR', args));
+                } else {
+                    this.originalError.call(console, this._format('ERROR', args), ...args);
+                }
+                if (this.onError) this.onError(args);
+            } catch (e) {
+                // 如果攔截器本身出錯，絕不拋出，防止遞迴
+                if (this.originalError) this.originalError('❌ [Interceptor Error]', e);
             }
-            if (this.onError) this.onError(args);
         };
     }
 
