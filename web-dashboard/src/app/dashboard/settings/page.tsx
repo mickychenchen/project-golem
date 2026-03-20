@@ -852,6 +852,21 @@ export default function SettingsPage() {
                                         </select>
                                     </div>
                                 </div>
+                                
+                                {/* Response Style & Limits */}
+                                <div className="bg-card border border-border rounded-xl p-5 shadow-sm">
+                                    <h2 className="text-lg font-semibold text-foreground mb-4 flex items-center gap-2">
+                                        📝 回應風格與限制
+                                    </h2>
+                                    <SettingField
+                                        label="回應字數上限 (Max Response Words)"
+                                        keyName="GOLEM_MAX_RESPONSE_WORDS"
+                                        placeholder="0"
+                                        desc="設為 0 則不限制。若設定，將要求 Golem 縮短回覆長度。"
+                                        value={config.env.GOLEM_MAX_RESPONSE_WORDS || ""}
+                                        onChange={(val) => handleChangeEnv("GOLEM_MAX_RESPONSE_WORDS", val)}
+                                    />
+                                </div>
 
                                 {/* Gemini Brain Settings */}
                                 <div className="bg-card border border-border rounded-xl p-5 shadow-sm">
@@ -1045,8 +1060,29 @@ export default function SettingsPage() {
                     <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 space-y-6">
                         <div className="bg-card border border-border rounded-xl p-5 shadow-sm">
                             <h2 className="text-lg font-semibold text-foreground mb-4 flex items-center gap-2">
-                                🛡️ 指令安全設定
+                                🛡️ 指令安全與自主模式設定
                             </h2>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                                <SettingSelectField
+                                    label="自主介入等級 (Intervention Level)"
+                                    desc="保守: 僅重大錯誤 | 一般: 常規建議 | 積極: 專家主動引導"
+                                    value={config.env.GOLEM_INTERVENTION_LEVEL || "NORMAL"}
+                                    onChange={(val) => handleChangeEnv("GOLEM_INTERVENTION_LEVEL", val)}
+                                    options={[
+                                        { value: "CONSERVATIVE", label: "CONSERVATIVE (保守)" },
+                                        { value: "NORMAL", label: "NORMAL (一般)" },
+                                        { value: "PROACTIVE", label: "PROACTIVE (積極)" }
+                                    ]}
+                                />
+                                <SettingField
+                                    label="自動模式回合上限 (Max Auto Turns)"
+                                    keyName="GOLEM_MAX_AUTO_TURNS"
+                                    placeholder="5"
+                                    desc="防止 ReAct 循環陷入死循環，達到上限後會暫停並詢問使用者。"
+                                    value={config.env.GOLEM_MAX_AUTO_TURNS || ""}
+                                    onChange={(val) => handleChangeEnv("GOLEM_MAX_AUTO_TURNS", val)}
+                                />
+                            </div>
                             <SettingField
                                 label="嚴格指令防護 (Strict Safeguard)"
                                 keyName="GOLEM_STRICT_SAFEGUARD"
@@ -1076,6 +1112,14 @@ export default function SettingsPage() {
                                     desc="允許所有指令直接執行而不需經過任何通知或核准。核心阻斷清單除外。開啟此項代表您完全信任 AI 的行為。"
                                     value={config.env.GOLEM_AUTO_APPROVE_ALL || ""}
                                     onChange={(val) => handleChangeEnv("GOLEM_AUTO_APPROVE_ALL", val)}
+                                />
+                                <SettingField
+                                    label="沈默自動執行 (Silent Auto-Approve)"
+                                    keyName="GOLEM_SILENT_AUTO_APPROVE"
+                                    placeholder="false"
+                                    desc="當全自動執行開啟時，隱藏中間過程的 AI 解說文字，僅顯示最終結果與錯誤訊息。"
+                                    value={config.env.GOLEM_SILENT_AUTO_APPROVE || ""}
+                                    onChange={(val) => handleChangeEnv("GOLEM_SILENT_AUTO_APPROVE", val)}
                                 />
                             </div>
                         </div>
@@ -1300,7 +1344,8 @@ export default function SettingsPage() {
                                                 'GOLEM_AWAKE_INTERVAL_MIN', 'GOLEM_AWAKE_INTERVAL_MAX',
                                                 'GOLEM_SLEEP_START', 'GOLEM_SLEEP_END', 'USER_INTERESTS', 'COMMAND_WHITELIST', 'CUSTOM_COMMANDS',
                                                 'ENABLE_LOG_NOTIFICATIONS', 'ARCHIVE_CHECK_INTERVAL', 'ARCHIVE_THRESHOLD_YESTERDAY', 'ARCHIVE_THRESHOLD_TODAY',
-                                                'LOG_MAX_SIZE_MB', 'LOG_RETENTION_DAYS', 'ENABLE_SYSTEM_LOG', 'GOLEM_BACKEND', 'GOLEM_STRICT_SAFEGUARD'
+                                                'LOG_MAX_SIZE_MB', 'LOG_RETENTION_DAYS', 'ENABLE_SYSTEM_LOG', 'GOLEM_BACKEND', 'GOLEM_STRICT_SAFEGUARD',
+                                                'GOLEM_INTERVENTION_LEVEL', 'GOLEM_MAX_AUTO_TURNS', 'GOLEM_MAX_RESPONSE_WORDS'
                                             ].includes(k))
                                             .map(key => (
                                                 <div key={key} className="bg-secondary/20 p-2 rounded border border-border/40">

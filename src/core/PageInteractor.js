@@ -206,7 +206,10 @@ class PageInteractor {
 
         // 1. 先使用 page.focus 確保焦點在輸入框上
         try {
-            await this.page.focus(targetSelector);
+            await inputEl.scrollIntoViewIfNeeded(); // [Playwright 強化] 確保在可視區域
+            await inputEl.click({ delay: 50 });    // [強化] 點擊一下以確保真實 Focus
+            await inputEl.focus();
+            await new Promise(r => setTimeout(r, 300)); // 給予瀏覽器反應時間
         } catch (e) {
             console.warn(`⚠️ [PageInteractor] focus 失敗: ${e.message}`);
         }
@@ -227,7 +230,8 @@ class PageInteractor {
             // ⚡ 強制觸發事件，讓 React/Angular/ProseMirror 知道內容變了
             const events = ['input', 'change', 'keyup'];
             events.forEach(name => {
-                el.dispatchEvent(new Event(name, { bubbles: true, cancelable: true }));
+                const event = new Event(name, { bubbles: true, cancelable: true });
+                el.dispatchEvent(event);
             });
 
             // 確保游標在最後
@@ -249,9 +253,22 @@ class PageInteractor {
     }
 
     async _clickSend(sendSelector) {
-        console.log("🚀 [PageInteractor] 發送訊號中 (Enter 爆破 + 實體按鈕補送)...");
+        // 1. Enter 爆破 (確保焦點在輸入框，而非按鈕)
+        try {
+            const fallbackSelectors = [
+                '.ProseMirror',
+                'rich-textarea',
+                'div[role="textbox"][contenteditable="true"]',
+                'div[contenteditable="true"]',
+                'textarea'
+            ];
+            const inputEl = await this.page.$(fallbackSelectors.join(', '));
+            if (inputEl) {
+                await inputEl.focus();
+                await new Promise(r => setTimeout(r, 100));
+            }
+        } catch (e) { }
 
-        // 1. Enter 爆破
         await this.page.keyboard.press('Enter');
 
         // 2. 實體按鈕補強 (優先使用 ARIA Label 狙擊)
@@ -259,9 +276,21 @@ class PageInteractor {
             const btn = document.querySelector('button[aria-label*="發送"], button[aria-label*="Send"], button[aria-label*="傳送"]') ||
                 document.querySelector(s) ||
                 document.querySelector('button[disabled="false"]');
-            if (btn && btn.offsetHeight > 0) {
-                btn.focus();
-                btn.click();
+            
+            if (btn) {
+                // [強化] 檢查是否真的可見
+                const style = window.getComputedStyle(btn);
+                const isVisible = btn.offsetHeight > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+                
+                // 🛡️ 防禦：避免點到「停止」按鈕 (如果是忙碌中，直接退出)
+                const txt = (btn.innerText || btn.textContent || "").trim();
+                if (['停止', 'Stop', '中斷'].includes(txt)) return;
+
+                if (isVisible) {
+                    btn.scrollIntoView({ block: "center" });
+                    btn.focus();
+                    btn.click();
+                }
             }
         }, sendSelector);
 
@@ -440,17 +469,25 @@ class PageInteractor {
                 const stopButtons = Array.from(document.querySelectorAll('button, [role="button"]'))
                     .filter(b => {
                         const txt = (b.innerText || b.textContent || "").trim();
-                        return ['停止', 'Stop', '中斷'].includes(txt);
+                        return ['停止', 'Stop', '中斷', 'Stop generating'].includes(txt);
                     });
 
                 // 如果有停止按鈕，代表還在跑
-                if (stopButtons.length > 0 && stopButtons.some(b => b.offsetHeight > 0)) {
-                    return true;
+                if (stopButtons.length > 0) {
+                    const isAnyVisible = stopButtons.some(b => {
+                        const style = window.getComputedStyle(b);
+                        const rect = b.getBoundingClientRect();
+                        return rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+                    });
+                    if (isAnyVisible) return true;
                 }
 
                 // 檢查是否正在進行流式輸出 (可能會有一個正在閃爍的游標或類別)
-                const isStreaming = document.querySelector('.generating, .is-generating, [aria-busy="true"]');
-                if (isStreaming) return true;
+                const streamingElements = document.querySelectorAll('.generating, .is-generating, [aria-busy="true"], .loading, .spinner');
+                for (const el of streamingElements) {
+                    const style = window.getComputedStyle(el);
+                    if (style.display !== 'none' && style.visibility !== 'hidden' && el.offsetHeight > 0) return true;
+                }
 
                 return false;
             });

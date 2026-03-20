@@ -81,7 +81,7 @@ class BrowserLauncher {
             // Playwright 中，launchPersistentContext 直接回傳 Context，省去 browser.newPage() 的麻煩
             const context = await chromium.launchPersistentContext(userDataDir, {
                 headless: headless === 'true' || headless === 'new',
-                viewport: null,
+                viewport: { width: 1280, height: 800 },
                 args: [...BROWSER_ARGS],
                 ignoreDefaultArgs: ['--disable-extensions'], // 保留某些必要的擴充功能行為
             });
