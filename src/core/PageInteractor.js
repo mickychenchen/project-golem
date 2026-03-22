@@ -93,6 +93,10 @@ class PageInteractor {
             }
 
             console.log(`🏁 [Brain] 捕獲: ${finalResponse.status} | 長度: ${finalResponse.text.length} | 附件: ${finalResponse.attachments?.length || 0}`);
+            
+            // 🧹 [Memory Optimization] 實體修剪老舊 DOM 節點
+            await this._pruneDOM();
+
             return {
                 text: ResponseExtractor.cleanResponse(finalResponse.text, startTag, endTag),
                 attachments: finalResponse.attachments || []
@@ -560,6 +564,37 @@ class PageInteractor {
             console.warn(`⚠️ [Doctor] ${type} 修復失敗: ${e.message}`);
         }
         return false;
+    }
+
+    /**
+     * 🧹 物理修剪 DOM (DOM Pruning)
+     * 移除畫面中過舊的對話泡泡，防止長時間對話導致 Chromium 渲染進程吃光記憶體
+     */
+    async _pruneDOM() {
+        try {
+            console.log("🧹 [PageInteractor] 正在物理修剪頁面 DOM 結構以釋放記憶體...");
+            await this.page.evaluate(() => {
+                // 涵蓋 Gemini 與主流大模型的前端對話節點特徵
+                const chatNodes = document.querySelectorAll('message-content, model-response, user-message, .message-row, .conversation-turn');
+                
+                if (chatNodes.length <= 6) return; // 至少保留最後 6 個節點 (剛好是一兩組合法對話視窗)
+                
+                // 保留最後 6 個，其餘砍掉
+                for (let i = 0; i < chatNodes.length - 6; i++) {
+                    const node = chatNodes[i];
+                    if (node && node.parentNode) {
+                        // 往上找最高層級的包裝器
+                        const wrapper = node.closest('.message-row') || node.closest('.conversation-turn') || node.closest('.chat-message-group') || node;
+                        if (wrapper && wrapper.parentNode) {
+                            wrapper.parentNode.removeChild(wrapper);
+                        }
+                    }
+                }
+            });
+            console.log("✅ [PageInteractor] DOM 修剪完成，節點已釋放。");
+        } catch (e) {
+            console.warn(`⚠️ [PageInteractor] DOM 修剪失敗: ${e.message}`);
+        }
     }
 }
 

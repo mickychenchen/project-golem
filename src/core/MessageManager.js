@@ -52,7 +52,11 @@ class MessageManager {
                     // Telegram 處理附件 (僅在最後一個 Chunk 發送)
                     if (isLastChunk && options.attachments && options.attachments.length > 0) {
                         for (const att of options.attachments) {
-                            if (att.mimeType?.startsWith('image')) {
+                            const isImage = att.mimeType?.startsWith('image');
+                            const isSvg = att.mimeType?.includes('svg') || (att.path && att.path.toLowerCase().endsWith('.svg')) || (att.url && att.url.toLowerCase().endsWith('.svg'));
+                            
+                            // Telegram 的 sendPhoto 不支援 SVG 等向量格式，必須退回使用 sendDocument
+                            if (isImage && !isSvg) {
                                 await ctx.instance.sendPhoto(ctx.chatId, att.path || att.url, options);
                             } else {
                                 await ctx.instance.sendDocument(ctx.chatId, att.path || att.url, options);

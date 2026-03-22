@@ -168,6 +168,26 @@ class GrammyBridge extends EventEmitter {
   }
 
   /**
+   * Send a photo
+   * @param {number|string} chatId
+   * @param {string|object} photo - File path, URL, or stream
+   * @param {object} options - { caption, ... }
+   * @returns {Promise<object>}
+   */
+  async sendPhoto(chatId, photo, options = {}) {
+    const { caption, ...rest } = options;
+    let inputPhoto = photo;
+    if (typeof photo === 'string' && !photo.startsWith('http')) {
+      const fs = require('fs');
+      if (fs.existsSync(photo)) {
+        const { InputFile } = require('grammy');
+        inputPhoto = new InputFile(photo);
+      }
+    }
+    return await this._bot.api.sendPhoto(chatId, inputPhoto, { caption, ...rest });
+  }
+
+  /**
    * Send a document/file
    * @param {number|string} chatId
    * @param {string|object} document - File path, URL, or stream
@@ -214,6 +234,17 @@ class GrammyBridge extends EventEmitter {
    */
   async deleteWebHook(options = {}) {
     return await this._bot.api.deleteWebhook(options);
+  }
+
+  /**
+   * Set bot commands (slash commands menu in Telegram)
+   * @param {Array<object>} commands
+   * @param {object} options
+   * @returns {Promise<boolean>}
+   */
+  async setMyCommands(commands, options = {}) {
+    // grammY uses the exact same signature
+    return await this._bot.api.setMyCommands(commands, options);
   }
 
   // ================================================================

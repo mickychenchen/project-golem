@@ -238,6 +238,12 @@ class ConversationManager {
             await task.ctx.reply(`⚠️ 系統暫時無法回應，請稍後再試。`);
         } finally {
             this.isProcessing = false;
+            
+            // 🧹 [Memory Optimization] 強制執行 V8 垃圾回收，釋放回合變數
+            if (global.gc) {
+                global.gc();
+            }
+            
             setTimeout(() => this._processQueue(), 500);
         }
     }
