@@ -1,0 +1,214 @@
+const express = require('express');
+
+module.exports = function(server) {
+    const router = express.Router();
+
+    router.post('/api/chat', async (req, res) => {
+        try {
+            const { golemId, message, attachment: attachmentData } = req.body;
+            if (!golemId || (!message && !attachmentData)) {
+                return res.status(400).json({ error: 'Missing golemId, message or attachment' });
+            }
+
+            if (typeof global.handleDashboardMessage !== 'function') {
+                return res.status(503).json({ error: 'Dashboard message handler not ready' });
+            }
+
+            let finalMimeType = attachmentData ? attachmentData.mimeType : null;
+            if (attachmentData && !finalMimeType && attachmentData.url) {
+                const ext = attachmentData.url.split('.').pop().toLowerCase();
+                const mimeMap = {
+                    'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png', 'gif': 'image/gif', 'webp': 'image/webp',
+                    'pdf': 'application/pdf', 'txt': 'text/plain', 'md': 'text/markdown', 'sh': 'text/x-sh', 'js': 'text/javascript'
+                };
+                finalMimeType = mimeMap[ext] || 'application/octet-stream';
+            }
+
+            const attachment = attachmentData ? {
+                isNative: true,
+                path: attachmentData.path,
+                url: attachmentData.url,
+                mimeType: finalMimeType || 'application/octet-stream'
+            } : null;
+
+            const mockContext = {
+                platform: 'web',
+                isAdmin: true,
+                text: message,
+                messageTime: Date.now(),
+                senderName: 'User',
+                replyToName: '',
+                chatId: 'web-dashboard',
+                reply: async (text, options) => {
+                    let payloadType = 'agent';
+                    let actionData = null;
+
+                    if (options && options.reply_markup && options.reply_markup.inline_keyboard) {
+                        payloadType = 'approval';
+                        actionData = options.reply_markup.inline_keyboard[0];
+                    }
+
+                    server.broadcastLog({
+                        time: new Date().toLocaleTimeString('zh-TW', { hour12: false }),
+                        msg: `[${golemId}] ${text}`,
+                        type: payloadType,
+                        raw: text,
+                        actionData,
+                        golemId
+                    });
+                },
+                sendTyping: async () => { },
+                getAttachment: async () => attachment,
+                instance: { username: golemId }
+            };
+
+            server.broadcastLog({
+                time: new Date().toLocaleTimeString(),
+                msg: `[User] ${message || (attachment ? '[圖片]' : '')}`,
+                type: 'agent',
+                raw: `[User] ${message || '[圖片]'}`,
+                golemId,
+                attachment: attachment ? { url: attachment.url, mimeType: attachment.mimeType } : null
+            });
+
+            server.broadcastLog({
+                time: new Date().toLocaleTimeString(),
+                msg: `[${golemId}] ...`,
+                type: 'thinking',
+                raw: '...',
+                golemId
+            });
+
+            global.handleDashboardMessage(mockContext, golemId).catch(exp => {
+                console.error('[WebServer] Direct chat error:', exp);
+            });
+
+            return res.json({ success: true });
+        } catch (e) {
+            console.error('Failed to send chat message:', e);
+            return res.status(500).json({ error: e.message });
+        }
+    });
+
+    router.post('/api/chat/callback', async (req, res) => {
+        try {
+            const { golemId, callback_data } = req.body;
+            if (!golemId || !callback_data) {
+                return res.status(400).json({ error: 'Missing golemId or callback_data' });
+            }
+
+            const index = require('../../index.js');
+
+            if (typeof global.handleDashboardMessage !== 'function') {
+                return res.status(503).json({ error: 'Dashboard message handler not ready' });
+            }
+
+            const mockContext = {
+                platform: 'web',
+                isAdmin: true,
+                data: callback_data,
+                messageTime: Date.now(),
+                senderName: 'User',
+                replyToName: '',
+                chatId: 'web-dashboard',
+                reply: async (text, options) => {
+                    let payloadType = 'agent';
+                    let actionData = null;
+
+                    if (options && options.reply_markup && options.reply_markup.inline_keyboard) {
+                        payloadType = 'approval';
+                        actionData = options.reply_markup.inline_keyboard[0];
+                    }
+
+                    server.broadcastLog({
+                        time: new Date().toLocaleTimeString('zh-TW', { hour12: false }),
+                        msg: `[${golemId}] ${text}`,
+                        type: payloadType,
+                        raw: text,
+                        actionData,
+                        golemId
+                    });
+                },
+                answerCallbackQuery: async () => { },
+                sendTyping: async () => { },
+                instance: { username: golemId }
+            };
+
+            let translatedMsg = callback_data;
+            let displayType = 'agent';
+
+            if (callback_data.includes('_')) {
+                const [action, taskId] = callback_data.split('_');
+                const isApprove = action === 'APPROVE';
+                const isDeny = action === 'DENY';
+
+                if (isApprove || isDeny) {
+                    translatedMsg = isApprove ? '✅ 批准執行' : '❌ 拒絕執行';
+                    displayType = 'agent';
+
+                    try {
+                        const instance = index.getOrCreateGolem ? index.getOrCreateGolem(golemId) : null;
+                        if (instance && instance.controller && instance.controller.pendingTasks) {
+                            const task = instance.controller.pendingTasks.get(taskId);
+                            if (task && task.steps && task.steps[task.nextIndex]) {
+                                const step = task.steps[task.nextIndex];
+                                const cmd = step.cmd || step.parameter || step.command || "";
+                                if (cmd) {
+                                    translatedMsg += `: \`${cmd.length > 50 ? cmd.substring(0, 47) + '...' : cmd}\``;
+                                }
+                            }
+                        }
+                    } catch (err) {
+                        console.warn('[WebServer] 無法取得任務上下文:', err.message);
+                    }
+                }
+            }
+
+            server.broadcastLog({
+                time: new Date().toLocaleTimeString(),
+                msg: `[WebUser] ${translatedMsg}`,
+                type: displayType,
+                raw: `[User] ${translatedMsg}`,
+                golemId
+            });
+
+            server.broadcastLog({
+                time: new Date().toLocaleTimeString(),
+                msg: `[${golemId}] ...`,
+                type: 'thinking',
+                raw: '...',
+                golemId
+            });
+
+            setTimeout(() => {
+                if (typeof index.handleUnifiedCallback === 'function') {
+                    index.handleUnifiedCallback(mockContext, callback_data, golemId).catch(console.error);
+                } else if (global.handleUnifiedCallback) {
+                    global.handleUnifiedCallback(mockContext, callback_data, golemId).catch(console.error);
+                } else {
+                    console.error('[WebServer] handleUnifiedCallback not found in index.js exports or global');
+                }
+            }, 100);
+
+            return res.json({ success: true });
+        } catch (e) {
+            console.error('Failed to send callback query:', e);
+            return res.status(500).json({ error: e.message });
+        }
+    });
+
+    router.get('/api/chat/history', (req, res) => {
+        try {
+            const { golemId } = req.query;
+            if (!golemId) return res.status(400).json({ error: 'golemId required' });
+
+            const history = server.chatHistory ? (server.chatHistory.get(golemId) || []) : [];
+            return res.json({ success: true, history });
+        } catch (e) {
+            console.error('Failed to fetch chat history:', e);
+            return res.status(500).json({ error: e.message });
+        }
+    });
+
+    return router;
+};

@@ -10,7 +10,7 @@ import {
 import Link from "next/link";
 import { useGolem } from "@/components/GolemContext";
 
-type MemoryMode = "browser" | "qmd" | "lancedb";
+type MemoryMode = "lancedb";
 
 const LOCAL_MODELS = [
     {
@@ -54,13 +54,12 @@ export default function SystemSetupPage() {
     const router = useRouter();
     const { isSystemConfigured } = useGolem();
 
-    const [geminiKeys, setGeminiKeys] = useState("");
     const [userDataDir, setUserDataDir] = useState("./golem_memory");
-    const [memoryMode, setMemoryMode] = useState<MemoryMode>("browser");
+    const [memoryMode, setMemoryMode] = useState<MemoryMode>("lancedb");
     const golemMode = "SINGLE";
-    const [showKeys, setShowKeys] = useState(false);
     const [embeddingProvider, setEmbeddingProvider] = useState<"gemini" | "local">("local");
     const [localEmbeddingModel, setLocalEmbeddingModel] = useState("Xenova/bge-small-zh-v1.5");
+    const [allowRemoteAccess, setAllowRemoteAccess] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
     const [isFetching, setIsFetching] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -73,9 +72,10 @@ export default function SystemSetupPage() {
             .then(r => r.json())
             .then(data => {
                 setUserDataDir(data.userDataDir || "./golem_memory");
-                setMemoryMode((data.golemMemoryMode as MemoryMode) || "browser");
+                setMemoryMode("lancedb");
                 setEmbeddingProvider("local");
                 setLocalEmbeddingModel(data.golemLocalEmbeddingModel || "Xenova/bge-small-zh-v1.5");
+                setAllowRemoteAccess(data.allowRemoteAccess === true || data.allowRemoteAccess === "true");
             })
             .catch(console.error)
             .finally(() => setIsFetching(false));
@@ -91,12 +91,12 @@ export default function SystemSetupPage() {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    geminiApiKeys: geminiKeys.trim(),
                     userDataDir: userDataDir.trim(),
                     golemMemoryMode: memoryMode,
                     golemEmbeddingProvider: "local",
                     golemLocalEmbeddingModel: localEmbeddingModel,
-                    golemMode: golemMode
+                    golemMode: golemMode,
+                    allowRemoteAccess: allowRemoteAccess
                 }),
             });
             const data = await res.json();
@@ -146,57 +146,6 @@ export default function SystemSetupPage() {
                         </div>
                     )}
 
-                    {/* Gemini API Keys */}
-                    <div className="bg-gray-900/80 border border-gray-800 rounded-2xl p-6 shadow-xl relative overflow-hidden">
-                        <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-emerald-600 to-teal-400 rounded-t-2xl" />
-
-                        <div className="flex items-center justify-between mb-5">
-                            <div className="flex items-center gap-2">
-                                <Key className="w-5 h-5 text-emerald-400" />
-                                <h2 className="text-base font-semibold text-white">Gemini API Keys</h2>
-                                <span className="text-gray-500 text-xs font-medium border border-gray-800 px-1.5 py-0.5 rounded">選填</span>
-                            </div>
-                            <a
-                                href="https://aistudio.google.com/app/apikey"
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-xs text-emerald-500 hover:text-emerald-400 flex items-center gap-1 transition-colors"
-                            >
-                                取得 API Key
-                                <ExternalLink className="w-3 h-3" />
-                            </a>
-                        </div>
-
-                        <div className="relative">
-                            <input
-                                id="geminiKeys"
-                                type={showKeys ? "text" : "password"}
-                                value={geminiKeys}
-                                onChange={e => setGeminiKeys(e.target.value)}
-                                placeholder="AIzaSy... (多組 Key 請用半形逗號分隔)"
-                                className="w-full bg-gray-950 border border-gray-800 rounded-xl px-4 py-3 pr-11 text-white font-mono text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-500 transition-all"
-                            />
-                            <button
-                                type="button"
-                                onClick={() => setShowKeys(!showKeys)}
-                                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 p-1 transition-colors"
-                            >
-                                {showKeys ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                            </button>
-                        </div>
-                        <p className="text-xs text-gray-600 mt-2">
-                            支援多組 Key 輪替（KeyChain），建議填入 2 組以上以防超過配額。
-                        </p>
-
-                        {!geminiKeys.trim() && (
-                            <div className="mt-4 flex items-start gap-2 p-3 bg-amber-950/20 border border-amber-900/30 rounded-xl text-amber-200/60 animate-in fade-in slide-in-from-top-2">
-                                <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
-                                <p className="text-[11px] leading-relaxed">
-                                    注意：若不填寫 API Key，系統將失去<strong>多模態功能</strong>（如圖片解析、語音識別及視覺分析等）。
-                                </p>
-                            </div>
-                        )}
-                    </div>
 
                     {/* Memory Config */}
                     <div className="bg-gray-900/80 border border-gray-800 rounded-2xl p-6 shadow-xl relative overflow-hidden">
@@ -210,24 +159,18 @@ export default function SystemSetupPage() {
                         {/* Memory Mode */}
                         <div className="mb-5">
                             <label className="block text-sm font-medium text-gray-400 mb-3">記憶引擎模式</label>
-                            <div className="grid grid-cols-2 gap-3">
+                            <div className="grid grid-cols-1 gap-3">
                                 {([
-                                    { value: "browser", label: "Browser 模式", desc: "內建 memory.html，無須額外安裝（推薦）" },
-                                    { value: "lancedb", label: "LanceDB (Pro)", desc: "高效能向量資料庫，支援 Hybrid Search (效能最強)" },
-                                    { value: "qmd", label: "QMD 模式", desc: "混合向量搜尋，需安裝 Bun 與 qmd（進階）" },
+                                    { value: "lancedb", label: "LanceDB Vector Engine", desc: "高效能向量資料庫，支援 Hybrid Search (效能最強)" },
                                 ] as { value: MemoryMode; label: string; desc: string }[]).map(opt => (
                                     <button
                                         key={opt.value}
                                         type="button"
-                                        onClick={() => setMemoryMode(opt.value)}
-                                        className={`p-3 rounded-xl border text-sm font-medium transition-all text-left ${memoryMode === opt.value
-                                            ? "bg-blue-950/30 border-blue-600/50 text-blue-300"
-                                            : "bg-gray-950 border-gray-800 text-gray-400 hover:border-gray-700"
-                                            }`}
+                                        className="p-3 rounded-xl border text-sm font-medium transition-all text-left bg-blue-950/30 border-blue-600/50 text-blue-300 cursor-default"
                                     >
                                         <div className="flex items-center justify-between mb-0.5">
                                             <span className="font-bold text-xs">{opt.label}</span>
-                                            {memoryMode === opt.value && <CheckCircle2 className="w-3.5 h-3.5 text-blue-400" />}
+                                            <CheckCircle2 className="w-3.5 h-3.5 text-blue-400" />
                                         </div>
                                         <div className="text-[10px] font-normal opacity-70">{opt.desc}</div>
                                     </button>
@@ -293,6 +236,40 @@ export default function SystemSetupPage() {
                                         模型將在第一次啟動時自動下載至本地端。具備極佳隱私性與回應速度。
                                     </p>
                                 </div>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Network Config */}
+                    <div className="bg-gray-900/80 border border-gray-800 rounded-2xl p-6 shadow-xl relative overflow-hidden">
+                        <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-emerald-600 to-teal-400 rounded-t-2xl" />
+
+                        <div className="flex items-center gap-2 mb-5">
+                            <ExternalLink className="w-5 h-5 text-emerald-400" />
+                            <h2 className="text-base font-semibold text-white">網路連線設定</h2>
+                        </div>
+
+                        <div className="flex items-center justify-between p-4 bg-gray-950 border border-gray-800 rounded-xl">
+                            <div className="space-y-1">
+                                <div className="text-sm font-medium text-white">允許遠端存取 (Remote Access)</div>
+                                <div className="text-xs text-gray-500 leading-relaxed">
+                                    開啟後可允許區域網路或其他 IP 連線。若關閉則僅限 localhost。
+                                </div>
+                            </div>
+                            <div 
+                                onClick={() => setAllowRemoteAccess(!allowRemoteAccess)}
+                                className={`w-12 h-6 rounded-full p-1 cursor-pointer transition-colors duration-200 ease-in-out ${allowRemoteAccess ? 'bg-emerald-600' : 'bg-gray-700'}`}
+                            >
+                                <div className={`w-4 h-4 rounded-full bg-white shadow-sm transform transition-transform duration-200 ease-in-out ${allowRemoteAccess ? 'translate-x-6' : 'translate-x-0'}`} />
+                            </div>
+                        </div>
+
+                        {allowRemoteAccess && (
+                            <div className="mt-4 p-3 bg-amber-950/20 border border-amber-900/30 rounded-lg flex items-start gap-2 animate-in fade-in zoom-in-95">
+                                <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+                                <p className="text-[10px] text-amber-200/70 leading-relaxed">
+                                    ⚠️ 警告：開啟遠端存取會降低安全性。請確保您在受信任的網路環境中，或已設置適當的防火牆保護。
+                                </p>
                             </div>
                         )}
                     </div>

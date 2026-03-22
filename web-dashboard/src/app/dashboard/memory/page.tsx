@@ -10,6 +10,22 @@ import { cn } from "@/lib/utils";
 export default function MemoryPage() {
     const { activeGolem, golems } = useGolem();
     const [status, setStatus] = useState("initializing");
+    const [config, setConfig] = useState<any>(null);
+
+    useEffect(() => {
+        const fetchConfig = async () => {
+            try {
+                const res = await fetch("/api/system/config");
+                if (res.ok) {
+                    const data = await res.json();
+                    setConfig(data);
+                }
+            } catch (e) {
+                console.error("Failed to fetch config", e);
+            }
+        };
+        fetchConfig();
+    }, []);
 
     useEffect(() => {
         if (activeGolem) {
@@ -18,6 +34,18 @@ export default function MemoryPage() {
             return () => clearTimeout(timer);
         }
     }, [activeGolem]);
+
+    const getModelDisplayName = (modelId: string, provider: string) => {
+        if (provider === 'gemini') return "Google Gemini (004)";
+        const models: Record<string, string> = {
+            "Xenova/bge-small-zh-v1.5": "BGE-Small (ZH)",
+            "Xenova/bge-base-zh-v1.5": "BGE-Base (ZH)",
+            "Xenova/paraphrase-multilingual-MiniLM-L12-v2": "MiniLM-L12",
+            "Xenova/nomic-embed-text-v1.5": "Nomic Embed",
+            "Xenova/all-MiniLM-L6-v2": "MiniLM-L6 (EN)"
+        };
+        return models[modelId] || modelId || "Unknown Model";
+    };
 
     return (
         <div className="p-6 h-full flex flex-col space-y-6 overflow-hidden bg-background text-foreground/80 relative font-sans">
@@ -33,7 +61,7 @@ export default function MemoryPage() {
                             記憶核心 (Neural Core)
                         </h1>
                         <div className="text-sm text-muted-foreground mt-1 flex items-center flex-wrap">
-                            向量記憶與 Chronos 引擎 (Vector Memory & Chronos Engine)
+                            向量記憶與 LanceDB 混合搜尋引擎 (Vector Memory & LanceDB Hybrid Search)
                             <span className="ml-3 px-2 py-0.5 rounded-full bg-secondary border border-border text-xs font-mono text-muted-foreground">
                                 v9.1.5
                             </span>
@@ -65,16 +93,16 @@ export default function MemoryPage() {
                         <StatusCard
                             icon={Cpu}
                             title="向量模型 (Embedding)"
-                            value="all-MiniLM-L6-v2"
+                            value={getModelDisplayName(config?.golemLocalEmbeddingModel, config?.golemEmbeddingProvider)}
                             status={status === 'ready' ? 'online' : 'loading'}
-                            description="本地 Transformers.js 推論引擎"
+                            description={config?.golemEmbeddingProvider === 'gemini' ? "Google 雲端模型 (Cloud-based)" : "本地 Transformers.js 推論引擎 (Local)"}
                         />
                         <StatusCard
                             icon={Database}
                             title="記憶儲存 (Storage)"
-                            value="IndexedDB Bank"
+                            value={config?.golemMemoryMode === 'lancedb-pro' ? "LanceDB (Pro)" : (config?.golemMemoryMode ? config.golemMemoryMode.toUpperCase() : "LanceDB (Pro)")}
                             status={status === 'ready' ? 'online' : 'loading'}
-                            description="瀏覽器原生向量儲存空間"
+                            description="高效本地向量資料庫 (Persistent Storage)"
                         />
                         <StatusCard
                             icon={Activity}

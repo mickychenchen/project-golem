@@ -201,9 +201,10 @@ To keep this page concise, more in-depth technical details have been moved to de
 
 | Document | Description |
 |------|------|
+| [🔌 MCP Usage & Development Guide](MCP-Guide.en.md) | **[New]** How to install, configure, and call MCP Servers (includes Hacker News example) |
 | [🤖 AI Agent Guide](AGENTS.en.md) | **[Important]** Guidelines for AI assistants and developers on code maintenance |
 | [🧠 Memory System Architecture](記憶系統架構說明.md) | Pyramid compression principles and storage path analysis |
-| [🖥️ Web Dashboard Guide](Web-Dashboard-使用說明.md) | Extended details for each tab in the Web UI |
+| [🖥️ Web Dashboard Guide](Web-Dashboard-Guide.en.md) | Extended details for each tab in the Web UI |
 | [🛠️ Developer Implementation Guide](開發者實作指南.md) | How to implement new Skills and Golem Protocol specifications |
 | [🎮 Command Reference List](golem指令說明一覽表.md) | Quick reference for Telegram / Discord commands |
 | [🔑 Getting Robot Tokens](如何獲取TG或DC的Token及開啟權限.md) | How to set up your external communication platforms |

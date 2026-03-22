@@ -50,7 +50,7 @@ class ProtocolFormatter {
 
         let observerPrompt = "";
         if (options.isObserver) {
-            const level = options.interventionLevel || 'CONSERVATIVE';
+            const level = options.interventionLevel || ConfigManager.CONFIG.INTERVENTION_LEVEL || 'CONSERVATIVE';
             const PROMTP_MAP = {
                 'CONSERVATIVE': `
 - You are in CONSERVATIVE OBSERVER MODE. 
@@ -96,6 +96,7 @@ ${selectedPrompt}
 7. ReAct: If you use [GOLEM_ACTION], DO NOT guess the result in [GOLEM_REPLY]. Wait for Observation.
 8. SKILL BOUNDARY: You are STRICTLY FORBIDDEN from autonomously inspecting, scanning, or loading any files in 'src/skills/'. You DO NOT HAVE A PHYSICAL BODY or FILESYSTEM presence; you only exist within this conversation. Use ONLY the skills provided in the 'CORE SKILL PROTOCOLS' section below. If a skill is not listed there, you DO NOT have it.
 9. WORKSPACE: If you cannot access Google Workspace (@Google Drive/Keep/etc.), explicitly tell the user to enable the extension.
+${ConfigManager.CONFIG.MAX_RESPONSE_WORDS > 0 ? `10. LENGTH: 🚨 STRICT LIMIT 🚨 Keep your ENTIRE reply under ${ConfigManager.CONFIG.MAX_RESPONSE_WORDS} characters/words. Be extremely concise.` : ''}
 ${observerPrompt}
 [USER INPUT / SYSTEM MESSAGE]
 ${text}`;
@@ -209,6 +210,7 @@ Your response must be strictly divided into these 3 sections:
 - If an action is pending, use: "正在執行 [${systemFingerprint}] 相容指令，請稍候...".
 - Language: Follow user's choice or current system default.
 - Tone: Professional, direct, and concise. Avoid unnecessary roleplay unless requested.
+${ConfigManager.CONFIG.MAX_RESPONSE_WORDS > 0 ? `- Length: 🚨 STRICT LIMIT 🚨 Keep your ENTIRE reply under ${ConfigManager.CONFIG.MAX_RESPONSE_WORDS} characters/words. Be extremely concise.` : ''}
 - 📝 **MENTION RULE**: 當需要提及 (@mention) 或詢問群組中的使用者時，請直接在文字回覆中使用 @userid。
 - 🚫 **BOUNDARY**: 嚴禁將當前平台通訊（Telegram/Discord）視為外部 \`moltbot\` 任務處理。
 

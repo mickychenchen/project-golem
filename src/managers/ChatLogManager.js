@@ -455,10 +455,11 @@ class ChatLogManager {
      */
     /**
      * 讀取最近的原始 hourly 日誌 (Tier 0)，供無壓縮時 fallback 使用
-     * @param {number} [limit] - 最多讀取幾個 hourly 檔案 (從最新, null = 全部)
-     * @returns {string} 格式化後的對話文字，若無內容則回傳空字串
+     * @param {number} [limit] - 最多讀取幾個 hourly 檔案
+     * @param {number} [maxChars=200000] - 最大字元限制，達到後停止讀取更多檔案
+     * @returns {string} 格式化後的對話文字
      */
-    readRecentHourly(limit = null) {
+    readRecentHourly(limit = null, maxChars = 200000) {
         const dir = this.dirs.hourly;
         if (!dir || !fs.existsSync(dir)) return '';
 
@@ -467,20 +468,26 @@ class ChatLogManager {
                 .filter(f => f.length === 14 && f.endsWith('.log')) // YYYYMMDDHH.log
                 .sort();
 
-            if (limit) files = files.slice(-limit);
+            // 從最新的檔案開始讀取 (Reverse sort)
+            files = files.reverse();
+            if (limit) files = files.slice(0, limit);
 
             let result = '';
-            files.forEach(file => {
+            for (const file of files) {
+                if (result.length >= maxChars) break;
                 try {
                     const logs = JSON.parse(fs.readFileSync(path.join(dir, file), 'utf8'));
-                    logs.forEach(l => {
+                    // 也從該檔案內最新的對話開始讀取
+                    for (const l of logs.reverse()) {
                         const time = new Date(l.timestamp).toLocaleString('zh-TW', { hour12: false });
-                        result += `[${time}] ${l.sender}: ${l.content}\n`;
-                    });
+                        const entry = `[${time}] ${l.sender}: ${l.content}\n`;
+                        if (result.length + entry.length > maxChars) break;
+                        result = entry + result; // 保持時間正序
+                    }
                 } catch (e) {
                     console.warn(`⚠️ [LogManager] readRecentHourly 解析失敗，略過: ${file} — ${e.message}`);
                 }
-            });
+            }
 
             return result.trim();
         } catch (e) {
@@ -488,7 +495,14 @@ class ChatLogManager {
         }
     }
 
-    readTier(tier, limit = null) {
+    /**
+     * 讀取指定層級的摘要檔案
+     * @param {'daily'|'monthly'|'yearly'|'era'} tier
+     * @param {number} [limit] - 最多讀取幾個檔案
+     * @param {number} [maxChars=200000] - 最大字元限制
+     * @returns {Array<{date: string, content: string}>}
+     */
+    readTier(tier, limit = null, maxChars = 200000) {
         const dir = this.dirs[tier];
         if (!dir || !fs.existsSync(dir)) return [];
 
@@ -497,23 +511,30 @@ class ChatLogManager {
                 .filter(f => f.endsWith('.log'))
                 .sort();
 
-            if (limit) files = files.slice(-limit);
+            // 從最新的檔案開始讀取 (Reverse sort)
+            files = files.reverse();
+            if (limit) files = files.slice(0, limit);
 
             const results = [];
-            files.forEach(file => {
+            let currentChars = 0;
+
+            for (const file of files) {
+                if (currentChars >= maxChars) break;
                 try {
                     const logs = JSON.parse(fs.readFileSync(path.join(dir, file), 'utf8'));
                     const dateStr = file.replace('.log', '');
-                    logs.forEach(entry => {
+                    // 摘要通常也是由新到舊排列
+                    for (const entry of logs.reverse()) {
                         if (entry.content && entry.content.trim()) {
-                            results.push({ date: dateStr, content: entry.content });
+                            if (currentChars + entry.content.length > maxChars) break;
+                            results.unshift({ date: dateStr, content: entry.content });
+                            currentChars += entry.content.length;
                         }
-                    });
+                    }
                 } catch (e) {
-                    // ⚡ [Fix] 不再靜默：損毀的摘要檔會輸出警告，方便診斷記憶遺失
                     console.warn(`⚠️ [LogManager] readTier(${tier}) 解析失敗，略過: ${file} — ${e.message}`);
                 }
-            });
+            }
 
             return results;
         } catch (e) {

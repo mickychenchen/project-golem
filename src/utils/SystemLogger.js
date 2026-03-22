@@ -10,30 +10,32 @@ class SystemLogger {
         this.logFile = path.join(logBaseDir, 'system.log');
         this._ensureDirectory(logBaseDir);
 
-        const originalLog = console.log;
-        const originalError = console.error;
-        const originalWarn = console.warn;
+        this.originalLog = console.log;
+        this.originalError = console.error;
+        this.originalWarn = console.warn;
 
         console.log = (...args) => {
             const ts = new Date().toLocaleTimeString('zh-TW', { hour12: false });
-            originalLog(`\x1b[90m[${ts}]\x1b[0m`, ...args);
+            this.originalLog(`\x1b[90m[${ts}]\x1b[0m`, ...args);
             this._write('INFO', ...args);
         };
 
         console.error = (...args) => {
             const ts = new Date().toLocaleTimeString('zh-TW', { hour12: false });
-            originalError(`\x1b[90m[${ts}]\x1b[0m`, ...args);
+            this.originalError(`\x1b[90m[${ts}]\x1b[0m`, ...args);
             this._write('ERROR', ...args);
         };
 
         console.warn = (...args) => {
             const ts = new Date().toLocaleTimeString('zh-TW', { hour12: false });
-            originalWarn(`\x1b[90m[${ts}]\x1b[0m`, ...args);
+            this.originalWarn(`\x1b[90m[${ts}]\x1b[0m`, ...args);
             this._write('WARN', ...args);
         };
 
         this.initialized = true;
-        this._isLogging = false; // 🔄 遞迴鎖 (Recursion Guard)
+        this._isLogging = false; 
+        this.lastRotationFailure = 0; // ✨ [新增] 避免寫入失敗時無限嘗試輪替 (造成 EIO 循環)
+        this.rotationCooldown = 60000; // 60s cooldown
     }
 
     static _ensureDirectory(dir) {
@@ -92,9 +94,12 @@ class SystemLogger {
             }
         }
 
-        // 執行輪替
+        // 執行輪替 (增加冷卻機制防止磁碟滿額時無限嘗試)
         if (shouldRotate) {
-            this._rotateAndCompress(rotateTag);
+            const nowTime = Date.now();
+            if (nowTime - this.lastRotationFailure > this.rotationCooldown) {
+                this._rotateAndCompress(rotateTag);
+            }
         }
 
         const util = require('util');
@@ -142,10 +147,16 @@ class SystemLogger {
                 try { fs.unlinkSync(archivePath); } catch (e) { }
                 this._cleanOldLogs();
             }).on('error', (err) => {
-                console.error(`[SystemLogger] 壓縮日誌失敗: ${err.message}`);
+                this.lastRotationFailure = Date.now();
+                if (this.originalError) {
+                    this.originalError(`[SystemLogger] 壓縮日誌失敗 (磁碟可能已滿): ${err.message}`);
+                }
             });
         } catch (error) {
-            console.error(`[SystemLogger] 日誌輪替失敗: ${error.message}`);
+            this.lastRotationFailure = Date.now();
+            if (this.originalError) {
+                this.originalError(`[SystemLogger] 日誌輪替重大失敗: ${error.message}`);
+            }
         }
     }
 
@@ -174,7 +185,9 @@ class SystemLogger {
                 }
             });
         } catch (error) {
-            console.error(`[SystemLogger] 日誌清理失敗: ${error.message}`);
+            if (this.originalError) {
+                this.originalError(`[SystemLogger] 日誌清理失敗: ${error.message}`);
+            }
         }
     }
 }

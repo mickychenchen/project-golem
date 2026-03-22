@@ -80,7 +80,15 @@ class CommandHandler {
 
                 // ✨ [v9.1] 產線串接：將 Observation 放入對話產線
                 if (convoManager) {
-                    await convoManager.enqueue(ctx, feedbackPrompt, { isPriority: true, bypassDebounce: true });
+                    const isAuto = process.env.GOLEM_AUTO_APPROVE_ALL === 'true';
+                    const isSilent = process.env.GOLEM_SILENT_AUTO_APPROVE === 'true';
+                    const feedbackOptions = { 
+                        isPriority: true, 
+                        bypassDebounce: true,
+                        isSystemFeedback: true, // 🎯 [v9.1.15] Mark as system feedback for turn tracking
+                        suppressReply: isAuto && isSilent // 🎯 [v9.1.13] 全自動且靜默時，隱藏中間過程
+                    };
+                    await convoManager.enqueue(ctx, feedbackPrompt, feedbackOptions);
                 } else {
                     // Fallback 對話發送
                     const finalRes = await brain.sendMessage(feedbackPrompt);

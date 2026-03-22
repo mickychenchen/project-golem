@@ -56,11 +56,31 @@ class TaskController {
 
             // ✨ [v9.1 Hybrid Object Fix] 如果 cmd 為空但 action 存在，則自動組裝
             if (!cmdToRun && step.action && step.action !== 'command') {
-                const actionName = String(step.action).toLowerCase().replace(/_/g, '-');
-                const { action, ...params } = step;
-                const payload = JSON.stringify(params).replace(/"/g, '\\"').replace(/\$/g, '\\$').replace(/`/g, '\\`');
-                cmdToRun = `node src/skills/core/${actionName}.js "${payload}"`;
-                console.log(`🔧 [TaskController] 自動組裝技能指令: ${cmdToRun}`);
+                if (step.parameters && step.parameters.command) {
+                    cmdToRun = step.parameters.command;
+                } else if (step.parameters && typeof step.parameters === 'string') {
+                    cmdToRun = step.parameters;
+                } else {
+                    const actionName = String(step.action).toLowerCase().replace(/_/g, '-');
+                    const { action, ...params } = step;
+
+                    const fs = require('fs');
+                    const path = require('path');
+                    const skillPath = path.join(process.cwd(), 'src/skills/core', `${actionName}.js`);
+
+                    if (fs.existsSync(skillPath)) {
+                        let payloadObj = params;
+                        if (params.parameters && typeof params.parameters === 'object') {
+                            payloadObj = params.parameters; // 去除多層嵌套，方便腳本解析
+                        }
+                        const payload = JSON.stringify(payloadObj).replace(/"/g, '\\"').replace(/\$/g, '\\$').replace(/`/g, '\\`');
+                        cmdToRun = `node src/skills/core/${actionName}.js "${payload}"`;
+                        console.log(`🔧 [TaskController] 自動組裝技能指令: ${cmdToRun}`);
+                    } else {
+                        console.warn(`⚠️ [TaskController] 找不到實體技能檔: ${skillPath}`);
+                        cmdToRun = `echo "⛔ [系統攔截] 找不到實體技能檔: src/skills/core/${actionName}.js (可能為虛擬技能)。請改用 {\\\"action\\\": \\\"command\\\", \\\"command\\\": \\\"你的 shell 指令\\\"}。"`;
+                    }
+                }
             }
             const risk = this.security.assess(cmdToRun);
             if (cmdToRun.startsWith('golem-check')) {

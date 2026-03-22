@@ -4,6 +4,9 @@
 const { TIMINGS, LIMITS } = require('./constants');
 const ResponseExtractor = require('./ResponseExtractor');
 
+// 共用的按鈕偵測關鍵字 (供 autoClick 快速點擊使用)
+const WORKSPACE_SAVE_KEYWORDS = ['儲存活動', '儲存', '建立', '建立活動', 'Save event', 'Save', 'Create'];
+
 class PageInteractor {
     /**
      * @param {import('puppeteer').Page} page - Puppeteer 頁面實例
@@ -93,6 +96,10 @@ class PageInteractor {
             }
 
             console.log(`🏁 [Brain] 捕獲: ${finalResponse.status} | 長度: ${finalResponse.text.length} | 附件: ${finalResponse.attachments?.length || 0}`);
+            
+            // 🧹 [Memory Optimization] 實體修剪老舊 DOM 節點
+            await this._pruneDOM();
+
             return {
                 text: ResponseExtractor.cleanResponse(finalResponse.text, startTag, endTag),
                 attachments: finalResponse.attachments || []
@@ -206,7 +213,10 @@ class PageInteractor {
 
         // 1. 先使用 page.focus 確保焦點在輸入框上
         try {
-            await this.page.focus(targetSelector);
+            await inputEl.scrollIntoViewIfNeeded(); // [Playwright 強化] 確保在可視區域
+            await inputEl.click({ delay: 50 });    // [強化] 點擊一下以確保真實 Focus
+            await inputEl.focus();
+            await new Promise(r => setTimeout(r, 300)); // 給予瀏覽器反應時間
         } catch (e) {
             console.warn(`⚠️ [PageInteractor] focus 失敗: ${e.message}`);
         }
@@ -227,7 +237,8 @@ class PageInteractor {
             // ⚡ 強制觸發事件，讓 React/Angular/ProseMirror 知道內容變了
             const events = ['input', 'change', 'keyup'];
             events.forEach(name => {
-                el.dispatchEvent(new Event(name, { bubbles: true, cancelable: true }));
+                const event = new Event(name, { bubbles: true, cancelable: true });
+                el.dispatchEvent(event);
             });
 
             // 確保游標在最後
@@ -249,9 +260,22 @@ class PageInteractor {
     }
 
     async _clickSend(sendSelector) {
-        console.log("🚀 [PageInteractor] 發送訊號中 (Enter 爆破 + 實體按鈕補送)...");
+        // 1. Enter 爆破 (確保焦點在輸入框，而非按鈕)
+        try {
+            const fallbackSelectors = [
+                '.ProseMirror',
+                'rich-textarea',
+                'div[role="textbox"][contenteditable="true"]',
+                'div[contenteditable="true"]',
+                'textarea'
+            ];
+            const inputEl = await this.page.$(fallbackSelectors.join(', '));
+            if (inputEl) {
+                await inputEl.focus();
+                await new Promise(r => setTimeout(r, 100));
+            }
+        } catch (e) { }
 
-        // 1. Enter 爆破
         await this.page.keyboard.press('Enter');
 
         // 2. 實體按鈕補強 (優先使用 ARIA Label 狙擊)
@@ -259,9 +283,21 @@ class PageInteractor {
             const btn = document.querySelector('button[aria-label*="發送"], button[aria-label*="Send"], button[aria-label*="傳送"]') ||
                 document.querySelector(s) ||
                 document.querySelector('button[disabled="false"]');
-            if (btn && btn.offsetHeight > 0) {
-                btn.focus();
-                btn.click();
+            
+            if (btn) {
+                // [強化] 檢查是否真的可見
+                const style = window.getComputedStyle(btn);
+                const isVisible = btn.offsetHeight > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+                
+                // 🛡️ 防禦：避免點到「停止」按鈕 (如果是忙碌中，直接退出)
+                const txt = (btn.innerText || btn.textContent || "").trim();
+                if (['停止', 'Stop', '中斷'].includes(txt)) return;
+
+                if (isVisible) {
+                    btn.scrollIntoView({ block: "center" });
+                    btn.focus();
+                    btn.click();
+                }
             }
         }, sendSelector);
 
@@ -280,7 +316,12 @@ class PageInteractor {
 
         try {
             console.log("⚓ [PageInteractor] 正在將 Chrome 視窗自動移動至隱藏位置...");
-            const session = await this.page.context().newCDPSession(this.page);
+            
+            // 複用 CDPSession 以提升效能
+            if (!this._persistedCdpSession) {
+                this._persistedCdpSession = await this.page.context().newCDPSession(this.page);
+            }
+            const session = this._persistedCdpSession;
 
             // Playwright 中 getWindowForTarget 標籤可能略有不同，但協議本身一致
             const { windowId } = await session.send('Browser.getWindowForTarget');
@@ -301,7 +342,7 @@ class PageInteractor {
                     windowState: 'normal'
                 }
             });
-            await session.detach();
+            // 註: 不再呼叫 await session.detach()，保留給下次視窗移動時使用
             console.log("✅ [PageInteractor] 視窗已成功移動。");
         } catch (e) {
             console.warn(`⚠️ [PageInteractor] 視窗移動失敗: ${e.message}`);
@@ -317,8 +358,7 @@ class PageInteractor {
 
             await new Promise(r => setTimeout(r, 1500));
 
-            const clickedButtonText = await this.page.evaluate(() => {
-                const targetKeywords = ['儲存活動', '儲存', '建立', '建立活動', 'Save event', 'Save', 'Create'];
+            const clickedButtonText = await this.page.evaluate((keywords) => {
                 const buttons = Array.from(document.querySelectorAll('button, [role="button"], a.btn'));
 
                 for (let i = buttons.length - 1; i >= 0; i--) {
@@ -336,13 +376,13 @@ class PageInteractor {
                         continue;
                     }
 
-                    if (targetKeywords.some(kw => text === kw || text.includes(kw))) {
+                    if (keywords.some(kw => text === kw || text.includes(kw))) {
                         btn.click();
                         return text;
                     }
                 }
                 return null;
-            });
+            }, WORKSPACE_SAVE_KEYWORDS);
 
             if (clickedButtonText) {
                 console.log(`🎯 [PageInteractor] 幽靈突刺成功！已自動幫忙點擊：【${clickedButtonText}】`);
@@ -440,17 +480,25 @@ class PageInteractor {
                 const stopButtons = Array.from(document.querySelectorAll('button, [role="button"]'))
                     .filter(b => {
                         const txt = (b.innerText || b.textContent || "").trim();
-                        return ['停止', 'Stop', '中斷'].includes(txt);
+                        return ['停止', 'Stop', '中斷', 'Stop generating'].includes(txt);
                     });
 
                 // 如果有停止按鈕，代表還在跑
-                if (stopButtons.length > 0 && stopButtons.some(b => b.offsetHeight > 0)) {
-                    return true;
+                if (stopButtons.length > 0) {
+                    const isAnyVisible = stopButtons.some(b => {
+                        const style = window.getComputedStyle(b);
+                        const rect = b.getBoundingClientRect();
+                        return rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+                    });
+                    if (isAnyVisible) return true;
                 }
 
                 // 檢查是否正在進行流式輸出 (可能會有一個正在閃爍的游標或類別)
-                const isStreaming = document.querySelector('.generating, .is-generating, [aria-busy="true"]');
-                if (isStreaming) return true;
+                const streamingElements = document.querySelectorAll('.generating, .is-generating, [aria-busy="true"], .loading, .spinner');
+                for (const el of streamingElements) {
+                    const style = window.getComputedStyle(el);
+                    if (style.display !== 'none' && style.visibility !== 'hidden' && el.offsetHeight > 0) return true;
+                }
 
                 return false;
             });
@@ -523,6 +571,37 @@ class PageInteractor {
             console.warn(`⚠️ [Doctor] ${type} 修復失敗: ${e.message}`);
         }
         return false;
+    }
+
+    /**
+     * 🧹 物理修剪 DOM (DOM Pruning)
+     * 移除畫面中過舊的對話泡泡，防止長時間對話導致 Chromium 渲染進程吃光記憶體
+     */
+    async _pruneDOM() {
+        try {
+            console.log("🧹 [PageInteractor] 正在物理修剪頁面 DOM 結構以釋放記憶體...");
+            await this.page.evaluate(() => {
+                // 涵蓋 Gemini 與主流大模型的前端對話節點特徵
+                const chatNodes = document.querySelectorAll('message-content, model-response, user-message, .message-row, .conversation-turn');
+                
+                if (chatNodes.length <= 6) return; // 至少保留最後 6 個節點 (剛好是一兩組合法對話視窗)
+                
+                // 保留最後 6 個，其餘砍掉
+                for (let i = 0; i < chatNodes.length - 6; i++) {
+                    const node = chatNodes[i];
+                    if (node && node.parentNode) {
+                        // 往上找最高層級的包裝器
+                        const wrapper = node.closest('.message-row') || node.closest('.conversation-turn') || node.closest('.chat-message-group') || node;
+                        if (wrapper && wrapper.parentNode) {
+                            wrapper.parentNode.removeChild(wrapper);
+                        }
+                    }
+                }
+            });
+            console.log("✅ [PageInteractor] DOM 修剪完成，節點已釋放。");
+        } catch (e) {
+            console.warn(`⚠️ [PageInteractor] DOM 修剪失敗: ${e.message}`);
+        }
     }
 }
 

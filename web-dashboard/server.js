@@ -3,6 +3,7 @@ const http = require('http');
 const { Server } = require("socket.io");
 const path = require('path');
 const fs = require('fs');
+const { getLocalIp } = require('../src/utils/HttpUtils');
 const { MANDATORY_SKILLS, OPTIONAL_SKILLS: OPTIONAL_SKILL_LIST, resolveEnabledSkills } = require('../src/skills/skillsConfig');
 
 // ─── .env helper ────────────────────────────────────────────────────────────────────
@@ -40,6 +41,7 @@ function maskValue(val) {
     return val.slice(0, 4) + '****' + val.slice(-4);
 }
 
+
 class WebServer {
     constructor(dashboard) {
         this.dashboard = dashboard; // Reference to main dashboard if needed for initial state
@@ -49,8 +51,8 @@ class WebServer {
         // ─── Remote Access Config ────────────────────────────────────────────────────
         // When ALLOW_REMOTE_ACCESS=true, open CORS to all origins so remote clients
         // (e.g. LAN IP / reverse-proxy) can connect. Otherwise, restrict to localhost.
-        const allowRemote = (process.env.ALLOW_REMOTE_ACCESS || '').trim() === 'true';
-        const corsOrigin = allowRemote
+        this.allowRemote = (process.env.ALLOW_REMOTE_ACCESS || '').trim() === 'true';
+        const corsOrigin = this.allowRemote
             ? true // allow all origins
             : ["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:3001", "http://127.0.0.1:3001"];
 
@@ -69,9 +71,9 @@ class WebServer {
         this.app.use((req, res, next) => {
             // CSP: allow WebSocket connections from any host when remote access is on
             // 🎯 [v9.1.10] Relax CSP for images to support diverse sources and prevent broken icons
-            const connectSrc = allowRemote
-                ? "default-src 'self' *; connect-src * ws: wss:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: *;"
-                : "default-src 'self'; connect-src 'self' ws: wss:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: *;";
+            const connectSrc = this.allowRemote
+                ? "default-src 'self'; connect-src * ws: wss:; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: *;"
+                : "default-src 'self'; connect-src 'self' ws: wss:; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: *;";
             res.setHeader('Content-Security-Policy', connectSrc);
             next();
         });
@@ -237,6 +239,7 @@ class WebServer {
                 '/dashboard/terminal',
                 '/dashboard/agents',
                 '/dashboard/office',
+                '/dashboard/mcp',
                 '/dashboard/system-setup'
             ];
 
@@ -295,756 +298,16 @@ class WebServer {
 
         // --- API Routes ---
 
-        // Upload API (Direct Web Upload)
-        this.app.post('/api/upload', async (req, res) => {
-            try {
-                const { fileName, base64Data } = req.body;
-                if (!fileName || !base64Data) {
-                    return res.status(400).json({ error: 'Missing fileName or base64Data' });
-                }
-
-                // Create temp upload dir
-                const uploadDir = path.join(process.cwd(), 'data', 'temp_uploads');
-                if (!fs.existsSync(uploadDir)) {
-                    fs.mkdirSync(uploadDir, { recursive: true });
-                }
-
-                // Sanitize filename
-                const safeName = `${Date.now()}_${fileName.replace(/[^a-z0-9.]/gi, '_')}`;
-                const filePath = path.join(uploadDir, safeName);
-
-                // Save file
-                const buffer = Buffer.from(base64Data, 'base64');
-                fs.writeFileSync(filePath, buffer);
-
-                console.log(`💾 [WebServer] File uploaded: ${safeName}`);
-                return res.json({ success: true, path: filePath, url: `/api/files/${safeName}` });
-            } catch (e) {
-                console.error('Failed to upload file:', e);
-                return res.status(500).json({ error: e.message });
-            }
-        });
-
-        // Chat API (Direct Web Chat)
-        this.app.post('/api/chat', async (req, res) => {
-            try {
-                const { golemId, message, attachment: attachmentData } = req.body;
-                if (!golemId || (!message && !attachmentData)) {
-                    return res.status(400).json({ error: 'Missing golemId, message or attachment' });
-                }
-
-                if (typeof global.handleDashboardMessage !== 'function') {
-                    return res.status(503).json({ error: 'Dashboard message handler not ready' });
-                }
-
-                // 🚀 [v9.1.10] 更好的 MIME Type 推斷邏輯，避免非圖片檔案被誤判為 image/jpeg
-                let finalMimeType = attachmentData ? attachmentData.mimeType : null;
-                if (attachmentData && !finalMimeType && attachmentData.url) {
-                    const ext = attachmentData.url.split('.').pop().toLowerCase();
-                    const mimeMap = {
-                        'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png', 'gif': 'image/gif', 'webp': 'image/webp',
-                        'pdf': 'application/pdf', 'txt': 'text/plain', 'md': 'text/markdown', 'sh': 'text/x-sh', 'js': 'text/javascript'
-                    };
-                    finalMimeType = mimeMap[ext] || 'application/octet-stream';
-                }
-
-                const attachment = attachmentData ? {
-                    isNative: true,
-                    path: attachmentData.path,
-                    url: attachmentData.url,
-                    mimeType: finalMimeType || 'application/octet-stream'
-                } : null;
-
-                // 建立了 UniversalContext 替代品
-                const mockContext = {
-                    platform: 'web',
-                    isAdmin: true,
-                    text: message,
-                    messageTime: Date.now(),
-                    senderName: 'User',
-                    replyToName: '',
-                    chatId: 'web-dashboard',
-                    reply: async (text, options) => {
-                        let payloadType = 'agent';
-                        let actionData = null;
-
-                        if (options && options.reply_markup && options.reply_markup.inline_keyboard) {
-                            payloadType = 'approval';
-                            actionData = options.reply_markup.inline_keyboard[0];
-                        }
-
-                        this.broadcastLog({
-                            time: new Date().toLocaleTimeString('zh-TW', { hour12: false }),
-                            msg: `[${golemId}] ${text}`,
-                            type: payloadType,
-                            raw: text,
-                            actionData,
-                            golemId
-                        });
-                    },
-                    sendTyping: async () => { },
-                    getAttachment: async () => attachment,
-                    instance: { username: golemId }
-                };
-
-                // 回顯使用者的訊息到 Dashboard Log
-                this.broadcastLog({
-                    time: new Date().toLocaleTimeString(),
-                    msg: `[User] ${message || (attachment ? '[圖片]' : '')}`,
-                    type: 'agent',
-                    raw: `[User] ${message || '[圖片]'}`,
-                    golemId,
-                    attachment: attachment ? { url: attachment.url, mimeType: attachment.mimeType } : null
-                });
-
-                // ── [v9.1.10] 立即發送「思考中」信號 ──
-                this.broadcastLog({
-                    time: new Date().toLocaleTimeString(),
-                    msg: `[${golemId}] ...`,
-                    type: 'thinking',
-                    raw: '...',
-                    golemId
-                });
-
-                // 將訊息推進 Golem
-                global.handleDashboardMessage(mockContext, golemId).catch(exp => {
-                    console.error('[WebServer] Direct chat error:', exp);
-                });
-
-                return res.json({ success: true });
-            } catch (e) {
-                console.error('Failed to send chat message:', e);
-                return res.status(500).json({ error: e.message });
-            }
-        });
-
-        // Chat Action Callback API (Inline Button Click)
-        this.app.post('/api/chat/callback', async (req, res) => {
-            try {
-                const { golemId, callback_data } = req.body;
-                if (!golemId || !callback_data) {
-                    return res.status(400).json({ error: 'Missing golemId or callback_data' });
-                }
-
-                const index = require('../index.js');
-
-                if (typeof global.handleDashboardMessage !== 'function') {
-                    return res.status(503).json({ error: 'Dashboard message handler not ready' });
-                }
-
-                const mockContext = {
-                    platform: 'web',
-                    isAdmin: true,
-                    data: callback_data,
-                    messageTime: Date.now(),
-                    senderName: 'User',
-                    replyToName: '',
-                    chatId: 'web-dashboard',
-                    reply: async (text, options) => {
-                        let payloadType = 'agent';
-                        let actionData = null;
-
-                        if (options && options.reply_markup && options.reply_markup.inline_keyboard) {
-                            payloadType = 'approval';
-                            actionData = options.reply_markup.inline_keyboard[0];
-                        }
-
-                        this.broadcastLog({
-                            time: new Date().toLocaleTimeString('zh-TW', { hour12: false }),
-                            msg: `[${golemId}] ${text}`,
-                            type: payloadType,
-                            raw: text,
-                            actionData,
-                            golemId
-                        });
-                    },
-                    answerCallbackQuery: async () => { },
-                    sendTyping: async () => { },
-                    instance: { username: golemId }
-                };
-
-                // ── [v9.1.8] 翻譯指令代碼為人類語言 ──
-                let translatedMsg = callback_data;
-                let displayType = 'agent';
-
-                if (callback_data.includes('_')) {
-                    const [action, taskId] = callback_data.split('_');
-                    const isApprove = action === 'APPROVE';
-                    const isDeny = action === 'DENY';
-
-                    if (isApprove || isDeny) {
-                        translatedMsg = isApprove ? '✅ 批准執行' : '❌ 拒絕執行';
-                        displayType = 'agent'; // 雖然是 User 發起，但目前前端統一走 agent 頻道
-
-                        // 嘗試抓取具體指令內容增加上下文
-                        try {
-                            const instance = index.getOrCreateGolem ? index.getOrCreateGolem(golemId) : null;
-                            if (instance && instance.controller && instance.controller.pendingTasks) {
-                                const task = instance.controller.pendingTasks.get(taskId);
-                                if (task && task.steps && task.steps[task.nextIndex]) {
-                                    const step = task.steps[task.nextIndex];
-                                    const cmd = step.cmd || step.parameter || step.command || "";
-                                    if (cmd) {
-                                        translatedMsg += `: \`${cmd.length > 50 ? cmd.substring(0, 47) + '...' : cmd}\``;
-                                    }
-                                }
-                            }
-                        } catch (err) {
-                            console.warn('[WebServer] 無法取得任務上下文:', err.message);
-                        }
-                    }
-                }
-
-                // ── [v9.1.11] 調整順序：優先顯示使用者動作，再執行後端邏輯 ──
-
-                // 1. 回顯操作給前端 (改用 [WebUser] 前綴，讓前端正確歸類為使用者消息)
-                this.broadcastLog({
-                    time: new Date().toLocaleTimeString(),
-                    msg: `[WebUser] ${translatedMsg}`,
-                    type: displayType,
-                    raw: `[User] ${translatedMsg}`,
-                    golemId
-                });
-
-                // 2. 立即發送「思考中」信號
-                this.broadcastLog({
-                    time: new Date().toLocaleTimeString(),
-                    msg: `[${golemId}] ...`,
-                    type: 'thinking',
-                    raw: '...',
-                    golemId
-                });
-
-                // 3. 微小延遲確保前端 Socket 順序，接著才觸發後端執行 (避免 Golem 回覆超車)
-                setTimeout(() => {
-                    if (typeof index.handleUnifiedCallback === 'function') {
-                        index.handleUnifiedCallback(mockContext, callback_data, golemId).catch(console.error);
-                    } else if (global.handleUnifiedCallback) {
-                        global.handleUnifiedCallback(mockContext, callback_data, golemId).catch(console.error);
-                    } else {
-                        console.error('[WebServer] handleUnifiedCallback not found in index.js exports or global');
-                    }
-                }, 100);
-
-                return res.json({ success: true });
-            } catch (e) {
-                console.error('Failed to send callback query:', e);
-                return res.status(500).json({ error: e.message });
-            }
-        });
-
-        // Chat History API
-        this.app.get('/api/chat/history', (req, res) => {
-            try {
-                const { golemId } = req.query;
-                if (!golemId) return res.status(400).json({ error: 'golemId required' });
-
-                const history = this.chatHistory ? (this.chatHistory.get(golemId) || []) : [];
-                return res.json({ success: true, history });
-            } catch (e) {
-                console.error('Failed to fetch chat history:', e);
-                return res.status(500).json({ error: e.message });
-            }
-        });
-
-        // Config API (Settings Page)
-        this.app.get('/api/config', (req, res) => {
-            try {
-                const EnvManager = require('../src/utils/EnvManager');
-                const envData = EnvManager.readEnv();
-
-                // We return all properties so the frontend can display them.
-                return res.json({ env: envData, golems: [] });
-            } catch (e) {
-                console.error("Failed to read config:", e);
-                return res.status(500).json({ error: e.message });
-            }
-        });
-
-        this.app.post('/api/config', (req, res) => {
-            try {
-                const { env: envPayload } = req.body;
-
-                if (!envPayload || typeof envPayload !== 'object') {
-                    return res.status(400).json({ error: "Invalid env payload" });
-                }
-
-                const EnvManager = require('../src/utils/EnvManager');
-
-                // 1. 寫入 .env 檔案
-                const envUpdated = EnvManager.updateEnv(envPayload);
-
-                if (envUpdated) {
-                    console.log(`📝 [System] Saved new config. env updated: ${envUpdated}`);
-
-                    return res.json({ success: true, message: "Settings saved successfully. A system restart is required for changes to take effect." });
-                }
-
-                return res.json({ success: false, message: "No changes detected" });
-            } catch (e) {
-                console.error("Failed to update config:", e);
-                return res.status(500).json({ error: e.message });
-            }
-        });
-
-
-        this.app.get('/api/skills/marketplace', (req, res) => {
-            try {
-                const marketplaceDir = path.join(process.cwd(), 'data', 'marketplace', 'skills');
-                let allSkills = [];
-
-                const { search, category, page = 1, limit = 20 } = req.query;
-
-                if (category && category !== 'all') {
-                    const catFile = path.join(marketplaceDir, `${category}.json`);
-                    if (fs.existsSync(catFile)) {
-                        allSkills = JSON.parse(fs.readFileSync(catFile, 'utf8'));
-                    }
-                } else {
-                    if (fs.existsSync(marketplaceDir)) {
-                        const files = fs.readdirSync(marketplaceDir).filter(f => f.endsWith('.json'));
-                        for (const file of files) {
-                            const data = JSON.parse(fs.readFileSync(path.join(marketplaceDir, file), 'utf8'));
-                            allSkills = allSkills.concat(data);
-                        }
-                    }
-                }
-
-                if (category && category !== 'all') {
-                    allSkills = allSkills.filter(s => s.category === category);
-                }
-                if (search) {
-                    const term = search.toLowerCase();
-                    allSkills = allSkills.filter(s => s.title.toLowerCase().includes(term) || s.description.toLowerCase().includes(term));
-                }
-
-                const total = allSkills.length;
-                const startIndex = (Number(page) - 1) * Number(limit);
-                const endIndex = startIndex + Number(limit);
-                const skills = allSkills.slice(startIndex, endIndex);
-
-                // Calculate counts for all categories
-                const categoryCounts = {};
-                let totalMarketSkills = 0;
-                if (fs.existsSync(marketplaceDir)) {
-                    const files = fs.readdirSync(marketplaceDir).filter(f => f.endsWith('.json'));
-                    for (const file of files) {
-                        const data = JSON.parse(fs.readFileSync(path.join(marketplaceDir, file), 'utf8'));
-                        const categoryId = file.replace('.json', '');
-                        categoryCounts[categoryId] = data.length;
-                        totalMarketSkills += data.length;
-                    }
-                }
-                categoryCounts['all'] = totalMarketSkills;
-
-                return res.json({ skills, total, categoryCounts });
-            } catch (e) {
-                console.error("Failed to read marketplace skills:", e);
-                return res.status(500).json({ error: e.message });
-            }
-        });
-
-        this.app.post('/api/skills/marketplace/install', async (req, res) => {
-            try {
-                const { id, repoUrl } = req.body;
-                if (!id || !repoUrl) return res.status(400).json({ error: 'Missing id or repoUrl' });
-
-                let rawUrl = repoUrl
-                    .replace('github.com', 'raw.githubusercontent.com')
-                    .replace('/tree/', '/');
-
-                if (!rawUrl.toLowerCase().endsWith('.md')) {
-                    if (rawUrl.endsWith('/')) rawUrl += 'SKILL.md';
-                    else rawUrl += '/SKILL.md';
-                }
-
-                const https = require('https');
-
-                async function fetchWithFallback(url, id) {
-                    const tryUrls = [
-                        url, // Original
-                        url.replace(/\/SKILL\.md$/i, `/${id}/SKILL.md`), // Subdir + SKILL.md
-                        url.replace(/\/SKILL\.md$/i, `/${id}/skill.md`), // Subdir + skill.md
-                        url.endsWith('SKILL.md') ? url.replace('SKILL.md', 'skill.md') : url + '/skill.md' // Root skill.md
-                    ];
-
-                    // Remove duplicates
-                    const uniqueUrls = [...new Set(tryUrls)];
-
-                    for (const targetUrl of uniqueUrls) {
-                        try {
-                            const data = await new Promise((resolve, reject) => {
-                                const options = {
-                                    headers: { 'User-Agent': 'Golem-Dashboard-Installer' }
-                                };
-                                https.get(targetUrl, options, (response) => {
-                                    if (response.statusCode === 200) {
-                                        let body = '';
-                                        response.on('data', chunk => body += chunk);
-                                        response.on('end', () => resolve(body));
-                                    } else {
-                                        resolve(null);
-                                    }
-                                }).on('error', (e) => resolve(null));
-                            });
-                            if (data) return data;
-                        } catch (e) {
-                            continue;
-                        }
-                    }
-                    return null;
-                }
-
-                const content = await fetchWithFallback(rawUrl, id);
-                if (!content) {
-                    return res.status(404).json({ error: 'Skill markdown not found even after trying subdirectories' });
-                }
-
-                const safeId = id.replace(/[^a-z0-9_-]/gi, '_').toLowerCase();
-                const libPath = path.join(process.cwd(), 'src', 'skills', 'lib');
-                const filePath = path.join(libPath, `${safeId}.md`);
-
-                let title = safeId;
-                // Remove BOM if present, then trim
-                let parsedContent = content.toString().replace(/^\uFEFF/, '').trim();
-
-                // Parse YAML frontmatter if present (allowing for any stray spaces before ---)
-                const fmMatch = parsedContent.match(/^\s*---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/);
-                if (fmMatch) {
-                    const yaml = fmMatch[1];
-                    const nameMatch = yaml.match(/^name:\s*(.+)$/m);
-                    if (nameMatch) {
-                        title = nameMatch[1].replace(/^["']|["']$/g, '').trim();
-                    }
-                    parsedContent = fmMatch[2].trim();
-                } else {
-                    // Fallback to first heading
-                    const hMatch = parsedContent.match(/^#+\s+(.+)$/m);
-                    if (hMatch) title = hMatch[1].trim();
-                }
-
-                // Wrap with Golem standard tag
-                const finalContent = `【已載入技能：${title}】\n\n${parsedContent}`;
-
-                fs.writeFileSync(filePath, finalContent, 'utf8');
-                console.log(`✨ [WebServer] Marketplace skill installed: ${safeId}.md`);
-
-                const SkillIndexManager = require('../src/managers/SkillIndexManager');
-                const { MEMORY_BASE_DIR } = require('../src/config');
-                const idx = new SkillIndexManager(MEMORY_BASE_DIR);
-                idx.addSkill(safeId).catch(e => console.error(`[SkillIndex] MarketplaceInstall-Add Error for ${safeId}:`, e.message));
-
-                return res.json({ success: true, id: safeId });
-            } catch (e) {
-                console.error('Failed to install marketplace skill:', e);
-                return res.status(500).json({ error: e.message });
-            }
-        });
-
-        this.app.get('/api/skills', async (req, res) => {
-            try {
-                const libPath = path.join(process.cwd(), 'src', 'skills', 'lib');
-                if (!fs.existsSync(libPath)) return res.json([]);
-
-                const files = fs.readdirSync(libPath).filter(f => f.endsWith('.md'));
-
-                // Use shared skillsConfig: mandatory always on, optional via env
-                const enabledSkills = resolveEnabledSkills(process.env.OPTIONAL_SKILLS || '', []);
-
-                const skillsData = files.map(file => {
-                    const content = fs.readFileSync(path.join(libPath, file), 'utf8');
-                    const baseName = file.replace('.md', '').toLowerCase();
-                    const isOptional = !MANDATORY_SKILLS.includes(baseName);
-                    const isEnabled = enabledSkills.has(baseName);
-
-                    // Extract first line or generic title
-                    const firstLineMatch = content.match(/^#+ (.*)|^【(.*)】/m) || content.match(/^([^\n]+)/);
-                    let title = baseName;
-                    if (firstLineMatch) {
-                        title = firstLineMatch[1] || firstLineMatch[2] || firstLineMatch[0];
-                        title = title.replace(/^#+\s*|【|】/g, '').trim();
-                    }
-
-                    return {
-                        id: baseName,
-                        title: title || baseName,
-                        isOptional,
-                        isEnabled,
-                        content: content
-                    };
-                });
-
-                // Sort: Enabled first, then by name
-                skillsData.sort((a, b) => {
-                    if (a.isEnabled && !b.isEnabled) return -1;
-                    if (!a.isEnabled && b.isEnabled) return 1;
-                    return a.id.localeCompare(b.id);
-                });
-
-                return res.json(skillsData);
-            } catch (e) {
-                console.error("Failed to read skills:", e);
-                return res.status(500).json({ error: e.message });
-            }
-        });
-
-        this.app.post('/api/skills/toggle', (req, res) => {
-            try {
-                const { id, enabled } = req.body;
-                if (!id) return res.status(400).json({ error: "Missing skill ID" });
-
-                // Verify skill is optional and exists in lib/
-                const libPath = path.join(process.cwd(), 'src', 'skills', 'lib');
-                if (!fs.existsSync(path.join(libPath, `${id}.md`))) {
-                    return res.status(400).json({ error: `Skill "${id}" not found in lib/` });
-                }
-                if (MANDATORY_SKILLS.includes(id)) {
-                    return res.status(400).json({ error: `"${id}" is a mandatory skill and cannot be toggled` });
-                }
-
-                // 1. Update in-memory
-                let currentStr = process.env.OPTIONAL_SKILLS || '';
-                let currentSkills = currentStr.split(',').map(s => s.trim().toLowerCase()).filter(s => s !== '');
-
-                if (enabled && !currentSkills.includes(id)) {
-                    currentSkills.push(id);
-                } else if (!enabled && currentSkills.includes(id)) {
-                    currentSkills = currentSkills.filter(s => s !== id);
-                }
-
-                const newSkillsStr = currentSkills.join(',');
-                process.env.OPTIONAL_SKILLS = newSkillsStr;
-
-                // 2. Persist to .env
-                const envPath = path.resolve(process.cwd(), '.env'); // Fixed: directly in root if started from root
-                if (fs.existsSync(envPath)) {
-                    let envContent = fs.readFileSync(envPath, 'utf8');
-
-                    // Regex to find OPTIONAL_SKILLS=... and replace it
-                    const regex = /^OPTIONAL_SKILLS=.*$/m;
-                    if (regex.test(envContent)) {
-                        envContent = envContent.replace(regex, `OPTIONAL_SKILLS=${newSkillsStr}`);
-                    } else {
-                        envContent += `\nOPTIONAL_SKILLS=${newSkillsStr}\n`;
-                    }
-                    fs.writeFileSync(envPath, envContent, 'utf8');
-                    console.log(`📝 [System] Saved new skill config to .env: ${newSkillsStr}`);
-                }
-
-                // 3. Clear Cache (Hot Reload)
-                const ProtocolFormatter = require('../src/services/ProtocolFormatter');
-                ProtocolFormatter._lastScanTime = 0;
-
-                // 4. Update SQLite Index
-                const SkillIndexManager = require('../src/managers/SkillIndexManager');
-                const { MEMORY_BASE_DIR } = require('../src/config');
-                const idx = new SkillIndexManager(MEMORY_BASE_DIR);
-                if (enabled) {
-                    idx.addSkill(id).catch(e => console.error(`[SkillIndex] Toggle-Add Error for ${id}:`, e.message));
-                } else {
-                    idx.removeSkill(id).catch(e => console.error(`[SkillIndex] Toggle-Remove Error for ${id}:`, e.message));
-                }
-
-                return res.json({ success: true, enabled, skillsStr: newSkillsStr });
-            } catch (e) {
-                console.error("Failed to toggle skill:", e);
-                return res.status(500).json({ error: e.message });
-            }
-        });
-
-        // ➕ 新增技能 API
-        this.app.post('/api/skills/create', (req, res) => {
-            try {
-                const { id, content } = req.body;
-                if (!id || !content) return res.status(400).json({ error: 'Missing id or content' });
-
-                const safeId = id.replace(/[^a-z0-9_-]/gi, '_').toLowerCase();
-                if (MANDATORY_SKILLS.includes(safeId)) {
-                    return res.status(400).json({ error: `Cannot overwrite mandatory skill '${safeId}'` });
-                }
-
-                const libPath = path.join(process.cwd(), 'src', 'skills', 'lib');
-                const filePath = path.join(libPath, `${safeId}.md`);
-
-                if (fs.existsSync(filePath)) {
-                    return res.status(409).json({ error: `Skill '${safeId}' already exists` });
-                }
-
-                fs.writeFileSync(filePath, content, 'utf8');
-                console.log(`✨ [WebServer] Custom skill created: ${safeId}.md`);
-
-                // 2. Index to SQLite if it would be enabled (mandatory or in OPTIONAL_SKILLS)
-                const enabledSkills = resolveEnabledSkills(process.env.OPTIONAL_SKILLS || '', []);
-                if (MANDATORY_SKILLS.includes(safeId) || enabledSkills.has(safeId)) {
-                    const SkillIndexManager = require('../src/managers/SkillIndexManager');
-                    const { MEMORY_BASE_DIR } = require('../src/config');
-                    const idx = new SkillIndexManager(MEMORY_BASE_DIR);
-                    idx.addSkill(safeId).catch(e => console.error(`[SkillIndex] Create-Add Error for ${safeId}:`, e.message));
-                }
-
-                return res.json({ success: true, id: safeId });
-            } catch (e) {
-                console.error('Failed to create skill:', e);
-                return res.status(500).json({ error: e.message });
-            }
-        });
-
-        // ✏️ 更新技能 API
-        this.app.post('/api/skills/update', (req, res) => {
-            try {
-                const { id, content } = req.body;
-                if (!id || !content) return res.status(400).json({ error: 'Missing id or content' });
-
-                const safeId = id.replace(/[^a-z0-9_-]/gi, '_').toLowerCase();
-                if (MANDATORY_SKILLS.includes(safeId)) {
-                    return res.status(403).json({ error: `Cannot edit mandatory skill '${safeId}'` });
-                }
-
-                const libPath = path.join(process.cwd(), 'src', 'skills', 'lib');
-                const filePath = path.join(libPath, `${safeId}.md`);
-
-                if (!fs.existsSync(filePath)) {
-                    return res.status(404).json({ error: `Skill '${safeId}' not found` });
-                }
-
-                fs.writeFileSync(filePath, content, 'utf8');
-                console.log(`📝 [WebServer] Custom skill updated: ${safeId}.md`);
-
-                // 2. Update SQLite Index if active
-                const enabledSkills = resolveEnabledSkills(process.env.OPTIONAL_SKILLS || '', []);
-                if (MANDATORY_SKILLS.includes(safeId) || enabledSkills.has(safeId)) {
-                    const SkillIndexManager = require('../src/managers/SkillIndexManager');
-                    const { MEMORY_BASE_DIR } = require('../src/config');
-
-                    const idx = new SkillIndexManager(MEMORY_BASE_DIR);
-                    idx.addSkill(safeId).catch(e => console.error(`[SkillIndex] Update-Add Error for ${safeId}:`, e.message));
-                }
-
-                return res.json({ success: true, id: safeId });
-            } catch (e) {
-                console.error('Failed to update skill:', e);
-                return res.status(500).json({ error: e.message });
-            }
-        });
-
-        // 🗑️ 刪除技能 API
-        this.app.post('/api/skills/delete', async (req, res) => {
-            try {
-                const { id } = req.body;
-                if (!id) return res.status(400).json({ error: 'Missing skill ID' });
-
-                const safeId = id.replace(/[^a-z0-9_-]/gi, '_').toLowerCase();
-
-                // 1. 安全檢查：禁止刪除強制性技能
-                if (MANDATORY_SKILLS.includes(safeId)) {
-                    return res.status(403).json({ error: `Cannot delete mandatory skill '${safeId}'` });
-                }
-
-                const libPath = path.join(process.cwd(), 'src', 'skills', 'lib');
-                const filePath = path.join(libPath, `${safeId}.md`);
-
-                if (!fs.existsSync(filePath)) {
-                    return res.status(404).json({ error: `Skill '${safeId}' not found` });
-                }
-
-                // 2. 執行檔案刪除
-                fs.unlinkSync(filePath);
-                console.log(`🗑️ [WebServer] Custom skill deleted: ${safeId}.md`);
-
-                // 3. 從 SQLite 索引移除
-                const SkillIndexManager = require('../src/managers/SkillIndexManager');
-                const { MEMORY_BASE_DIR } = require('../src/config');
-                const idx = new SkillIndexManager(MEMORY_BASE_DIR);
-                await idx.removeSkill(safeId).catch(e => console.error(`[SkillIndex] Delete-Remove Error for ${safeId}:`, e.message));
-
-                // 4. 清除技能快取 (ProtocolFormatter)
-                const ProtocolFormatter = require('../src/services/ProtocolFormatter');
-                ProtocolFormatter._lastScanTime = 0;
-
-                return res.json({ success: true, id: safeId });
-            } catch (e) {
-                console.error('Failed to delete skill:', e);
-                return res.status(500).json({ error: e.message });
-            }
-        });
-
-        this.app.post('/api/skills/reload', (req, res) => {
-            try {
-                console.log("🔄 [WebServer] Hot-reloading skills... Clearing ProtocolFormatter cache.");
-                const ProtocolFormatter = require('../src/services/ProtocolFormatter');
-                ProtocolFormatter._lastScanTime = 0; // Trigger a fresh scan on next turn
-                return res.json({ success: true, message: "Skills cache cleared" });
-            } catch (e) {
-                console.error("Failed to reload skills cache:", e);
-                return res.status(500).json({ error: e.message });
-            }
-        });
-
-        // 🚀 技能注入：重新組裝技能書並送進 Gemini
-        this.app.post('/api/skills/inject', async (req, res) => {
-            try {
-                // 1. 先清除 ProtocolFormatter 快取，確保讀到最新的技能清單
-                const ProtocolFormatter = require('../src/services/ProtocolFormatter');
-                ProtocolFormatter._lastScanTime = 0;
-
-                // 2. 對每個運行中的 Golem Brain 呼叫 reloadSkills()
-                const results = [];
-                for (const [id, context] of this.contexts.entries()) {
-                    if (context.brain && typeof context.brain.reloadSkills === 'function') {
-                        try {
-                            console.log(`🚀 [WebServer] 啟動 [${id}] 完整重啟程序...`);
-                            await context.brain.reloadSkills();
-                            results.push({ id, status: 'success' });
-
-                            // 📣 TG 通知
-                            const tgBot = context.brain.tgBot;
-                            if (tgBot) {
-                                const enabledSkills = resolveEnabledSkills(process.env.OPTIONAL_SKILLS || '', []);
-                                const enabledOptional = OPTIONAL_SKILL_LIST.filter(s => enabledSkills.has(s));
-                                const disabledOptional = OPTIONAL_SKILL_LIST.filter(s => !enabledSkills.has(s));
-
-                                const mandatoryList = MANDATORY_SKILLS.map(s => `• ${s}`).join('\n');
-                                const optionalList = enabledOptional.length > 0 ? enabledOptional.map(s => `• ${s}`).join('\n') : '（無）';
-                                const disabledList = disabledOptional.length > 0 ? disabledOptional.map(s => `• ${s}`).join('\n') : '（無）';
-
-                                const msg = `⚡ *[${id}] 技能書已重新注入*\n\n🔒 *必要技能（永久啟用）:*\n${mandatoryList}\n\n✅ *已啟用選用技能:*\n${optionalList}\n\n⛔ *未啟用選用技能:*\n${disabledList}`;
-
-                                const gCfg = tgBot.golemConfig || {};
-                                const targetId = gCfg.adminId || gCfg.chatId;
-                                if (targetId) {
-                                    tgBot.sendMessage(targetId, msg, { parse_mode: 'Markdown' })
-                                        .catch(e => console.warn(`⚠️ [WebServer] TG skill notify failed [${id}]:`, e.message));
-                                    // 確認通知
-                                    tgBot.sendMessage(targetId, `🔄 *[${id}] 技能書注入完成*\n已為您重新開啟全新的 Gemini 對話視窗並注入技能，人格設定與歷史記憶已完整保留，不需重新設定。`, { parse_mode: 'Markdown' })
-                                        .catch(e => console.warn(`⚠️ [WebServer] TG inject notify failed [${id}]:`, e.message));
-                                }
-                            }
-                        } catch (e) {
-                            console.error(`❌ [WebServer] Failed to inject skills into Golem [${id}]:`, e.message);
-                            results.push({ id, status: 'error', error: e.message });
-                        }
-                    } else {
-                        results.push({ id, status: 'skipped', error: 'Brain not ready or reloadSkills not available' });
-                    }
-                }
-
-                if (results.length === 0) {
-                    return res.status(503).json({ success: false, message: "No active Golem instances found" });
-                }
-
-                const allSuccess = results.every(r => r.status === 'success');
-                return res.json({
-                    success: allSuccess,
-                    message: allSuccess
-                        ? `技能書已成功注入 ${results.length} 個 Golem 實體`
-                        : `部分注入失敗`,
-                    results
-                });
-            } catch (e) {
-                console.error("Failed to inject skills:", e);
-                return res.status(500).json({ error: e.message });
-            }
-        });
+        // 模組化 API 路由
+        const uploadRoutes = require('./routes/api.upload')(this);
+        const chatRoutes = require('./routes/api.chat')(this);
+        const configRoutes = require('./routes/api.config')(this);
+        const skillsRoutes = require('./routes/api.skills')(this);
+
+        this.app.use(uploadRoutes);
+        this.app.use(chatRoutes);
+        this.app.use(configRoutes);
+        this.app.use(skillsRoutes);
 
         this.app.get('/api/golems/templates', (req, res) => {
             const personasDir = path.resolve(process.cwd(), 'personas');
@@ -1243,7 +506,6 @@ class WebServer {
                 const health = {
                     node: process.version.startsWith('v20') || process.version.startsWith('v22') || process.version.startsWith('v21') || process.version.startsWith('v23') || process.version.startsWith('v25'),
                     env: fs.existsSync(DOT_ENV_PATH),
-                    keys: !!(envVars.GEMINI_API_KEYS && envVars.GEMINI_API_KEYS !== '你的Key1,你的Key2,你的Key3'),
                     deps: fs.existsSync(path.join(process.cwd(), 'node_modules')),
                     core: ['index.js', 'package.json', 'dashboard.js'].every(f => fs.existsSync(path.join(process.cwd(), f))),
                     dashboard: fs.existsSync(path.join(process.cwd(), 'web-dashboard/node_modules')) || fs.existsSync(path.join(process.cwd(), 'web-dashboard/.next'))
@@ -1270,6 +532,9 @@ class WebServer {
                     configuredCount,
                     isSystemConfigured,
                     isBooting: this.isBooting,
+                    allowRemote: this.allowRemote,
+                    localIp: getLocalIp(),
+                    dashboardPort: process.env.DASHBOARD_PORT || 3000,
                     runtime,
                     health,
                     system
@@ -1299,10 +564,11 @@ class WebServer {
                 return res.json({
                     version,
                     userDataDir: envVars.USER_DATA_DIR || './golem_memory',
-                    golemMemoryMode: envVars.GOLEM_MEMORY_MODE || 'browser',
+                    golemMemoryMode: envVars.GOLEM_MEMORY_MODE || 'lancedb',
                     golemEmbeddingProvider: envVars.GOLEM_EMBEDDING_PROVIDER || 'gemini',
                     golemLocalEmbeddingModel: envVars.GOLEM_LOCAL_EMBEDDING_MODEL || 'Xenova/bge-small-zh-v1.5',
-                    golemMode: 'SINGLE'
+                    golemMode: 'SINGLE',
+                    allowRemoteAccess: this.allowRemote
                 });
             } catch (e) {
                 console.error('[WebServer] Failed to get system config:', e);
@@ -1312,7 +578,7 @@ class WebServer {
 
         this.app.post('/api/system/config', (req, res) => {
             try {
-                const { geminiApiKeys, userDataDir, golemMemoryMode, golemEmbeddingProvider, golemLocalEmbeddingModel, golemMode } = req.body;
+                const { geminiApiKeys, userDataDir, golemMemoryMode, golemEmbeddingProvider, golemLocalEmbeddingModel, golemMode, allowRemoteAccess } = req.body;
                 const EnvManager = require('../src/utils/EnvManager');
                 const ConfigManager = require('../src/config/index');
 
@@ -1323,6 +589,7 @@ class WebServer {
                 if (golemMemoryMode) updates.GOLEM_MEMORY_MODE = golemMemoryMode;
                 if (golemEmbeddingProvider) updates.GOLEM_EMBEDDING_PROVIDER = golemEmbeddingProvider;
                 if (golemLocalEmbeddingModel) updates.GOLEM_LOCAL_EMBEDDING_MODEL = golemLocalEmbeddingModel;
+                if (allowRemoteAccess !== undefined) updates.ALLOW_REMOTE_ACCESS = String(allowRemoteAccess);
                 updates.GOLEM_MODE = 'SINGLE';
 
                 if (Object.keys(updates).length > 0) {
@@ -1331,6 +598,10 @@ class WebServer {
 
                     EnvManager.updateEnv(updates);
                     console.log('📝 [System] System configuration updated via web dashboard. Flag: SYSTEM_CONFIGURED=true');
+
+                    if (updates.ALLOW_REMOTE_ACCESS !== undefined) {
+                        this.allowRemote = updates.ALLOW_REMOTE_ACCESS === 'true';
+                    }
 
                     // 觸發熱重載
                     ConfigManager.reloadConfig();
@@ -1907,6 +1178,139 @@ class WebServer {
             } catch (e) {
                 console.error('Failed to delete persona:', e);
                 return res.status(500).json({ success: false, error: e.message });
+            }
+        });
+
+        // ─── MCP API Routes ──────────────────────────────────────────────────────────────────────
+        // Lazy-init MCPManager and wire its 'mcpLog' event to broadcastLog
+        const getMCPManager = async () => {
+            const MCPManager = require('../src/mcp/MCPManager');
+            const mgr = MCPManager.getInstance();
+            if (!mgr._loaded) {
+                // Wire log event once
+                if (!mgr._broadcastWired) {
+                    mgr._broadcastWired = true;
+                    mgr.on('mcpLog', (entry) => {
+                        const preview = entry.success
+                            ? (JSON.stringify(entry.result || '').slice(0, 120))
+                            : `ERROR: ${entry.error}`;
+                        this.broadcastLog({
+                            time: new Date().toLocaleTimeString('zh-TW', { hour12: false }),
+                            msg:  `[MCP] ${entry.server}/${entry.tool} (${entry.durationMs}ms) ${entry.success ? '✅' : '❌'} ${preview}`,
+                            type: 'mcp',
+                            raw:  JSON.stringify(entry),
+                            mcpEntry: entry
+                        });
+                    });
+                }
+                await mgr.load();
+            }
+            return mgr;
+        };
+
+        // GET /api/mcp/servers — list all
+        this.app.get('/api/mcp/servers', async (req, res) => {
+            try {
+                const mgr = await getMCPManager();
+                return res.json({ servers: mgr.getServers() });
+            } catch (e) {
+                console.error('[MCP] List servers error:', e);
+                return res.status(500).json({ error: e.message });
+            }
+        });
+
+        // POST /api/mcp/servers — add
+        this.app.post('/api/mcp/servers', async (req, res) => {
+            try {
+                const { name, command, args, env, enabled, description } = req.body;
+                if (!name || !command) return res.status(400).json({ error: 'Missing name or command' });
+                const mgr   = await getMCPManager();
+                const entry = await mgr.addServer({ name, command, args, env, enabled, description });
+                console.log(`[MCP] Added server: ${name}`);
+                return res.json({ success: true, server: entry });
+            } catch (e) {
+                console.error('[MCP] Add server error:', e);
+                return res.status(500).json({ error: e.message });
+            }
+        });
+
+        // PUT /api/mcp/servers/:name — update
+        this.app.put('/api/mcp/servers/:name', async (req, res) => {
+            try {
+                const { name } = req.params;
+                const mgr   = await getMCPManager();
+                const entry = await mgr.updateServer(name, req.body);
+                console.log(`[MCP] Updated server: ${name}`);
+                return res.json({ success: true, server: entry });
+            } catch (e) {
+                console.error('[MCP] Update server error:', e);
+                return res.status(500).json({ error: e.message });
+            }
+        });
+
+        // DELETE /api/mcp/servers/:name — remove
+        this.app.delete('/api/mcp/servers/:name', async (req, res) => {
+            try {
+                const { name } = req.params;
+                const mgr = await getMCPManager();
+                await mgr.removeServer(name);
+                console.log(`[MCP] Removed server: ${name}`);
+                return res.json({ success: true });
+            } catch (e) {
+                console.error('[MCP] Remove server error:', e);
+                return res.status(500).json({ error: e.message });
+            }
+        });
+
+        // POST /api/mcp/servers/:name/toggle — enable/disable
+        this.app.post('/api/mcp/servers/:name/toggle', async (req, res) => {
+            try {
+                const { name } = req.params;
+                const { enabled } = req.body;
+                const mgr   = await getMCPManager();
+                const entry = await mgr.toggleServer(name, Boolean(enabled));
+                return res.json({ success: true, server: entry });
+            } catch (e) {
+                console.error('[MCP] Toggle server error:', e);
+                return res.status(500).json({ error: e.message });
+            }
+        });
+
+        // GET /api/mcp/servers/:name/tools — list tools
+        this.app.get('/api/mcp/servers/:name/tools', async (req, res) => {
+            try {
+                const { name } = req.params;
+                const mgr   = await getMCPManager();
+                const tools = await mgr.listTools(name);
+                return res.json({ tools });
+            } catch (e) {
+                console.error('[MCP] List tools error:', e);
+                return res.status(500).json({ error: e.message });
+            }
+        });
+
+        // POST /api/mcp/servers/:name/test — test connection
+        this.app.post('/api/mcp/servers/:name/test', async (req, res) => {
+            try {
+                const { name } = req.params;
+                const mgr    = await getMCPManager();
+                const result = await mgr.testServer(name);
+                return res.json(result);
+            } catch (e) {
+                console.error('[MCP] Test server error:', e);
+                return res.status(500).json({ success: false, error: e.message });
+            }
+        });
+
+        // GET /api/mcp/logs — recent call logs
+        this.app.get('/api/mcp/logs', async (req, res) => {
+            try {
+                const limit = Math.min(Number(req.query.limit) || 100, 500);
+                const mgr   = await getMCPManager();
+                return res.json({ logs: mgr.getLogs(limit) });
+            } catch (e) {
+                console.error('[MCP] Get logs error:', e);
+                return res.status(500).json({ error: e.message });
             }
         });
 

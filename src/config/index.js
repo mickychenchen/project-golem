@@ -35,8 +35,13 @@ const CONFIG = {
     DONATE_URL: 'https://buymeacoffee.com/arvincreator',
     TZ: cleanEnv(process.env.TZ) || 'Asia/Taipei',
     INTERVENTION_LEVEL: cleanEnv(process.env.GOLEM_INTERVENTION_LEVEL) || 'CONSERVATIVE',
+    TG_ENGINE: cleanEnv(process.env.TG_ENGINE) || 'legacy',
+    CB_TG_TIMEOUT_MS: cleanEnv(process.env.CB_TG_TIMEOUT_MS) || '10000',
+    CB_TG_RESET_MS: cleanEnv(process.env.CB_TG_RESET_MS) || '15000',
+    CB_TG_ERROR_PCT: cleanEnv(process.env.CB_TG_ERROR_PCT) || '30',
     // --- AI Backend ---
     GOLEM_BACKEND: cleanEnv(process.env.GOLEM_BACKEND) || 'gemini',
+    GOLEM_MEMORY_MODE: cleanEnv(process.env.GOLEM_MEMORY_MODE) || 'lancedb-pro',
     // --- Scheduled Tasks ---
     AWAKE_INTERVAL_MIN: Number(cleanEnv(process.env.GOLEM_AWAKE_INTERVAL_MIN)) || 10, // 預設最小 10 分鐘
     AWAKE_INTERVAL_MAX: Number(cleanEnv(process.env.GOLEM_AWAKE_INTERVAL_MAX)) || 60, // 預設最大 60 分鐘
@@ -51,6 +56,8 @@ const CONFIG = {
     EMBEDDING_PROVIDER: cleanEnv(process.env.GOLEM_EMBEDDING_PROVIDER) || 'local',
     LOCAL_EMBEDDING_MODEL: cleanEnv(process.env.GOLEM_LOCAL_EMBEDDING_MODEL) || 'Xenova/bge-small-zh-v1.5',
     GEMINI_URLS: (process.env.GEMINI_URLS || '').split(',').map(u => cleanEnv(u, true)).filter(u => u),
+    MAX_AUTO_TURNS: Number(cleanEnv(process.env.GOLEM_MAX_AUTO_TURNS)) || 5,
+    MAX_RESPONSE_WORDS: Number(cleanEnv(process.env.GOLEM_MAX_RESPONSE_WORDS)) || 0,
 };
 
 // 驗證關鍵 Token
@@ -130,6 +137,10 @@ const reloadConfig = () => {
     CONFIG.QMD_PATH = cleanEnv(process.env.GOLEM_QMD_PATH || 'qmd', true);
     CONFIG.TZ = cleanEnv(process.env.TZ) || 'Asia/Taipei';
     CONFIG.INTERVENTION_LEVEL = cleanEnv(process.env.GOLEM_INTERVENTION_LEVEL) || 'CONSERVATIVE';
+    CONFIG.TG_ENGINE = cleanEnv(process.env.TG_ENGINE) || 'legacy';
+    CONFIG.CB_TG_TIMEOUT_MS = cleanEnv(process.env.CB_TG_TIMEOUT_MS) || '10000';
+    CONFIG.CB_TG_RESET_MS = cleanEnv(process.env.CB_TG_RESET_MS) || '15000';
+    CONFIG.CB_TG_ERROR_PCT = cleanEnv(process.env.CB_TG_ERROR_PCT) || '30';
     CONFIG.GOLEM_BACKEND = cleanEnv(process.env.GOLEM_BACKEND) || 'gemini';
     CONFIG.AWAKE_INTERVAL_MIN = Number(cleanEnv(process.env.GOLEM_AWAKE_INTERVAL_MIN)) || 10;
     CONFIG.AWAKE_INTERVAL_MAX = Number(cleanEnv(process.env.GOLEM_AWAKE_INTERVAL_MAX)) || 60;
@@ -142,10 +153,14 @@ const reloadConfig = () => {
     CONFIG.ARCHIVE_THRESHOLD_TODAY = Number(cleanEnv(process.env.ARCHIVE_THRESHOLD_TODAY)) || 1;
     CONFIG.EMBEDDING_PROVIDER = cleanEnv(process.env.GOLEM_EMBEDDING_PROVIDER) || 'local';
     CONFIG.LOCAL_EMBEDDING_MODEL = cleanEnv(process.env.GOLEM_LOCAL_EMBEDDING_MODEL) || 'Xenova/bge-small-zh-v1.5';
+    CONFIG.GOLEM_MEMORY_MODE = cleanEnv(process.env.GOLEM_MEMORY_MODE) || 'lancedb-pro';
 
     const newGeminiUrls = (process.env.GEMINI_URLS || '').split(',').map(u => cleanEnv(u, true)).filter(u => u);
     CONFIG.GEMINI_URLS.length = 0;
     CONFIG.GEMINI_URLS.push(...newGeminiUrls);
+
+    CONFIG.MAX_AUTO_TURNS = Number(cleanEnv(process.env.GOLEM_MAX_AUTO_TURNS)) || 5;
+    CONFIG.MAX_RESPONSE_WORDS = Number(cleanEnv(process.env.GOLEM_MAX_RESPONSE_WORDS)) || 0;
 
     // 重新載入 GOLEMS_CONFIG (固定為單機模式)
     GOLEMS_CONFIG.length = 0;

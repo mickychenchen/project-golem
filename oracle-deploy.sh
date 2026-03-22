@@ -176,7 +176,7 @@ DASHBOARD_PORT=${dashboard_port}
 
 # Memory
 USER_DATA_DIR=./golem_memory
-GOLEM_MEMORY_MODE=browser
+GOLEM_MEMORY_MODE=lancedb
 
 # System
 GOLEM_TEST_MODE=false

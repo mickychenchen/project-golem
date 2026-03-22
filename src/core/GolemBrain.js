@@ -4,10 +4,8 @@
 const path = require('path');
 const ConfigManager = require('../config');
 const DOMDoctor = require('../services/DOMDoctor');
-const BrowserMemoryDriver = require('../memory/BrowserMemoryDriver');
-const SystemQmdDriver = require('../memory/SystemQmdDriver');
+const LanceDBProDriver = require('../memory/LanceDBProDriver');
 const SystemNativeDriver = require('../memory/SystemNativeDriver');
-const LanceDBMemoryDriver = require('../memory/LanceDBMemoryDriver');
 
 const BrowserLauncher = require('./BrowserLauncher');
 const ProtocolFormatter = require('../services/ProtocolFormatter');
@@ -30,7 +28,6 @@ class GolemBrain {
         // ── 瀏覽器狀態 ──
         this.context = null; // Playwright BrowserContext
         this.page = null;
-        this.memoryPage = null;
         this.cdpSession = null;
 
         // ── DOM 修復服務 ──
@@ -38,12 +35,15 @@ class GolemBrain {
         this.selectors = this.doctor.loadSelectors();
 
         // ── 記憶引擎 ──
-        const mode = ConfigManager.cleanEnv(process.env.GOLEM_MEMORY_MODE || 'browser').toLowerCase();
+        const mode = ConfigManager.cleanEnv(process.env.GOLEM_MEMORY_MODE || 'lancedb-pro').toLowerCase();
         console.log(`⚙️ [System] 記憶引擎模式: ${mode.toUpperCase()} (Golem: ${this.golemId})`);
-        if (mode === 'qmd') this.memoryDriver = new SystemQmdDriver();
-        else if (mode === 'lancedb') this.memoryDriver = new LanceDBMemoryDriver();
-        else if (mode === 'native' || mode === 'system') this.memoryDriver = new SystemNativeDriver();
-        else this.memoryDriver = new BrowserMemoryDriver(this);
+
+        if (mode === 'native' || mode === 'system') {
+            this.memoryDriver = new SystemNativeDriver();
+        } else {
+            // Default to lancedb-pro
+            this.memoryDriver = new LanceDBProDriver();
+        }
 
         // ── 對話日誌 ──
         this.chatLogManager = new ChatLogManager({
@@ -53,6 +53,9 @@ class GolemBrain {
 
         // ── Backend Selection ──
         this.backend = ConfigManager.CONFIG.GOLEM_BACKEND || 'gemini';
+        
+        // ── 實體生命週期追蹤 ──
+        this.browserStartTime = null;
     }
 
     // ─── Public API (向後相容) ─────────────────────────────
@@ -78,6 +81,7 @@ class GolemBrain {
                 userDataDir: this.userDataDir,
                 headless: process.env.PLAYWRIGHT_HEADLESS,
             });
+            this.browserStartTime = Date.now();
         }
 
         // 2. 取得或建立頁面
@@ -301,7 +305,7 @@ class GolemBrain {
             const { downloadFile } = require('../utils/HttpUtils');
             const path = require('path');
             const { v4: uuidv4 } = require('uuid');
-            
+
             const localAttachments = [];
             for (const att of result.attachments) {
                 try {
@@ -312,14 +316,14 @@ class GolemBrain {
                     if (matchedExt) ext = matchedExt[1];
                     else if (att.mimeType === 'image/png') ext = 'png';
                     else if (att.mimeType === 'application/pdf') ext = 'pdf';
-                    
+
                     const fileName = `gemini_res_${Date.now()}_${uuidv4().substring(0, 8)}.${ext}`;
                     const projectRoot = path.resolve(__dirname, '../../');
                     const localPath = path.join(projectRoot, 'data', 'temp_uploads', fileName);
-                    
+
                     await downloadFile(att.url, localPath);
                     console.log(`✅ [Brain] Gemini 回應附件已下載 [${ext}]: ${fileName}`);
-                    
+
                     localAttachments.push({
                         url: `/api/files/${fileName}`,
                         path: localPath,
@@ -366,6 +370,8 @@ class GolemBrain {
         // 確保在寫入前已初始化 (防呆)
         this.chatLogManager.init().then(() => {
             this.chatLogManager.append(entry);
+        }).catch(err => {
+            console.error(`❌ [Brain][${this.golemId}] appendedChatLog error:`, err);
         });
     }
 
@@ -561,8 +567,15 @@ class GolemBrain {
         }
 
         let lastError = null;
+        let attempt = 0;
         for (const url of urls) {
             try {
+                if (attempt > 0) {
+                    const delay = Math.min(1000 * Math.pow(2, attempt), 10000); // 最大延遲 10 秒
+                    console.log(`⏳ [Brain] 等待 ${delay}ms 後重試連線...`);
+                    await new Promise(r => setTimeout(r, delay));
+                }
+                attempt++;
                 console.log(`📡 [Brain] 正在嘗試導航至: ${url}`);
                 // 等待 domcontentloaded 以確保基本結構已載入
                 await this.page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000 });
@@ -581,12 +594,13 @@ class GolemBrain {
     /**
      * 🛡️ 瀏覽器健康檢查與自癒機制
      */
-    async _ensureBrowserHealth() {
-        let isHealthy = true;
-        try {
-            if (!this.context) return; // 尚未啟動不視為故障，由 sendMessage 的 init() 處理
+    async _ensureBrowserHealth(forceRestart = false) {
+        let isHealthy = !forceRestart;
+        if (!forceRestart) {
+            try {
+                if (!this.context) return; // 尚未啟動不視為故障，由 sendMessage 的 init() 處理
 
-            // 1. 檢查連線狀態
+                // 1. 檢查連線狀態
             // Playwright 中，如果 context.browser 存在，則檢查連線
             const browser = this.context.browser();
             if (browser && !browser.isConnected()) {
@@ -607,9 +621,10 @@ class GolemBrain {
         } catch (e) {
             isHealthy = false;
         }
+        } // Close if (!forceRestart)
 
         if (!isHealthy) {
-            console.warn("🩹 [Brain] 偵測到失效狀態，正在執行物理清理並重新初始化...");
+            console.warn(`🩹 [Brain] 偵測到失效狀態或強制重啟 (forceRestart=${forceRestart})，正在執行物理清理並重新初始化...`);
             // 清理舊實體 (確保清理乾淨，防止殘留 Lock)
             try {
                 if (this.context) {

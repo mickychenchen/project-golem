@@ -205,6 +205,7 @@ graph TD
 | 文件 | 說明 |
 |------|------|
 | [🤖 編碼代理指南](docs/AGENTS.md) | **[重要]** 供 AI 助理或開發者參考的程式碼維護與架構規範 |
+| [🔌 MCP 使用與開發指南](docs/MCP-使用與開發指南.md) | **[最新]** 如何安裝、配置與調用 MCP Server (含 Hacker News 範例) |
 | [🧠 記憶系統架構說明](docs/記憶系統架構說明.md) | 金字塔壓縮原理與存放路徑解析 |
 | [🖥️ Web Dashboard 使用說明](docs/Web-Dashboard-使用說明.md) | Web UI 各個分頁的延伸細節 |
 | [🛠️ 開發者實作指南](docs/開發者實作指南.md) | 如何實作新的 Skill 與 Golem Protocol 格式規範 |

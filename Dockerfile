@@ -1,10 +1,11 @@
-# Base image with Node.js 20 (Slim version for smaller size & multi-arch support)
-FROM node:20-slim
+# --- Stage 1: Base (System Dependencies) ---
+FROM node:20-slim AS base
 
-# Install system dependencies for Puppeteer (Chromium) + curl for healthcheck
+# Install system dependencies for Playwright (libraries only, no chromium)
+# These are required even if we use Playwright's own browser binaries
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    chromium \
     curl \
+    ca-certificates \
     fonts-liberation \
     libasound2 \
     libatk-bridge2.0-0 \
@@ -42,39 +43,71 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     xdg-utils \
     && rm -rf /var/lib/apt/lists/*
 
-# Set working directory
+ENV PLAYWRIGHT_BROWSERS_PATH=/app/pw-browsers \
+    NEXT_TELEMETRY_DISABLED=1 \
+    NODE_ENV=production
+
+# --- Stage 2: Builder (Build Assets) ---
+FROM base AS builder
 WORKDIR /app
 
-# Skip downloading Chrome and use installed Chromium
-ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=true \
-    PLAYWRIGHT_BROWSERS_PATH=/usr/bin/chromium \
-    NEXT_TELEMETRY_DISABLED=1
+# Copy package files for root
+COPY package*.json ./
+# Install all dependencies (including dev) to build web-dashboard
+RUN npm install
 
-# --- Layer caching: install deps before copying source ---
+# Download Playwright Chromium browser
+RUN npx playwright install chromium
 
-# 1. Root dependencies (changes rarely)
+# Copy web-dashboard package files
+COPY web-dashboard/package*.json ./web-dashboard/
+WORKDIR /app/web-dashboard
+# Install dashboard dependencies
+RUN NODE_ENV=development npm install
+
+# Copy all source code for building
+WORKDIR /app
+COPY . .
+
+# Build the web-dashboard
+RUN npm run build
+
+# --- Stage 3: Runner (Production Image) ---
+FROM base AS runner
+WORKDIR /app
+
+# Copy production node_modules from builder (or reinstall production-only)
+# Reinstalling production-only is cleaner to keep image size small
 COPY package*.json ./
 RUN npm ci --omit=dev
 
-# 2. Web dashboard dependencies (changes rarely)
+# Copy web-dashboard production node_modules
 COPY web-dashboard/package*.json ./web-dashboard/
 WORKDIR /app/web-dashboard
-RUN npm ci
+RUN npm ci --omit=dev
 
-# 3. Web dashboard source + build
-COPY web-dashboard/ ./
-RUN npm run build
-
-# 4. Copy application source (changes most often — last layer)
+# Copy built assets and source code from builder
 WORKDIR /app
+COPY --from=builder /app/web-dashboard/.next ./web-dashboard/.next
+COPY --from=builder /app/web-dashboard/out ./web-dashboard/out
+COPY --from=builder /app/web-dashboard/public ./web-dashboard/public
+COPY --from=builder /app/web-dashboard/server.js ./web-dashboard/server.js
+COPY --from=builder /app/pw-browsers /app/pw-browsers
 COPY . .
+
+# Ensure golem_memory and logs directory exist and have correct permissions
+RUN mkdir -p golem_memory logs && \
+    chown -R node:node /app
+
+# Switch to non-root user
+USER node
 
 # Expose the dashboard port
 EXPOSE 3000
 
-# Health check for Docker and orchestrators
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+# Health check
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD curl -f http://localhost:3000/api/health || exit 1
 
-# Start the application in dashboard mode
+# Start the application
 CMD ["npm", "run", "dashboard"]

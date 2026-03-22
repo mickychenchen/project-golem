@@ -46,9 +46,10 @@ class ResponseExtractor {
                         // 📸 [v9.1.10] 提取容器內的圖片與其他附件
                         const attachments = [];
                         
-                        // 1. 圖片偵測
+                        // 1. 圖片偵測 (濾除天氣/UI 圖示等 svg 雜訊)
                         container.querySelectorAll('img').forEach(img => {
                             if (img.src && img.src.startsWith('http')) {
+                                if (img.src.toLowerCase().includes('.svg')) return;
                                 attachments.push({ url: img.src, mimeType: 'image/png' });
                             }
                         });

@@ -67,6 +67,18 @@ node server.js     # 預設：http://localhost:3000
 
 ---
 
+### 🔌 MCP 工具 (`/dashboard/mcp`) 🆕
+
+**Model Context Protocol 管理中心**，用於整合外部工具與資料源。
+
+功能：
+- **Server 管理**：新增/編輯/刪除 MCP Server（支援 stdio 傳輸）。
+- **連線測試**：一鍵測試 Golem 與 Server 的連線狀態。
+- **工具查閱**：即時顯示各個 Server 提供的工具名稱與參數定義。
+- **實時日誌**：觀察 JSON-RPC 往返細項，除錯必備。
+
+---
+
 ### 🏢 自動化中心 (`/dashboard/office`)
 
 管理系統的**自動化任務**，包含排程檢查、系統自省與定期維護日誌。
@@ -126,7 +138,10 @@ Dashboard 後端由 `web-dashboard/server.js` 提供，主要功能：
 | `POST /api/message` | 向 Golem 傳送訊息 |
 | `GET /api/memory/:id` | 讀取記憶清單 |
 | `POST /api/skills/reload` | 重新注入技能書 |
-| `Socket.IO` | 即時推送 Golem 回應與系統事件 |
+| `GET /api/mcp/servers` | 取得 MCP Server 列表 |
+| `POST /api/mcp/test/:name` | 測試指定 MCP 連線 |
+| `GET /api/mcp/logs` | 讀取 MCP 調用日誌 |
+| `Socket.IO` | 即時推送 Golem 回應、系統事件、MCP 日誌 |
 
 ---
 

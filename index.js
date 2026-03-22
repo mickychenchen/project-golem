@@ -23,7 +23,13 @@ try {
 }
 
 process.on('uncaughtException', (err) => {
-    console.error('🔥 [CRITICAL] Uncaught Exception:', err);
+    // ✨ [新增] 避免無限循環：如果 SystemLogger 已掛載，使用原始的 Error 輸出
+    const SystemLogger = require('./src/utils/SystemLogger');
+    if (SystemLogger && SystemLogger.originalError) {
+        SystemLogger.originalError('🔥 [CRITICAL] Uncaught Exception:', err);
+    } else {
+        console.error('🔥 [CRITICAL] Uncaught Exception:', err);
+    }
 });
 
 process.on('unhandledRejection', (reason, promise) => {
@@ -50,7 +56,8 @@ const fs = require('fs').promises;
 const path = require('path');
 const os = require('os');
 const { spawn } = require('child_process');
-const TelegramBot = require('node-telegram-bot-api');
+// [GrammyBridge] Factory: auto-selects grammY or legacy based on env setup
+const { createTelegramBot } = require('./src/bridges/TelegramBotFactory');
 const { Client, GatewayIntentBits, Partials } = require('discord.js');
 
 const GolemBrain = require('./src/core/GolemBrain');
@@ -60,9 +67,9 @@ const ConversationManager = require('./src/core/ConversationManager');
 const NeuroShunter = require('./src/core/NeuroShunter');
 const NodeRouter = require('./src/core/NodeRouter');
 const UniversalContext = require('./src/core/UniversalContext');
-const { downloadFile } = require('./src/utils/HttpUtils');
+const { downloadFile, getLocalIp } = require('./src/utils/HttpUtils');
 const OpticNerve = require('./src/services/OpticNerve');
-const SystemUpgrader = require('./src/managers/SystemUpgrader');
+const SystemUpgrader = require('./src/utils/SystemUpdater');
 const https = require('https');
 const InteractiveMultiAgent = require('./src/core/InteractiveMultiAgent');
 const introspection = require('./src/services/Introspection');
@@ -175,7 +182,7 @@ function getOrCreateGolem() {
 
     const dashboard = require('./dashboard');
     if (dashboard && dashboard.webServer && typeof dashboard.webServer.setGolemFactory === 'function') {
-        const TelegramBot = require('node-telegram-bot-api');
+        // [GrammyBridge] Use factory instead of direct TelegramBot constructor
         dashboard.webServer.setGolemFactory(async (golemConfig) => {
             if (singleGolemInstance) {
                 console.log(`⚠️ [Factory] Golem already exists, skipping.`);
@@ -185,11 +192,26 @@ function getOrCreateGolem() {
                 try {
                     // [v9.1.5 修正] 先以 polling: false 建立 Bot，
                     // 再延遲啟動 Polling 並使用 restart:true 讓舊 session 自動讓步，防止 409 Conflict
-                    const bot = new TelegramBot(golemConfig.tgToken, { polling: false });
+                    const bot = createTelegramBot(golemConfig.tgToken, { polling: false });
                     bot.golemConfig = golemConfig;
                     bot.getMe().then(me => {
                         bot.username = me.username;
                         console.log(`🤖 [Bot] ${golemConfig.id} 已掛載 (@${me.username})`);
+                        
+                        // ✨ [新增] 更新 Telegram 指令選單
+                        const tgCommands = [
+                            { command: 'sos', description: '輕量級急救：清除網頁快取' },
+                            { command: 'new', description: '物理重生：開啟全新對話' },
+                            { command: 'new_memory', description: '徹底轉生：清空 DB 並重置' },
+                            { command: 'model', description: '模型切換 (fast/thinking/pro)' },
+                            { command: 'dashboard', description: '顯示控制台連線網址' },
+                            { command: 'enable_silent', description: '開啟完全靜默模式' },
+                            { command: 'disable_silent', description: '解除靜默模式' },
+                            { command: 'enable_observer', description: '同步對話但不發言' },
+                            { command: 'disable_observer', description: '解除觀察者模式' },
+                            { command: 'patch', description: '執行自我反思與代碼優化' }
+                        ];
+                        bot.setMyCommands(tgCommands).catch(e => console.error(`❌ [Bot] Set TG Commands Error:`, e.message));
                     }).catch(e => {
                         if (!e.message.includes('401')) {
                             console.warn(`⚠️ [Bot] ${golemConfig.id}:`, e.message);
@@ -443,6 +465,26 @@ async function handleUnifiedMessage(ctx, forceTargetId = null) {
         return;
     }
 
+    // ✨ [新增] /dashboard 指令實作
+    if (ctx.isAdmin && ctx.text && ctx.text.trim().toLowerCase() === '/dashboard') {
+        const port = process.env.DASHBOARD_PORT || 3000;
+        const allowRemote = process.env.ALLOW_REMOTE_ACCESS === 'true';
+        const localUrl = `http://localhost:${port}/dashboard`;
+        
+        let message = `🌐 **Golem 控制台網址**\n\n🏠 **本地存取 (Local):**\n${localUrl}`;
+        
+        if (allowRemote) {
+            const localIp = getLocalIp();
+            const remoteUrl = `http://${localIp}:${port}/dashboard`;
+            message += `\n\n🌍 **區域網路存取 (Remote):**\n${remoteUrl}`;
+        } else {
+            message += `\n\n> 💡 目前未開啟遠端存取。若需從區域網路連線，請至「系統總表」開啟「允許遠端存取」。`;
+        }
+        
+        await ctx.reply(message, { parse_mode: 'Markdown' });
+        return;
+    }
+
     // ✨ [新增] /enable_silent & /disable_silent 指令實作 (僅限 CHAT 模式)
     if (ctx.authMode === 'CHAT' && ctx.isAdmin && ctx.text && (ctx.text.trim().toLowerCase().startsWith('/enable_silent') || ctx.text.trim().toLowerCase().startsWith('/disable_silent'))) {
         const lowerRaw = ctx.text.trim().toLowerCase();
@@ -501,8 +543,8 @@ async function handleUnifiedMessage(ctx, forceTargetId = null) {
         return;
     }
 
-    if (global.multiAgentListeners && global.multiAgentListeners.has(ctx.chatId)) {
-        const callback = global.multiAgentListeners.get(ctx.chatId);
+    if (InteractiveMultiAgent.multiAgentListeners && InteractiveMultiAgent.multiAgentListeners.has(ctx.chatId)) {
+        const callback = InteractiveMultiAgent.multiAgentListeners.get(ctx.chatId);
         callback(ctx.text);
         return;
     }

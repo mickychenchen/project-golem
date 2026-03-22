@@ -25,6 +25,53 @@ interface ChatMessage {
     }[];
 }
 
+const COMMANDS: { command: string; description: string; options?: { name: string; description: string }[] }[] = [
+    { command: '/sos', description: '輕量級急救：清除「網頁元素快取」，強迫 DOM Doctor 重新掃描並修復。' },
+    { command: '/new', description: '物理重生：強制重新整理底層瀏覽器，開啟一個全新的對話視窗。' },
+    { command: '/new_memory', description: '徹底轉生：物理清空底層資料庫 (DB) 並重置對話，完全忘記過去細節。' },
+    { 
+        command: '/model', 
+        description: '模型切換：切換 Gemini 的大腦模型 (fast/thinking/pro)。',
+        options: [
+            { name: 'fast', description: '回答速度快 (效能優先)' },
+            { name: 'thinking', description: '具備深度思考 (邏輯優先)' },
+            { name: 'pro', description: '進階程式碼與數學能力 (專業優先)' }
+        ]
+    },
+    { 
+        command: '/enable_silent', 
+        description: '開啟完全靜默模式：暫時關閉感知，且不會記錄任何對話。',
+        options: [{ name: '@username', description: '請輸入目標 Bot ID' }]
+    },
+    { 
+        command: '/disable_silent', 
+        description: '解除靜默模式。',
+        options: [{ name: '@username', description: '請輸入目標 Bot ID' }]
+    },
+    { 
+        command: '/enable_observer', 
+        description: '進入觀察者模式：同步所有對話上下文，但預設不發言。',
+        options: [{ name: '@username', description: '請輸入目標 Bot ID' }]
+    },
+    { 
+        command: '/disable_observer', 
+        description: '解除觀察者模式。',
+        options: [{ name: '@username', description: '請輸入目標 Bot ID' }]
+    },
+    { command: '/patch', description: '執行自我反思與代碼優化。' },
+    { command: '/dashboard', description: '顯示控制台連線網址：包含本地 (Local) 與遠端 (Remote) 存取網址。' },
+    { command: '/@Gmail', description: '讀取、搜尋您的個人電子郵件。' },
+    { command: '/@Google 雲端硬碟', description: '搜尋您的 Google Drive 檔案 (文件、PDF、圖片等)。' },
+    { command: '/@Google 文件', description: '讀取或搜尋特定的 Google Docs。' },
+    { command: '/@Google Keep', description: '讀取您的個人筆記。' },
+    { command: '/@Google Tasks', description: '讀取或管理您的待辦事項。' },
+    { command: '/@YouTube', description: '搜尋 YouTube 影片資料。' },
+    { command: '/@Google Maps', description: '查詢地圖、地點資訊。' },
+    { command: '/@Google 航班', description: '查詢航班資訊。' },
+    { command: '/@Google 飯店', description: '查詢飯店住宿資訊。' },
+    { command: '/@Workspace', description: '讓 AI 自行推斷要使用哪個辦公軟體。' },
+];
+
 export default function DirectChatPage() {
     const { activeGolem, isSingleNode } = useGolem();
     const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -33,6 +80,12 @@ export default function DirectChatPage() {
     const [isSending, setIsSending] = useState(false);
     const [selectedFile, setSelectedFile] = useState<{ name: string, base64: string, type: string } | null>(null);
     const [isDragging, setIsDragging] = useState(false);
+    // Command suggestions state
+    const [showSuggestions, setShowSuggestions] = useState(false);
+    const [filteredCommands, setFilteredCommands] = useState(COMMANDS);
+    const [suggestionIndex, setSuggestionIndex] = useState(0);
+    const suggestionListRef = useRef<HTMLDivElement>(null);
+
     const scrollRef = useRef<HTMLDivElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const dragCounterRef = useRef(0);
@@ -192,7 +245,15 @@ export default function DirectChatPage() {
         e.target.value = '';
     };
 
-    // ── Drag & Drop Handlers ──────────────────────────────────────────────────
+    useEffect(() => {
+        if (showSuggestions && suggestionListRef.current) {
+            const activeItem = suggestionListRef.current.children[0]?.children[suggestionIndex] as HTMLElement;
+            if (activeItem) {
+                activeItem.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+            }
+        }
+    }, [suggestionIndex, showSuggestions]);
+
     const handleDragEnter = (e: DragEvent<HTMLDivElement>) => {
         e.preventDefault();
         e.stopPropagation();
@@ -246,6 +307,7 @@ export default function DirectChatPage() {
 
         const val = input.trim();
         setInput("");
+        setShowSuggestions(false);
         setIsSending(true);
 
         try {
@@ -284,6 +346,50 @@ export default function DirectChatPage() {
             console.error("Failed to send message:", e);
         } finally {
             setIsSending(false);
+        }
+    };
+
+    const handleCommandClick = (cmd: string) => {
+        setInput(cmd + " ");
+        setShowSuggestions(false);
+    };
+
+    const onInputChange = (val: string) => {
+        setInput(val);
+        if (val.startsWith('/')) {
+            const parts = val.split(/\s+/);
+            const cmdName = parts[0];
+            const arg = parts.length > 1 ? parts[1] : '';
+
+            // 如果有完全符合的頂層指令，且該指令有選項，且使用者已經輸入了空格
+            const exactCmd = COMMANDS.find(c => c.command.toLowerCase() === cmdName.toLowerCase());
+
+            if (exactCmd && exactCmd.options && val.includes(' ')) {
+                // 顯示選項
+                let options = exactCmd.options;
+                
+                // 動態加入目前的 Golem 作為選項 (針對需要 @username 的指令)
+                if (options.some(o => o.name === '@username') && activeGolem) {
+                    const dynamicOption = { name: `@${activeGolem}`, description: `針對目前的 ${activeGolem} 執行` };
+                    options = [dynamicOption, ...options.filter(o => o.name !== '@username')];
+                }
+
+                const filteredOptions = options.filter(opt => opt.name.toLowerCase().includes(arg.toLowerCase()));
+                setFilteredCommands(filteredOptions.map(opt => ({
+                    command: `${exactCmd.command} ${opt.name}`,
+                    description: opt.description
+                })));
+                setShowSuggestions(filteredOptions.length > 0);
+            } else {
+                // 顯示頂層指令
+                const filtered = COMMANDS.filter(c => c.command.toLowerCase().includes(cmdName.toLowerCase()));
+                setFilteredCommands(filtered);
+                // 只有在還沒輸入空格時才顯示頂層指令列表
+                setShowSuggestions(filtered.length > 0 && !val.includes(' '));
+            }
+            setSuggestionIndex(0);
+        } else {
+            setShowSuggestions(false);
         }
     };
 
@@ -427,6 +533,40 @@ export default function DirectChatPage() {
                     onDragOver={handleDragOver}
                     onDrop={handleDrop}
                 >
+                    {/* Command suggestions dropdown */}
+                    {showSuggestions && (
+                        <div 
+                            ref={suggestionListRef}
+                            className="absolute bottom-full left-4 mb-2 w-80 max-h-72 overflow-y-auto bg-card/95 backdrop-blur-md border border-border rounded-xl shadow-2xl z-50 animate-in fade-in slide-in-from-bottom-2 duration-200 scrollbar-thin scrollbar-thumb-primary/20 scrollbar-track-transparent"
+                        >
+                            <div className="p-2 space-y-1">
+                                {filteredCommands.map((cmd, idx) => (
+                                    <button
+                                        key={cmd.command}
+                                        onClick={() => handleCommandClick(cmd.command)}
+                                        onMouseEnter={() => setSuggestionIndex(idx)}
+                                        className={cn(
+                                            "w-full text-left p-2 rounded-lg transition-all duration-150 group",
+                                            idx === suggestionIndex ? "bg-primary/20 border-primary/20" : "hover:bg-secondary"
+                                        )}
+                                    >
+                                        <div className="flex flex-col">
+                                            <span className={cn(
+                                                "text-sm font-bold",
+                                                idx === suggestionIndex ? "text-primary" : "text-foreground/90"
+                                            )}>
+                                                {cmd.command}
+                                            </span>
+                                            <span className="text-[10px] text-muted-foreground line-clamp-1 group-hover:line-clamp-none">
+                                                {cmd.description}
+                                            </span>
+                                        </div>
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
                     {/* Drag overlay */}
                     {isDragging && (
                         <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 rounded-b-xl border-2 border-dashed border-primary/60 bg-primary/10 backdrop-blur-sm pointer-events-none">
@@ -484,8 +624,31 @@ export default function DirectChatPage() {
                                 className="flex-1 max-h-32 min-h-[44px] bg-secondary/50 border border-border rounded-lg px-4 py-3 pr-12 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/50 resize-none transition-all"
                                 placeholder={activeGolem ? `傳送訊息給 ${activeGolem}… 可拖曳或 ⌘V 貼入圖片` : "請先選擇一個 Golem..."}
                                 value={input}
-                                onChange={(e) => setInput(e.target.value)}
+                                onChange={(e) => onInputChange(e.target.value)}
                                 onKeyDown={(e) => {
+                                    if (showSuggestions) {
+                                        if (e.key === 'ArrowDown') {
+                                            e.preventDefault();
+                                            setSuggestionIndex((prev) => (prev + 1) % filteredCommands.length);
+                                            return;
+                                        }
+                                        if (e.key === 'ArrowUp') {
+                                            e.preventDefault();
+                                            setSuggestionIndex((prev) => (prev - 1 + filteredCommands.length) % filteredCommands.length);
+                                            return;
+                                        }
+                                        if (e.key === 'Enter' || e.key === 'Tab') {
+                                            e.preventDefault();
+                                            handleCommandClick(filteredCommands[suggestionIndex].command);
+                                            return;
+                                        }
+                                        if (e.key === 'Escape') {
+                                            e.preventDefault();
+                                            setShowSuggestions(false);
+                                            return;
+                                        }
+                                    }
+
                                     if (e.key === 'Enter' && !e.shiftKey) {
                                         e.preventDefault();
                                         handleSend();

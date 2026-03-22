@@ -39,7 +39,7 @@ async function run(ctx) {
             return `✅ 學習已成功記錄 (ID: ${newLearning.id})。下次遇到類似問題時我會參考這項紀錄。`;
         }
 
-        if (action === 'search') {
+        if (action === 'recall_records') {
             const query = (args.query || (args.parameters && args.parameters.query) || "").toLowerCase();
             if (!query) return "❌ 缺少 query 參數。";
 
@@ -65,7 +65,7 @@ async function run(ctx) {
             return `📚 最近的學習記錄：\n${summary}\n\n共有 ${learnings.length} 項紀錄。`;
         }
 
-        return "❌ 未知的 action 類型 (record/search/list)。";
+        return "❌ 未知的 action 類型 (record/recall_records/list)。";
     } catch (e) {
         return `❌ 執行失敗: ${e.message}`;
     }

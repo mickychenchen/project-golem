@@ -119,7 +119,7 @@ class AutonomyManager {
         // 1. 讀取並檢查檔案資料庫 (New Path: logs/schedules.json)
         if (fs.existsSync(scheduleFile)) {
             try {
-                const rawData = fs.readFileSync(scheduleFile, 'utf-8');
+                const rawData = await fs.promises.readFile(scheduleFile, 'utf-8');
                 if (rawData.trim()) {
                     const schedules = JSON.parse(rawData);
                     schedules.forEach(item => {
@@ -133,11 +133,11 @@ class AutonomyManager {
 
                     // 如果有過期或已處理的，寫回檔案進行更新 (物理移除)
                     if (fileTasks.length > 0) {
-                        fs.writeFileSync(scheduleFile, JSON.stringify(updatedSchedules, null, 2));
+                        await fs.promises.writeFile(scheduleFile, JSON.stringify(updatedSchedules, null, 2));
                     }
                 }
             } catch (e) {
-                console.error("❌ [Autonomy:TimeWatcher] 讀取排程檔案失敗:", e.message);
+                console.error("❌ [Autonomy:TimeWatcher] 讀取/寫入排程檔案失敗:", e.message);
             }
         }
 

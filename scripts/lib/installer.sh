@@ -129,7 +129,7 @@ step_check_files() {
 
     local missing=0
     local checked=0
-    local files=(index.js skills.js package.json dashboard.js memory.html)
+    local files=(index.js skills.js package.json dashboard.js)
 
     for file in "${files[@]}"; do
         checked=$((checked + 1))

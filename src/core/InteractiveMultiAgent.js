@@ -320,29 +320,29 @@ ${userMessage}
     }
 
     _registerInputListener(chatId, callback) {
-        if (!global.multiAgentListeners) global.multiAgentListeners = new Map();
-        global.multiAgentListeners.set(chatId, callback);
+        if (!InteractiveMultiAgent.multiAgentListeners) InteractiveMultiAgent.multiAgentListeners = new Map();
+        InteractiveMultiAgent.multiAgentListeners.set(chatId, callback);
         console.log(`[InteractiveMultiAgent] 監聽器已註冊: ${chatId}`);
     }
 
     _removeInputListener(chatId) {
-        if (global.multiAgentListeners) {
-            global.multiAgentListeners.delete(chatId);
+        if (InteractiveMultiAgent.multiAgentListeners) {
+            InteractiveMultiAgent.multiAgentListeners.delete(chatId);
             console.log(`[InteractiveMultiAgent] 監聽器已移除: ${chatId}`);
         }
     }
 
     static canResume(chatId) {
-        return global.pausedConversations && global.pausedConversations.has(chatId);
+        return InteractiveMultiAgent.pausedConversations && InteractiveMultiAgent.pausedConversations.has(chatId);
     }
 
     static async resumeConversation(ctx, brain) {
-        if (!global.pausedConversations || !global.pausedConversations.has(ctx.chatId)) {
+        if (!InteractiveMultiAgent.pausedConversations || !InteractiveMultiAgent.pausedConversations.has(ctx.chatId)) {
             await ctx.reply('⚠️ 沒有暫停的會議可以恢復');
             return;
         }
-        const savedConv = global.pausedConversations.get(ctx.chatId);
-        global.pausedConversations.delete(ctx.chatId);
+        const savedConv = InteractiveMultiAgent.pausedConversations.get(ctx.chatId);
+        InteractiveMultiAgent.pausedConversations.delete(ctx.chatId);
         await ctx.reply(
             `▶️ **恢復會議**\n\n` +
             `📋 任務: ${savedConv.task}\n` +
@@ -361,8 +361,8 @@ ${userMessage}
     _cleanup() {
         const conv = this.activeConversation;
         if (conv.status === 'interrupted') {
-            if (!global.pausedConversations) global.pausedConversations = new Map();
-            global.pausedConversations.set(conv.chatId, conv);
+            if (!InteractiveMultiAgent.pausedConversations) InteractiveMultiAgent.pausedConversations = new Map();
+            InteractiveMultiAgent.pausedConversations.set(conv.chatId, conv);
             console.log(`[InteractiveMultiAgent] 會議已暫停並保存: ${conv.chatId}`);
         }
         this._removeInputListener(conv.chatId);
@@ -411,6 +411,13 @@ ${isLastRound ? '\n⚠️ 這是最後一輪，請給出最終結論！' : ''}
     }
 
     async _parseAgentOutput(rawResponse, agent) {
+        // ✨ [Hotfix] 防護 rawResponse 是物件格式 (如 {text, attachments})
+        if (typeof rawResponse === 'object' && rawResponse !== null) {
+            rawResponse = rawResponse.text || '';
+        } else if (typeof rawResponse !== 'string') {
+            rawResponse = String(rawResponse || '');
+        }
+
         const result = { memories: [], actions: [], reply: '' };
         const memoryRegex = /\[GOLEM_MEMORY\]([\s\S]*?)(?=\[GOLEM_|$)/i;
         const memoryMatch = rawResponse.match(memoryRegex);
@@ -510,7 +517,8 @@ ${memoryContext}
 `;
         try {
             const rawSummary = await this.brain.sendMessage(summaryPrompt);
-            const parsed = await this._parseAgentOutput(rawSummary, { name: 'Master' });
+            const textContent = typeof rawSummary === 'object' ? (rawSummary.text || '') : rawSummary;
+            const parsed = await this._parseAgentOutput(textContent, { name: 'Master' });
             await ctx.reply(
                 `🎯 **團隊總結報告**\n\n${parsed.reply}\n\n` +
                 `━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
