@@ -1,4 +1,4 @@
-const LanceDBMemoryDriver = require('../src/memory/LanceDBMemoryDriver');
+const LanceDBProDriver = require('../src/memory/LanceDBProDriver');
 const ConfigManager = require('../src/config/index');
 const path = require('path');
 const fs = require('fs');
@@ -12,7 +12,7 @@ async function testEmbeddingSelection() {
     process.env.GOLEM_LOCAL_EMBEDDING_MODEL = 'Xenova/bge-small-zh-v1.5';
     ConfigManager.reloadConfig();
 
-    const localDriver = new LanceDBMemoryDriver();
+    const localDriver = new LanceDBProDriver();
     console.log(`Table Name: ${localDriver.tableName}`);
     
     try {
@@ -38,13 +38,14 @@ async function testEmbeddingSelection() {
     console.log("\n--- Test 2: Table Isolation ---");
     process.env.GOLEM_EMBEDDING_PROVIDER = 'gemini';
     ConfigManager.reloadConfig();
-    const geminiDriver = new LanceDBMemoryDriver();
-    console.log(`Gemini Table Name: ${geminiDriver.tableName}`);
+    const geminiDriver = new LanceDBProDriver();
+    await geminiDriver.init();
+    console.log(`Gemini DB Path: ${geminiDriver.dbPath}`);
     
-    if (geminiDriver.tableName !== localDriver.tableName) {
-        console.log("✅ Table isolation logic confirmed (Different names for different providers)");
+    if (geminiDriver.dbPath !== localDriver.dbPath) {
+        console.log("✅ Table isolation logic confirmed (Different paths for different dimensions/providers)");
     } else {
-        console.log("❌ Table isolation logic failed (Same name used!)");
+        console.log("❌ Table isolation logic failed (Same path used!)");
     }
 
     console.log("\n🧪 Tests completed.");
