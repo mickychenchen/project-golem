@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { Card, CardHeader, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -11,7 +11,7 @@ import {
     DialogDescription,
     DialogFooter,
 } from "@/components/ui/dialog";
-import { BookOpen, AlertCircle, CheckCircle2, RefreshCcw, ChevronRight, Zap, TriangleAlert, Plus, Pencil, X, Search, Download, Store, Tags, Trash2, Activity, Database, Globe } from "lucide-react";
+import { BookOpen, AlertCircle, CheckCircle2, RefreshCcw, ChevronRight, Zap, TriangleAlert, Plus, Pencil, X, Search, Download, Upload, Store, Tags, Trash2, Activity, Database, Globe, ArrowUpDown } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
@@ -23,6 +23,7 @@ type InstalledSkill = {
     title: string;
     content: string;
     isOptional: boolean;
+    isDeletable?: boolean;
     isEnabled: boolean;
 };
 
@@ -45,9 +46,233 @@ type MarketplaceResponse = {
     categoryCounts?: Record<string, number>;
 };
 
+type SkillImportResponse = {
+    success?: boolean;
+    importedCount?: number;
+    totalReceived?: number;
+    enabledAdded?: number;
+    skippedMandatory?: string[];
+    skippedExisting?: string[];
+    skippedInvalid?: string[];
+    error?: string;
+};
+
+type ImportConflictStrategy = "overwrite" | "skip" | "new_only";
+
+type BaseImportedSkill = {
+    id: string;
+    title: string;
+    content: string;
+    category: string;
+    isEnabled: boolean;
+    isOptional: boolean;
+};
+
+type ImportedSkillPreview = BaseImportedSkill & {
+    isExisting: boolean;
+    isMandatoryConflict: boolean;
+};
+
+type ImportDraft = {
+    fileName: string;
+    format: "json" | "markdown" | "auto";
+    rawText: string;
+    skills: ImportedSkillPreview[];
+    total: number;
+    newCount: number;
+    existingCount: number;
+    mandatoryConflictCount: number;
+};
+
+type InstalledListFilter = "all" | "enabled" | "core";
+type InstalledSortMode = "enabled_first" | "core_first" | "title_asc" | "title_desc";
+
 function getErrorMessage(error: unknown, fallback: string): string {
     if (error instanceof Error && error.message) return error.message;
     return fallback;
+}
+
+function parseFilenameFromDisposition(disposition: string | null): string | null {
+    if (!disposition) return null;
+
+    const encodedMatch = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+    if (encodedMatch && encodedMatch[1]) {
+        try {
+            return decodeURIComponent(encodedMatch[1].trim());
+        } catch {
+            return encodedMatch[1].trim();
+        }
+    }
+
+    const plainMatch = disposition.match(/filename="?([^";]+)"?/i);
+    if (plainMatch && plainMatch[1]) {
+        return plainMatch[1].trim();
+    }
+
+    return null;
+}
+
+async function parseExportError(response: Response): Promise<string> {
+    const raw = await response.text();
+    if (!raw) return `匯出失敗 (${response.status})`;
+
+    try {
+        const parsed = JSON.parse(raw) as { error?: string; message?: string };
+        if (typeof parsed.error === "string" && parsed.error.trim()) return parsed.error;
+        if (typeof parsed.message === "string" && parsed.message.trim()) return parsed.message;
+    } catch {
+        // 非 JSON 回應時直接回傳文字
+    }
+    return raw;
+}
+
+function detectImportFormat(fileName: string): "json" | "markdown" | "auto" {
+    const lower = fileName.trim().toLowerCase();
+    if (lower.endsWith(".json")) return "json";
+    if (lower.endsWith(".md") || lower.endsWith(".markdown")) return "markdown";
+    return "auto";
+}
+
+function toSafeSkillId(input: string, fallback: string): string {
+    const normalized = String(input || "")
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]+/g, "_")
+        .replace(/^_+|_+$/g, "");
+    return normalized || fallback;
+}
+
+function normalizeImportedSkill(raw: unknown, index: number): BaseImportedSkill | null {
+    if (!raw || typeof raw !== "object") return null;
+    const record = raw as Record<string, unknown>;
+    const title = String(record.title || record.name || `Imported Skill ${index + 1}`).trim();
+    const idSeed = String(record.id || title || "").trim();
+    const id = toSafeSkillId(idSeed, `imported_skill_${index + 1}`);
+    const content = String(record.content || "").trim();
+    if (!content) return null;
+
+    return {
+        id,
+        title: title || id,
+        content,
+        category: String(record.category || "lib").trim().toLowerCase() || "lib",
+        isEnabled: record.isEnabled === true,
+        isOptional: record.isOptional !== false,
+    };
+}
+
+function parseImportedSkillsFromJson(rawText: string): BaseImportedSkill[] {
+    const parsed = JSON.parse(rawText) as unknown;
+    const list = Array.isArray(parsed)
+        ? parsed
+        : (parsed && typeof parsed === "object" && Array.isArray((parsed as { skills?: unknown[] }).skills)
+            ? (parsed as { skills: unknown[] }).skills
+            : null);
+    if (!list) {
+        throw new Error("JSON 檔案格式不符合技能備份結構");
+    }
+
+    const entries: BaseImportedSkill[] = [];
+    for (let i = 0; i < list.length; i += 1) {
+        const normalized = normalizeImportedSkill(list[i], i);
+        if (normalized) entries.push(normalized);
+    }
+    return entries;
+}
+
+function parseImportedSkillsFromMarkdown(rawText: string): BaseImportedSkill[] {
+    const raw = String(rawText || "").replace(/^\uFEFF/, "").trim();
+    if (!raw) return [];
+
+    const sectionPattern = /(?:^|\n)---\n\n## ([^\n]+)\n\n- ID: ([^\n]+)\n- Category: ([^\n]+)\n- Enabled: (true|false)\n- Optional: (true|false)\n\n([\s\S]*?)(?=\n---\n\n## |\s*$)/g;
+    const entries: BaseImportedSkill[] = [];
+    let match: RegExpExecArray | null = null;
+    while ((match = sectionPattern.exec(raw)) !== null) {
+        const normalized = normalizeImportedSkill({
+            title: String(match[1] || "").trim(),
+            id: String(match[2] || "").trim(),
+            category: String(match[3] || "").trim().toLowerCase(),
+            isEnabled: String(match[4] || "").trim().toLowerCase() === "true",
+            isOptional: String(match[5] || "").trim().toLowerCase() === "true",
+            content: String(match[6] || "").trim(),
+        }, entries.length);
+        if (normalized) entries.push(normalized);
+    }
+
+    if (entries.length > 0) return entries;
+
+    const headingMatch = raw.match(/^#+\s+(.+)$/m);
+    const bracketMatch = raw.match(/^【已載入技能：(.+?)】/m);
+    const inferredTitle = headingMatch?.[1]?.trim() || bracketMatch?.[1]?.trim() || "Imported Skill";
+    const single = normalizeImportedSkill({
+        id: inferredTitle,
+        title: inferredTitle,
+        content: raw,
+        category: "lib",
+        isEnabled: false,
+        isOptional: true,
+    }, 0);
+    return single ? [single] : [];
+}
+
+function buildImportDraft(
+    fileName: string,
+    rawText: string,
+    currentSkills: InstalledSkill[]
+): ImportDraft {
+    const format = detectImportFormat(fileName);
+
+    let imported: BaseImportedSkill[] = [];
+    if (format === "json") {
+        imported = parseImportedSkillsFromJson(rawText);
+    } else if (format === "markdown") {
+        imported = parseImportedSkillsFromMarkdown(rawText);
+    } else {
+        try {
+            imported = parseImportedSkillsFromJson(rawText);
+        } catch {
+            imported = parseImportedSkillsFromMarkdown(rawText);
+        }
+    }
+
+    if (imported.length === 0) {
+        throw new Error("找不到可匯入的技能內容");
+    }
+
+    const existingById = new Map(currentSkills.map((skill) => [skill.id, skill]));
+    const deduped = new Map<string, BaseImportedSkill>();
+    for (const item of imported) {
+        if (!deduped.has(item.id)) {
+            deduped.set(item.id, item);
+        }
+    }
+
+    const skills = Array.from(deduped.values()).map<ImportedSkillPreview>((entry) => {
+        const existing = existingById.get(entry.id);
+        const isExisting = Boolean(existing);
+        const isMandatoryConflict = Boolean(existing && !existing.isOptional);
+        return {
+            ...entry,
+            isExisting,
+            isMandatoryConflict,
+        };
+    });
+
+    const total = skills.length;
+    const existingCount = skills.filter((item) => item.isExisting).length;
+    const mandatoryConflictCount = skills.filter((item) => item.isMandatoryConflict).length;
+    const newCount = skills.filter((item) => !item.isExisting && !item.isMandatoryConflict).length;
+
+    return {
+        fileName,
+        format,
+        rawText,
+        skills,
+        total,
+        newCount,
+        existingCount,
+        mandatoryConflictCount,
+    };
 }
 
 // ── Inject Confirm Dialog ───────────────────────────────────────────────────
@@ -304,6 +529,185 @@ function DeleteConfirmDialog({
     );
 }
 
+// ── Import Preview Dialog ───────────────────────────────────────────────────
+function ImportPreviewDialog({
+    open,
+    onOpenChange,
+    draft,
+    strategy,
+    onStrategyChange,
+    onConfirm,
+    isLoading,
+}: {
+    open: boolean;
+    onOpenChange: (v: boolean) => void;
+    draft: ImportDraft | null;
+    strategy: ImportConflictStrategy;
+    onStrategyChange: (value: ImportConflictStrategy) => void;
+    onConfirm: () => void;
+    isLoading: boolean;
+}) {
+    if (!draft) return null;
+
+    const importableCount = strategy === "overwrite"
+        ? Math.max(0, draft.total - draft.mandatoryConflictCount)
+        : draft.newCount;
+    const previewSkills = draft.skills.slice(0, 12);
+
+    return (
+        <Dialog open={open} onOpenChange={isLoading ? undefined : onOpenChange}>
+            <DialogContent showCloseButton={!isLoading} className="relative bg-card border-border text-foreground max-w-3xl max-h-[90vh] flex flex-col overflow-hidden">
+                <div className="absolute -top-12 -right-12 h-32 w-32 rounded-full bg-primary/10 blur-2xl pointer-events-none" />
+                <DialogHeader className="flex-shrink-0 pb-1">
+                    <div className="w-11 h-11 rounded-2xl border bg-primary/10 border-primary/30 flex items-center justify-center mb-2 shadow-[0_0_20px_-10px_var(--primary)]">
+                        <Upload className="w-5 h-5 text-primary" />
+                    </div>
+                    <DialogTitle className="text-foreground text-lg tracking-tight">匯入預覽與衝突策略</DialogTitle>
+                    <DialogDescription className="text-muted-foreground text-sm">
+                        匯入前先確認內容與策略，避免覆蓋到不該變動的技能。
+                    </DialogDescription>
+                </DialogHeader>
+
+                <div className="flex-1 overflow-y-auto space-y-4 py-2 pr-1">
+                    <div className="rounded-xl border border-border/60 bg-secondary/20 px-3 py-2.5">
+                        <p className="text-[11px] text-muted-foreground mb-1">來源檔案</p>
+                        <p className="text-xs font-mono text-foreground truncate">{draft.fileName}</p>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        <div className="rounded-xl border border-border bg-secondary/30 px-3 py-2.5">
+                            <p className="text-[11px] text-muted-foreground">總技能數</p>
+                            <p className="text-sm font-semibold text-foreground">{draft.total}</p>
+                        </div>
+                        <div className="rounded-xl border border-green-500/30 bg-green-500/10 px-3 py-2.5">
+                            <p className="text-[11px] text-green-600/80 dark:text-green-300/80">新技能</p>
+                            <p className="text-sm font-semibold text-green-600 dark:text-green-300">{draft.newCount}</p>
+                        </div>
+                        <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2.5">
+                            <p className="text-[11px] text-amber-600/80 dark:text-amber-300/80">重複項目</p>
+                            <p className="text-sm font-semibold text-amber-600 dark:text-amber-300">{draft.existingCount}</p>
+                        </div>
+                        <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2.5">
+                            <p className="text-[11px] text-red-600/80 dark:text-red-300/80">核心衝突</p>
+                            <p className="text-sm font-semibold text-red-600 dark:text-red-300">{draft.mandatoryConflictCount}</p>
+                        </div>
+                    </div>
+
+                    <div className="space-y-2">
+                        <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">衝突策略</p>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                            <label className={`rounded-xl border px-3 py-3 cursor-pointer transition-all ${strategy === "new_only" ? "border-primary/60 bg-primary/10 shadow-sm" : "border-border bg-secondary/20 hover:bg-secondary/40"}`}>
+                                <input
+                                    type="radio"
+                                    className="sr-only"
+                                    checked={strategy === "new_only"}
+                                    onChange={() => onStrategyChange("new_only")}
+                                />
+                                <div className="flex items-start gap-2">
+                                    <CheckCircle2 className={`w-4 h-4 mt-0.5 ${strategy === "new_only" ? "text-primary" : "text-muted-foreground"}`} />
+                                    <div>
+                                        <p className="text-xs font-semibold text-foreground">只新增（建議）</p>
+                                        <p className="text-[11px] text-muted-foreground mt-0.5">僅匯入新技能，不處理重複項目。</p>
+                                        <p className="text-[11px] text-primary mt-1">預計匯入 {draft.newCount}</p>
+                                    </div>
+                                </div>
+                            </label>
+
+                            <label className={`rounded-xl border px-3 py-3 cursor-pointer transition-all ${strategy === "skip" ? "border-primary/60 bg-primary/10 shadow-sm" : "border-border bg-secondary/20 hover:bg-secondary/40"}`}>
+                                <input
+                                    type="radio"
+                                    className="sr-only"
+                                    checked={strategy === "skip"}
+                                    onChange={() => onStrategyChange("skip")}
+                                />
+                                <div className="flex items-start gap-2">
+                                    <ChevronRight className={`w-4 h-4 mt-0.5 ${strategy === "skip" ? "text-primary" : "text-muted-foreground"}`} />
+                                    <div>
+                                        <p className="text-xs font-semibold text-foreground">略過重複</p>
+                                        <p className="text-[11px] text-muted-foreground mt-0.5">送完整檔案，後端略過同 ID。</p>
+                                        <p className="text-[11px] text-primary mt-1">預計匯入 {draft.newCount}</p>
+                                    </div>
+                                </div>
+                            </label>
+
+                            <label className={`rounded-xl border px-3 py-3 cursor-pointer transition-all ${strategy === "overwrite" ? "border-primary/60 bg-primary/10 shadow-sm" : "border-border bg-secondary/20 hover:bg-secondary/40"}`}>
+                                <input
+                                    type="radio"
+                                    className="sr-only"
+                                    checked={strategy === "overwrite"}
+                                    onChange={() => onStrategyChange("overwrite")}
+                                />
+                                <div className="flex items-start gap-2">
+                                    <AlertCircle className={`w-4 h-4 mt-0.5 ${strategy === "overwrite" ? "text-primary" : "text-muted-foreground"}`} />
+                                    <div>
+                                        <p className="text-xs font-semibold text-foreground">覆蓋既有</p>
+                                        <p className="text-[11px] text-muted-foreground mt-0.5">同 ID 直接更新為備份內容。</p>
+                                        <p className="text-[11px] text-primary mt-1">預計匯入 {Math.max(0, draft.total - draft.mandatoryConflictCount)}</p>
+                                    </div>
+                                </div>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div className="space-y-2">
+                        <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">
+                            匯入預覽（前 {previewSkills.length} 筆）
+                        </p>
+                        <div className="rounded-xl border border-border bg-secondary/20 p-2 space-y-1.5 max-h-[220px] overflow-y-auto">
+                            {previewSkills.map((item) => (
+                                <div key={item.id} className="flex items-center justify-between gap-2 rounded-lg px-2.5 py-2 bg-card/70 border border-border/50">
+                                    <div className="min-w-0">
+                                        <p className="text-xs font-semibold text-foreground truncate">{item.title}</p>
+                                        <p className="text-[11px] text-muted-foreground font-mono truncate">{item.id}</p>
+                                    </div>
+                                    <div className="flex items-center gap-1 shrink-0">
+                                        {item.isMandatoryConflict && (
+                                            <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-red-500/15 text-red-500 border border-red-500/30">核心衝突</span>
+                                        )}
+                                        {!item.isMandatoryConflict && item.isExisting && (
+                                            <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-amber-500/15 text-amber-500 border border-amber-500/30">重複</span>
+                                        )}
+                                        {!item.isExisting && (
+                                            <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-green-500/15 text-green-500 border border-green-500/30">新增</span>
+                                        )}
+                                    </div>
+                                </div>
+                            ))}
+                            {draft.total > previewSkills.length && (
+                                <p className="text-[11px] text-muted-foreground text-center pt-1">
+                                    尚有 {draft.total - previewSkills.length} 筆未顯示
+                                </p>
+                            )}
+                        </div>
+                    </div>
+                </div>
+
+                <DialogFooter className="gap-2 sm:gap-2 flex-shrink-0 pt-2 border-t border-border/60 mt-1">
+                    <Button
+                        variant="outline"
+                        className="flex-1 bg-transparent border-border text-muted-foreground hover:bg-secondary hover:text-foreground"
+                        onClick={() => onOpenChange(false)}
+                        disabled={isLoading}
+                    >
+                        取消
+                    </Button>
+                    <Button
+                        className="flex-1 bg-primary hover:bg-primary/90 text-primary-foreground"
+                        onClick={onConfirm}
+                        disabled={isLoading || importableCount <= 0}
+                    >
+                        {isLoading ? (
+                            <span className="flex items-center gap-1.5"><RefreshCcw className="w-3.5 h-3.5 animate-spin" />匯入中...</span>
+                        ) : (
+                            <span className="flex items-center gap-1.5"><Upload className="w-3.5 h-3.5" />開始匯入 ({importableCount})</span>
+                        )}
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+    );
+}
+
 const MARKET_CATEGORIES = [
     { id: 'all', name: '全部類別', name_en: 'All Categories' },
     { id: 'ai-and-llms', name: '人工智慧與模型', name_en: 'AI & LLMs' },
@@ -380,6 +784,17 @@ export default function SkillsPage() {
     // Sync hint
     const [showSyncHint, setShowSyncHint] = useState(false);
     const [syncHintType, setSyncHintType] = useState<"enable" | "delete">("enable");
+    const [exportingTarget, setExportingTarget] = useState<"all" | "selected" | "checked" | null>(null);
+    const [checkedSkillIds, setCheckedSkillIds] = useState<string[]>([]);
+    const [installedSearchText, setInstalledSearchText] = useState("");
+    const [installedListFilter, setInstalledListFilter] = useState<InstalledListFilter>("all");
+    const [installedSortMode, setInstalledSortMode] = useState<InstalledSortMode>("enabled_first");
+    const [isPreparingImport, setIsPreparingImport] = useState(false);
+    const [isImporting, setIsImporting] = useState(false);
+    const [showImportPreview, setShowImportPreview] = useState(false);
+    const [importDraft, setImportDraft] = useState<ImportDraft | null>(null);
+    const [importStrategy, setImportStrategy] = useState<ImportConflictStrategy>("new_only");
+    const importFileInputRef = useRef<HTMLInputElement | null>(null);
 
     const loadSkills = useCallback(() => {
         apiGet<InstalledSkill[]>("/api/skills")
@@ -387,9 +802,15 @@ export default function SkillsPage() {
                 if (Array.isArray(data)) {
                     setSkills(data);
                     setSelectedSkill((previousSelected) => {
-                        if (!previousSelected) return previousSelected;
+                        const fallback = data[0] ?? null;
+                        if (!previousSelected) return fallback;
                         const updated = data.find((skill) => skill.id === previousSelected.id);
-                        return updated ?? previousSelected;
+                        return updated ?? fallback;
+                    });
+                    setCheckedSkillIds((prev) => {
+                        if (prev.length === 0) return prev;
+                        const idSet = new Set(data.map((skill) => skill.id));
+                        return prev.filter((id) => idSet.has(id));
                     });
                 }
             })
@@ -541,6 +962,7 @@ export default function SkillsPage() {
                 } else {
                     setSelectedSkill(null);
                 }
+                setCheckedSkillIds((prev) => prev.filter((id) => id !== selectedSkill.id));
             } else {
                 toast.error("刪除失敗", data.error || "刪除失敗");
             }
@@ -565,132 +987,555 @@ export default function SkillsPage() {
         setShowEditor(true);
     };
 
+    const toggleCheckedSkill = (id: string, checked: boolean) => {
+        setCheckedSkillIds((prev) => {
+            if (checked) {
+                if (prev.includes(id)) return prev;
+                return [...prev, id];
+            }
+            return prev.filter((item) => item !== id);
+        });
+    };
+
+    const toggleAllCheckedSkills = (checked: boolean, targetSkills: InstalledSkill[]) => {
+        const targetIds = targetSkills.map((skill) => skill.id);
+        if (targetIds.length === 0) return;
+
+        setCheckedSkillIds((prev) => {
+            if (checked) {
+                const merged = new Set([...prev, ...targetIds]);
+                return [...merged];
+            }
+            const removeSet = new Set(targetIds);
+            return prev.filter((id) => !removeSet.has(id));
+        });
+    };
+
+    const downloadSkillsBook = async (target: "all" | "selected" | "checked") => {
+        if (target === "selected" && !selectedSkill) {
+            toast.error("匯出失敗", "請先選擇要匯出的技能。");
+            return;
+        }
+        if (target === "checked" && checkedSkillIds.length === 0) {
+            toast.error("匯出失敗", "請先勾選要匯出的技能。");
+            return;
+        }
+
+        setExportingTarget(target);
+        try {
+            const query = new URLSearchParams();
+            if (target === "selected" && selectedSkill) {
+                query.set("id", selectedSkill.id);
+            } else if (target === "checked") {
+                query.set("ids", checkedSkillIds.join(","));
+                query.set("format", "markdown");
+            } else {
+                query.set("format", "markdown");
+            }
+
+            const requestUrl = `/api/skills/export?${query.toString()}`;
+            const response = await fetch(requestUrl, { method: "GET" });
+
+            if (!response.ok) {
+                throw new Error(await parseExportError(response));
+            }
+
+            const blob = await response.blob();
+            const fileName = parseFilenameFromDisposition(response.headers.get("content-disposition"))
+                || (target === "selected" && selectedSkill
+                    ? `skill_${selectedSkill.id}.md`
+                    : target === "checked"
+                        ? `skills_selected_${checkedSkillIds.length}_${Date.now()}.md`
+                        : `skills_book_${Date.now()}.md`);
+
+            const blobUrl = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = blobUrl;
+            link.download = fileName;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(blobUrl);
+
+            toast.success(
+                "匯出完成",
+                target === "selected"
+                    ? "已下載目前技能。"
+                    : target === "checked"
+                        ? `已下載 ${checkedSkillIds.length} 個勾選技能。`
+                        : "已下載完整技能書。"
+            );
+        } catch (error: unknown) {
+            toast.error("匯出失敗", getErrorMessage(error, "技能匯出失敗，請稍後再試。"));
+        } finally {
+            setExportingTarget(null);
+        }
+    };
+
+    const handleImportClick = () => {
+        if (isImporting || isPreparingImport) return;
+        importFileInputRef.current?.click();
+    };
+
+    const handleImportFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+
+        setIsPreparingImport(true);
+        try {
+            const rawText = await file.text();
+            const draft = buildImportDraft(file.name, rawText, skills);
+            setImportDraft(draft);
+            setImportStrategy(draft.existingCount > 0 ? "new_only" : "overwrite");
+            setShowImportPreview(true);
+        } catch (error: unknown) {
+            toast.error("匯入預覽失敗", getErrorMessage(error, "無法解析技能書，請確認檔案格式。"));
+        } finally {
+            setIsPreparingImport(false);
+            if (importFileInputRef.current) {
+                importFileInputRef.current.value = "";
+            }
+        }
+    };
+
+    const handleConfirmImport = async () => {
+        if (!importDraft) return;
+
+        const overwriteExisting = importStrategy === "overwrite";
+        const selectedSkills = importStrategy === "new_only"
+            ? importDraft.skills.filter((item) => !item.isExisting && !item.isMandatoryConflict)
+            : importDraft.skills;
+
+        if (selectedSkills.length === 0) {
+            toast.error("匯入取消", "目前策略下沒有可匯入的技能。");
+            return;
+        }
+
+        const payload = importStrategy === "new_only"
+            ? JSON.stringify({
+                skills: selectedSkills.map((item) => ({
+                    id: item.id,
+                    title: item.title,
+                    content: item.content,
+                    category: item.category,
+                    isEnabled: item.isEnabled,
+                    isOptional: item.isOptional,
+                }))
+            })
+            : importDraft.rawText;
+
+        const format = importStrategy === "new_only" ? "json" : importDraft.format;
+
+        setIsImporting(true);
+        try {
+            const data = await apiPostWrite<SkillImportResponse>("/api/skills/import", {
+                format,
+                payload,
+                restoreEnabled: true,
+                overwriteExisting,
+            });
+
+            if (!data.success) {
+                toast.error("匯入失敗", data.error || "技能書匯入失敗");
+                return;
+            }
+
+            const importedCount = data.importedCount || 0;
+            const enabledAdded = data.enabledAdded || 0;
+            const skippedMandatory = data.skippedMandatory?.length || 0;
+            const skippedExisting = data.skippedExisting?.length || 0;
+
+            setHasUnsyncedChanges(true);
+            setSyncHintType("enable");
+            setShowSyncHint(true);
+            setShowImportPreview(false);
+            setImportDraft(null);
+            loadSkills();
+
+            const detail = [
+                `已匯入 ${importedCount} 項`,
+                enabledAdded > 0 ? `新增啟用 ${enabledAdded} 項` : "",
+                skippedMandatory > 0 ? `略過核心技能 ${skippedMandatory} 項` : "",
+                skippedExisting > 0 ? `略過既有技能 ${skippedExisting} 項` : ""
+            ].filter(Boolean).join("，");
+
+            toast.success("匯入完成", detail || "技能書已匯入。");
+        } catch (error: unknown) {
+            toast.error("匯入失敗", getErrorMessage(error, "技能書匯入失敗，請稍後再試。"));
+        } finally {
+            setIsImporting(false);
+        }
+    };
+
+    const installedSearchTerm = installedSearchText.trim().toLowerCase();
+    const isCoreSkill = (skill: InstalledSkill): boolean => skill.isDeletable === false;
+    const canDeleteSkill = (skill: InstalledSkill): boolean => skill.isDeletable !== false;
+    const filteredSkills = skills.filter((skill) => {
+        if (installedListFilter === "enabled" && !skill.isEnabled) return false;
+        if (installedListFilter === "core" && !isCoreSkill(skill)) return false;
+        if (!installedSearchTerm) return true;
+        const title = String(skill.title || "").toLowerCase();
+        const id = String(skill.id || "").toLowerCase();
+        return title.includes(installedSearchTerm) || id.includes(installedSearchTerm);
+    });
+    const sortedFilteredSkills = [...filteredSkills].sort((a, b) => {
+        const titleCompare = a.title.localeCompare(b.title, "zh-Hant-u-co-stroke");
+        if (installedSortMode === "title_asc") return titleCompare;
+        if (installedSortMode === "title_desc") return -titleCompare;
+        if (installedSortMode === "core_first") {
+            const aIsCore = isCoreSkill(a);
+            const bIsCore = isCoreSkill(b);
+            if (aIsCore !== bIsCore) return aIsCore ? -1 : 1;
+            if (a.isEnabled !== b.isEnabled) return a.isEnabled ? -1 : 1;
+            return titleCompare;
+        }
+        if (a.isEnabled !== b.isEnabled) return a.isEnabled ? -1 : 1;
+        const aIsCore = isCoreSkill(a);
+        const bIsCore = isCoreSkill(b);
+        if (aIsCore !== bIsCore) return aIsCore ? -1 : 1;
+        return titleCompare;
+    });
+    const allVisibleSkillsChecked = sortedFilteredSkills.length > 0
+        && sortedFilteredSkills.every((skill) => checkedSkillIds.includes(skill.id));
+
     return (
         <>
             <div className="flex-1 overflow-hidden bg-background p-6 flex flex-col text-foreground">
                 <div className="max-w-7xl w-full mx-auto h-full flex flex-col pt-4">
  
                     {/* Header */}
-                    <div className="flex items-center justify-between mb-8 animate-in fade-in slide-in-from-top-4 duration-500">
-                        <div className="flex items-center gap-4">
-                            <div className="inline-flex items-center justify-center p-3 bg-primary/10 border border-primary/20 rounded-xl shadow-[0_0_20px_-5px_var(--primary)] shadow-primary/40">
-                                <BookOpen className="w-6 h-6 text-primary" />
+                    <div className="mb-6 space-y-4 animate-in fade-in slide-in-from-top-4 duration-500">
+                        <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+                            <div className="flex items-start gap-4">
+                                <div className="inline-flex items-center justify-center p-3 bg-primary/10 border border-primary/20 rounded-xl shadow-[0_0_20px_-5px_var(--primary)] shadow-primary/40">
+                                    <BookOpen className="w-6 h-6 text-primary" />
+                                </div>
+                                <div>
+                                    <h1 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-foreground via-foreground/80 to-primary tracking-tight">
+                                        技能說明書 (Skills)
+                                    </h1>
+                                    <p className="text-sm text-muted-foreground mt-0.5 flex items-center gap-1.5">
+                                        {activeTab === "marketplace" ? (
+                                            <>
+                                                數據來源：
+                                                <a
+                                                    href="https://github.com/ComposioHQ/awesome-claude-skills"
+                                                    target="_blank"
+                                                    rel="noreferrer"
+                                                    className="text-primary hover:underline flex items-center gap-1"
+                                                >
+                                                    ComposioHQ/awesome-claude-skills
+                                                    <Globe className="w-3 h-3" />
+                                                </a>
+                                            </>
+                                        ) : "管理 Golem 的核心能力與開放技能市場"}
+                                    </p>
+                                </div>
                             </div>
-                            <div>
-                                <h1 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-foreground via-foreground/80 to-primary tracking-tight">
-                                    技能說明書 (Skills)
-                                </h1>
-                                <p className="text-sm text-muted-foreground mt-0.5 flex items-center gap-1.5">
-                                    {activeTab === "marketplace" ? (
-                                        <>
-                                            數據來源：
-                                            <a 
-                                                href="https://github.com/ComposioHQ/awesome-claude-skills" 
-                                                target="_blank" 
-                                                rel="noreferrer"
-                                                className="text-primary hover:underline flex items-center gap-1"
-                                            >
-                                                ComposioHQ/awesome-claude-skills
-                                                <Globe className="w-3 h-3" />
-                                            </a>
-                                        </>
-                                    ) : "管理 Golem 的核心能力與開放技能市場"}
-                                </p>
+
+                            <div className="flex items-center gap-2 bg-card/70 border border-border p-1.5 rounded-xl shadow-inner w-full xl:w-auto">
+                                <button
+                                    onClick={() => setActiveTab("installed")}
+                                    className={`flex-1 xl:flex-none px-4 py-2 text-sm font-medium rounded-lg flex items-center justify-center gap-2 transition-all ${activeTab === "installed"
+                                        ? "bg-secondary text-foreground shadow-sm"
+                                        : "text-muted-foreground hover:text-foreground hover:bg-secondary/50"
+                                        }`}
+                                >
+                                    <BookOpen className="w-4 h-4" />
+                                    已載入模組
+                                </button>
+                                <button
+                                    onClick={() => setActiveTab("marketplace")}
+                                    className={`flex-1 xl:flex-none px-4 py-2 text-sm font-medium rounded-lg flex items-center justify-center gap-2 transition-all ${activeTab === "marketplace"
+                                        ? "bg-secondary text-primary shadow-sm"
+                                        : "text-muted-foreground hover:text-foreground hover:bg-secondary/50"
+                                        }`}
+                                >
+                                    <Store className="w-4 h-4" />
+                                    技能市場
+                                </button>
                             </div>
-                        </div>
- 
-                        <div className="flex items-center gap-2 bg-card border border-border p-1 rounded-xl mr-auto ml-8 shadow-inner">
-                            <button
-                                onClick={() => setActiveTab("installed")}
-                                className={`px-4 py-1.5 text-sm font-medium rounded-lg flex items-center gap-2 transition-all ${activeTab === "installed"
-                                    ? "bg-secondary text-foreground shadow-sm"
-                                    : "text-muted-foreground hover:text-foreground hover:bg-secondary/50"
-                                    }`}
-                            >
-                                <BookOpen className="w-4 h-4" />
-                                已載入模組
-                            </button>
-                            <button
-                                onClick={() => setActiveTab("marketplace")}
-                                className={`px-4 py-1.5 text-sm font-medium rounded-lg flex items-center gap-2 transition-all ${activeTab === "marketplace"
-                                    ? "bg-secondary text-primary shadow-sm"
-                                    : "text-muted-foreground hover:text-foreground hover:bg-secondary/50"
-                                    }`}
-                            >
-                                <Store className="w-4 h-4" />
-                                技能市場
-                            </button>
                         </div>
 
-                        <div className="flex items-center gap-3">
-                            <button
-                                onClick={handleCreateSkill}
-                                className="px-4 py-2 text-sm font-medium rounded-lg flex items-center gap-2 transition-all bg-secondary text-muted-foreground border border-border hover:bg-accent hover:text-foreground"
-                            >
-                                <Plus className="w-4 h-4" />
-                                新增技能
-                            </button>
-                            {activeTab === "installed" && (
+                        <div className="rounded-2xl border border-border bg-card/35 p-2.5">
+                            <div className="flex flex-wrap items-center gap-2.5">
                                 <button
-                                    onClick={() => setShowConfirm(true)}
-                                    disabled={isInjecting}
-                                    className={`px-4 py-2 text-sm font-medium rounded-lg flex items-center gap-2 transition-all ${hasUnsyncedChanges
-                                        ? "bg-amber-500/20 text-amber-600 dark:text-amber-300 border border-amber-500/50 hover:bg-amber-500/30 animate-pulse"
-                                        : "bg-primary/10 text-primary border border-primary/30 hover:bg-primary/20"
-                                        } ${isInjecting ? "opacity-60 cursor-not-allowed" : ""}`}
+                                    onClick={handleCreateSkill}
+                                    className="px-4 py-2 text-sm font-medium rounded-lg flex items-center gap-2 transition-all bg-secondary text-muted-foreground border border-border hover:bg-accent hover:text-foreground"
                                 >
-                                    <Zap className={`w-4 h-4 ${isInjecting ? "animate-pulse" : ""}`} />
-                                    {isInjecting ? "注入中..." : "注入技能書"}
+                                    <Plus className="w-4 h-4" />
+                                    新增技能
                                 </button>
-                            )}
+                                {activeTab === "installed" && (
+                                    <button
+                                        onClick={handleImportClick}
+                                        disabled={isImporting || isPreparingImport || exportingTarget !== null}
+                                        className={`px-4 py-2 text-sm font-medium rounded-lg flex items-center gap-2 transition-all bg-primary/10 text-primary border border-primary/30 hover:bg-primary/20 ${isImporting || isPreparingImport || exportingTarget !== null ? "opacity-60 cursor-not-allowed" : ""}`}
+                                    >
+                                        <Upload className={`w-4 h-4 ${isImporting || isPreparingImport ? "animate-pulse" : ""}`} />
+                                        {isPreparingImport ? "分析中..." : isImporting ? "匯入中..." : "匯入技能書"}
+                                    </button>
+                                )}
+                                {activeTab === "installed" && (
+                                    <button
+                                        onClick={() => downloadSkillsBook("checked")}
+                                        disabled={checkedSkillIds.length === 0 || exportingTarget !== null || isImporting || isPreparingImport}
+                                        className={`px-4 py-2 text-sm font-medium rounded-lg flex items-center gap-2 transition-all bg-primary text-primary-foreground border border-primary hover:bg-primary/90 ${checkedSkillIds.length === 0 || exportingTarget !== null || isImporting || isPreparingImport ? "opacity-60 cursor-not-allowed" : ""}`}
+                                    >
+                                        <Download className={`w-4 h-4 ${exportingTarget === "checked" ? "animate-pulse" : ""}`} />
+                                        {exportingTarget === "checked" ? "匯出中..." : `匯出已勾選 (${checkedSkillIds.length})`}
+                                    </button>
+                                )}
+                                {activeTab === "installed" && (
+                                    <button
+                                        onClick={() => downloadSkillsBook("all")}
+                                        disabled={exportingTarget !== null || isImporting || isPreparingImport}
+                                        className={`px-4 py-2 text-sm font-medium rounded-lg flex items-center gap-2 transition-all bg-secondary text-muted-foreground border border-border hover:bg-accent hover:text-foreground ${exportingTarget !== null || isImporting || isPreparingImport ? "opacity-60 cursor-not-allowed" : ""}`}
+                                    >
+                                        <Download className={`w-4 h-4 ${exportingTarget === "all" ? "animate-pulse" : ""}`} />
+                                        {exportingTarget === "all" ? "匯出中..." : "匯出全部"}
+                                    </button>
+                                )}
+                                {activeTab === "installed" && (
+                                    <button
+                                        onClick={() => setShowConfirm(true)}
+                                        disabled={isInjecting || exportingTarget !== null || isImporting || isPreparingImport}
+                                        className={`px-4 py-2 text-sm font-medium rounded-lg flex items-center gap-2 transition-all ${hasUnsyncedChanges
+                                            ? "bg-amber-500/20 text-amber-600 dark:text-amber-300 border border-amber-500/50 hover:bg-amber-500/30 animate-pulse"
+                                            : "bg-primary/10 text-primary border border-primary/30 hover:bg-primary/20"
+                                            } ${isInjecting || exportingTarget !== null || isImporting || isPreparingImport ? "opacity-60 cursor-not-allowed" : ""}`}
+                                    >
+                                        <Zap className={`w-4 h-4 ${isInjecting ? "animate-pulse" : ""}`} />
+                                        {isInjecting ? "注入中..." : "注入技能書"}
+                                    </button>
+                                )}
+                                {activeTab === "installed" && (
+                                    <span className="text-xs text-muted-foreground px-2 py-1 rounded-md bg-secondary/40 border border-border/60 ml-auto">
+                                        已勾選 {checkedSkillIds.length} / {skills.length}
+                                    </span>
+                                )}
+                            </div>
                         </div>
                     </div>
 
                     {/* Main Content */}
                     <div className="flex-1 min-h-0 animate-in fade-in slide-in-from-bottom-4 duration-700 delay-100 flex flex-col">
                         {activeTab === "installed" ? (
-                            <div className="flex h-full gap-6 min-h-0">
-                                {/* Detail View (Left) */}
-                                <Card className="flex-[2] min-w-0 bg-card border-border shadow-2xl flex flex-col min-h-0 rounded-2xl overflow-hidden backdrop-blur-sm">
+                            <div className="grid h-full min-h-0 grid-cols-1 xl:grid-cols-[minmax(390px,44%)_1fr] gap-5">
+                                {/* List View (Left) */}
+                                <Card className="min-h-0 bg-card/35 border-border shadow-xl rounded-2xl overflow-hidden flex flex-col">
+                                    <CardHeader className="shrink-0 border-b border-border bg-card/55 px-5 py-4">
+                                        <div className="flex items-start justify-between gap-3">
+                                            <div>
+                                                <h2 className="text-sm font-bold text-foreground uppercase tracking-widest flex items-center gap-2">
+                                                    <div className="w-1.5 h-1.5 rounded-full bg-primary shadow-[0_0_8px_rgba(var(--primary),0.8)]"></div>
+                                                    已載入模組 ({sortedFilteredSkills.length}/{skills.length})
+                                                </h2>
+                                                <p className="text-xs text-muted-foreground mt-1">左側勾選後可批次匯出，點擊列可查看詳情。</p>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <button
+                                                    onClick={() => toggleAllCheckedSkills(!allVisibleSkillsChecked, sortedFilteredSkills)}
+                                                    disabled={sortedFilteredSkills.length === 0}
+                                                    className={`px-2.5 py-1.5 text-xs font-medium rounded-md border transition-colors ${sortedFilteredSkills.length === 0 ? "opacity-50 cursor-not-allowed bg-secondary/40 border-border text-muted-foreground" : "bg-secondary border-border text-muted-foreground hover:text-foreground hover:bg-accent"}`}
+                                                >
+                                                    {allVisibleSkillsChecked ? "取消可見項目" : "全選可見項目"}
+                                                </button>
+                                                <button
+                                                    onClick={() => setCheckedSkillIds([])}
+                                                    disabled={checkedSkillIds.length === 0}
+                                                    className={`px-2.5 py-1.5 text-xs font-medium rounded-md border transition-colors ${checkedSkillIds.length === 0 ? "opacity-50 cursor-not-allowed bg-secondary/40 border-border text-muted-foreground" : "bg-secondary border-border text-muted-foreground hover:text-foreground hover:bg-accent"}`}
+                                                >
+                                                    清除
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <div className="mt-3 space-y-2">
+                                            <div className="relative">
+                                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+                                                <input
+                                                    type="text"
+                                                    value={installedSearchText}
+                                                    onChange={(event) => setInstalledSearchText(event.target.value)}
+                                                    placeholder="搜尋技能名稱或 ID..."
+                                                    className="w-full bg-secondary/45 border border-border/70 rounded-lg pl-9 pr-3 py-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/40 transition-all"
+                                                />
+                                            </div>
+                                            <div className="flex items-center gap-1.5">
+                                                {[
+                                                    { key: "all" as const, label: "全部" },
+                                                    { key: "enabled" as const, label: "已啟用" },
+                                                    { key: "core" as const, label: "核心技能" },
+                                                ].map((filterOption) => (
+                                                    <button
+                                                        key={filterOption.key}
+                                                        onClick={() => setInstalledListFilter(filterOption.key)}
+                                                        className={cn(
+                                                            "px-2.5 py-1 text-xs rounded-md border transition-colors",
+                                                            installedListFilter === filterOption.key
+                                                                ? "bg-primary/15 text-primary border-primary/40"
+                                                                : "bg-secondary/45 text-muted-foreground border-border hover:bg-secondary hover:text-foreground"
+                                                        )}
+                                                    >
+                                                        {filterOption.label}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                            <div className="relative">
+                                                <ArrowUpDown className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
+                                                <select
+                                                    value={installedSortMode}
+                                                    onChange={(event) => setInstalledSortMode(event.target.value as InstalledSortMode)}
+                                                    className="w-full appearance-none bg-secondary/45 border border-border/70 rounded-lg pl-9 pr-9 py-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/40 transition-all"
+                                                >
+                                                    <option value="enabled_first">排序：已啟用優先</option>
+                                                    <option value="core_first">排序：核心技能優先</option>
+                                                    <option value="title_asc">排序：名稱 A → Z</option>
+                                                    <option value="title_desc">排序：名稱 Z → A</option>
+                                                </select>
+                                                <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
+                                                    <ChevronRight className="w-3.5 h-3.5 text-muted-foreground rotate-90" />
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </CardHeader>
+                                    <CardContent className="flex-1 overflow-y-auto p-2.5 space-y-1.5">
+                                        {sortedFilteredSkills.map((skill) => {
+                                            const isRowSelected = selectedSkill?.id === skill.id;
+                                            const isRowChecked = checkedSkillIds.includes(skill.id);
+                                            return (
+                                                <div
+                                                    key={skill.id}
+                                                    role="button"
+                                                    tabIndex={0}
+                                                    onClick={() => setSelectedSkill(skill)}
+                                                    onKeyDown={(event) => {
+                                                        if (event.key === "Enter" || event.key === " ") {
+                                                            event.preventDefault();
+                                                            setSelectedSkill(skill);
+                                                        }
+                                                    }}
+                                                    className={cn(
+                                                        "w-full text-left rounded-xl border px-3.5 py-3 transition-all duration-200 cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/30",
+                                                        isRowSelected
+                                                            ? "bg-primary/10 border-primary/50 shadow-sm"
+                                                            : "bg-card/50 border-border/50 hover:bg-secondary/60 hover:border-border"
+                                                    )}
+                                                >
+                                                    <div className="flex items-start gap-3">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={isRowChecked}
+                                                            onChange={(event) => toggleCheckedSkill(skill.id, event.target.checked)}
+                                                            onClick={(event) => event.stopPropagation()}
+                                                            className="mt-0.5 h-4 w-4 rounded border-border bg-secondary text-primary focus:ring-primary/30"
+                                                            aria-label={`選擇技能 ${skill.title}`}
+                                                        />
+                                                        <div className="min-w-0 flex-1">
+                                                            <div className="flex items-start justify-between gap-3">
+                                                                <div className="min-w-0">
+                                                                    <p className={`text-[15px] font-semibold truncate ${isRowSelected ? "text-primary" : "text-foreground"}`}>
+                                                                        {skill.title}
+                                                                    </p>
+                                                                    <p className="text-[11px] text-muted-foreground font-mono mt-0.5 truncate">
+                                                                        {skill.id}.md
+                                                                    </p>
+                                                                </div>
+                                                                <ChevronRight className={`w-4 h-4 mt-0.5 shrink-0 transition-transform ${isRowSelected ? "text-primary translate-x-0.5" : "text-muted-foreground"}`} />
+                                                            </div>
+                                                            <div className="mt-2 flex items-center gap-2">
+                                                                {isCoreSkill(skill) ? (
+                                                                    <span className="text-[10px] bg-indigo-500/10 text-indigo-500 border border-indigo-500/30 px-1.5 py-0.5 rounded-md uppercase tracking-wider font-bold">
+                                                                        常駐核心
+                                                                    </span>
+                                                                ) : skill.isEnabled ? (
+                                                                    <span className="flex items-center gap-1 text-[10px] text-primary uppercase tracking-wider font-bold">
+                                                                        <CheckCircle2 className="w-3 h-3" /> 已啟用
+                                                                    </span>
+                                                                ) : (
+                                                                    <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold">未啟用</span>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                        {skills.length === 0 && (
+                                            <div className="h-48 rounded-xl border border-dashed border-border/60 bg-card/40 flex flex-col items-center justify-center text-muted-foreground/70 gap-2">
+                                                <BookOpen className="w-8 h-8 opacity-30" />
+                                                <p className="text-sm">目前尚無已載入技能</p>
+                                            </div>
+                                        )}
+                                        {skills.length > 0 && sortedFilteredSkills.length === 0 && (
+                                            <div className="h-48 rounded-xl border border-dashed border-border/60 bg-card/40 flex flex-col items-center justify-center text-muted-foreground/70 gap-2">
+                                                <Search className="w-8 h-8 opacity-30" />
+                                                <p className="text-sm">目前篩選條件下沒有符合的技能</p>
+                                            </div>
+                                        )}
+                                    </CardContent>
+                                </Card>
+
+                                {/* Detail View (Right) */}
+                                <Card className="min-w-0 bg-card border-border shadow-2xl flex flex-col min-h-0 rounded-2xl overflow-hidden backdrop-blur-sm">
                                     <CardHeader className="flex-shrink-0 border-b border-border bg-card/60 p-5 px-6">
                                         {selectedSkill ? (
-                                            <div className="flex items-center justify-between">
-                                                <div className="flex items-center gap-3">
-                                                    <div className="w-10 h-10 rounded-xl bg-secondary border border-border flex items-center justify-center shadow-inner">
+                                            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                                                <div className="flex items-center gap-3 min-w-0">
+                                                    <div className="w-10 h-10 rounded-xl bg-secondary border border-border flex items-center justify-center shadow-inner shrink-0">
                                                         <BookOpen className="w-5 h-5 text-primary/80" />
                                                     </div>
-                                                    <div>
-                                                        <h3 className="text-lg font-bold text-foreground leading-tight">
+                                                    <div className="min-w-0">
+                                                        <h3 className="text-lg font-bold text-foreground leading-tight truncate">
                                                             {selectedSkill.title}
                                                         </h3>
-                                                        <p className="text-xs text-muted-foreground font-mono mt-0.5">
+                                                        <p className="text-xs text-muted-foreground font-mono mt-0.5 truncate">
                                                             {selectedSkill.id}.md
                                                         </p>
                                                     </div>
                                                 </div>
-                                                <div className="flex items-center gap-3">
-                                                    {!selectedSkill.isOptional && (
+                                                <div className="flex flex-wrap items-center gap-2">
+                                                    <label className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border bg-secondary/40 text-xs text-muted-foreground">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={checkedSkillIds.includes(selectedSkill.id)}
+                                                            onChange={(event) => toggleCheckedSkill(selectedSkill.id, event.target.checked)}
+                                                            className="h-3.5 w-3.5 rounded border-border bg-secondary text-primary focus:ring-primary/30"
+                                                        />
+                                                        納入批次匯出
+                                                    </label>
+                                                    <button
+                                                        onClick={() => downloadSkillsBook("selected")}
+                                                        disabled={exportingTarget !== null || isImporting || isPreparingImport}
+                                                        className={`flex items-center gap-1.5 px-3 py-1.5 bg-secondary border border-border text-muted-foreground hover:text-foreground hover:bg-accent text-xs font-medium rounded-lg transition-colors ${exportingTarget !== null || isImporting || isPreparingImport ? "opacity-60 cursor-not-allowed" : ""}`}
+                                                    >
+                                                        <Download className={`w-3.5 h-3.5 ${exportingTarget === "selected" ? "animate-pulse" : ""}`} />
+                                                        {exportingTarget === "selected" ? "匯出中..." : "匯出單一"}
+                                                    </button>
+                                                    {isCoreSkill(selectedSkill) && (
                                                         <div className="flex items-center gap-1.5 px-3 py-1 bg-secondary border border-border text-muted-foreground text-[11px] uppercase tracking-wider font-bold rounded-lg select-none">
                                                             <AlertCircle className="w-3.5 h-3.5 opacity-70" />
                                                             常駐核心技能
                                                         </div>
                                                     )}
-                                                    {selectedSkill.isOptional && (
-                                                        <div className="flex items-center gap-2">
+                                                    <div className="flex items-center gap-2">
+                                                        {canDeleteSkill(selectedSkill) && (
                                                             <button
                                                                 onClick={() => setShowDeleteConfirm(true)}
                                                                 className="flex items-center gap-1.5 px-3 py-1.5 bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400 hover:text-red-500 hover:bg-red-500/20 text-xs font-medium rounded-lg transition-colors"
                                                             >
                                                                 <Trash2 className="w-3.5 h-3.5" /> 刪除
                                                             </button>
+                                                        )}
+                                                        {selectedSkill.isOptional && (
                                                             <button
                                                                 onClick={(e) => handleEditSkill(e, selectedSkill)}
                                                                 className="flex items-center gap-1.5 px-3 py-1.5 bg-secondary border border-border text-muted-foreground hover:text-foreground hover:bg-accent text-xs font-medium rounded-lg transition-colors"
                                                             >
                                                                 <Pencil className="w-3.5 h-3.5" /> 編輯
                                                             </button>
-                                                        </div>
-                                                    )}
+                                                        )}
+                                                    </div>
                                                     {selectedSkill.isOptional && (
                                                         <label className="relative inline-flex items-center cursor-pointer ml-1">
                                                             <input
@@ -705,7 +1550,7 @@ export default function SkillsPage() {
                                                 </div>
                                             </div>
                                         ) : (
-                                            <div className="h-[46px] flex items-center text-muted-foreground text-sm">請選擇一個技能以檢視內容</div>
+                                            <div className="h-[46px] flex items-center text-muted-foreground text-sm">請先在左側列表選擇一個技能查看詳情</div>
                                         )}
                                     </CardHeader>
                                     <CardContent className="flex-1 overflow-y-auto p-0 scroll-smooth">
@@ -724,69 +1569,11 @@ export default function SkillsPage() {
                                         ) : (
                                             <div className="h-full flex flex-col items-center justify-center text-muted-foreground/50 space-y-4">
                                                 <BookOpen className="w-12 h-12 opacity-20" />
-                                                <p>在右側列表中選擇技能</p>
+                                                <p>在左側列表中選擇技能</p>
                                             </div>
                                         )}
                                     </CardContent>
                                 </Card>
-
-                                {/* List (Right) */}
-                                <div className="flex-1 flex flex-col min-h-0 bg-card/30 border border-border rounded-2xl overflow-hidden shadow-xl max-w-sm">
-                                    <div className="p-4 border-b border-border bg-card/50 backdrop-blur-sm flex justify-between items-center shrink-0">
-                                        <h2 className="text-sm font-bold text-foreground uppercase tracking-widest flex items-center gap-2">
-                                            <div className="w-1.5 h-1.5 rounded-full bg-primary shadow-[0_0_8px_rgba(var(--primary),0.8)]"></div>
-                                            已載入模組 ({skills.length})
-                                        </h2>
-                                    </div>
-                                    <div className="flex-1 overflow-y-auto p-2 space-y-1 scroll-smooth">
-                                        {skills.map((skill) => (
-                                            <button
-                                                key={skill.id}
-                                                onClick={() => setSelectedSkill(skill)}
-                                                className={`w-full text-left px-4 py-3 rounded-xl flex items-center justify-between transition-all duration-200 group relative overflow-hidden ${selectedSkill?.id === skill.id
-                                                    ? "bg-primary/10 border border-primary/50 shadow-lg"
-                                                    : "hover:bg-secondary border border-transparent"
-                                                    }`}
-                                            >
-                                                {selectedSkill?.id === skill.id && (
-                                                    <div className="absolute left-0 top-0 bottom-0 w-1 bg-primary shadow-[0_0_12px_rgba(var(--primary),0.6)] rounded-r-full"></div>
-                                                )}
-                                                <div className="flex flex-col gap-1 pr-4 z-10 w-full overflow-hidden">
-                                                    <span className={`font-semibold text-[15px] truncate ${selectedSkill?.id === skill.id ? "text-primary" : "text-foreground"}`}>
-                                                        {skill.title}
-                                                    </span>
-                                                    <div className="flex items-center gap-2">
-                                                        {!skill.isOptional ? (
-                                                            <span className="text-[9px] bg-indigo-500/10 text-indigo-500 border border-indigo-500/30 px-1.5 py-0.5 rounded-md uppercase tracking-wider font-bold shadow-[0_0_10px_-2px_rgba(99,102,241,0.2)]">
-                                                                常駐核心
-                                                            </span>
-                                                        ) : skill.isEnabled ? (
-                                                            <span className="flex items-center gap-1 text-[10px] text-primary uppercase tracking-wider font-bold">
-                                                                <CheckCircle2 className="w-3 h-3" /> 已啟用
-                                                            </span>
-                                                        ) : (
-                                                            <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold">未啟用</span>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                                <div className="flex items-center gap-2 z-10 shrink-0">
-                                                    {skill.isOptional && (
-                                                        <div
-                                                            onClick={(e) => handleEditSkill(e, skill)}
-                                                            className={`p-1.5 rounded-md transition-colors ${selectedSkill?.id === skill.id
-                                                                ? "text-primary hover:bg-primary/20"
-                                                                : "text-muted-foreground opacity-0 group-hover:opacity-100 hover:bg-secondary hover:text-foreground"
-                                                                }`}
-                                                        >
-                                                            <Pencil className="w-3.5 h-3.5" />
-                                                        </div>
-                                                    )}
-                                                    <ChevronRight className={`w-4 h-4 transition-transform ${selectedSkill?.id === skill.id ? "text-primary translate-x-1" : "text-muted-foreground group-hover:text-foreground group-hover:translate-x-0.5"}`} />
-                                                </div>
-                                            </button>
-                                        ))}
-                                    </div>
-                                </div>
                             </div>
                         ) : (
                             <div className="flex flex-col h-full space-y-6">
@@ -1063,8 +1850,30 @@ export default function SkillsPage() {
                     </div>
                 )}
             </div>
+
+            <input
+                ref={importFileInputRef}
+                type="file"
+                accept=".md,.markdown,.json,text/markdown,application/json"
+                className="hidden"
+                onChange={handleImportFileChange}
+            />
             
             {/* Dialogs */}
+            <ImportPreviewDialog
+                open={showImportPreview}
+                onOpenChange={(nextOpen) => {
+                    setShowImportPreview(nextOpen);
+                    if (!nextOpen && !isImporting) {
+                        setImportDraft(null);
+                    }
+                }}
+                draft={importDraft}
+                strategy={importStrategy}
+                onStrategyChange={setImportStrategy}
+                onConfirm={handleConfirmImport}
+                isLoading={isImporting}
+            />
             <InjectConfirmDialog open={showConfirm} onOpenChange={setShowConfirm} onConfirm={handleInject} isLoading={isInjecting} />
             <InjectDoneDialog open={showDone} onOpenChange={setShowDone} />
             <SkillEditorDialog

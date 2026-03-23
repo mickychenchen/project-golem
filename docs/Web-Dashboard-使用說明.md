@@ -50,6 +50,9 @@ node server.js     # 預設：http://localhost:3000
 |------|------|
 | 列出所有技能 | 顯示 CORE / USER 技能及描述 |
 | 開關技能 | 啟用/停用特定技能 |
+| 匯出技能書 | 一鍵下載整本技能書（Markdown） |
+| 匯出單一技能 | 在詳情面板下載目前技能 `.md` |
+| 匯入技能書 | 上傳 `.md/.json` 還原技能庫（含匯入前預覽與衝突策略） |
 | 注入技能書 | 重新將技能書注入 Gemini（相當於 `/reload`） |
 | 匯出/匯入膠囊 | 透過 `GOLEM_SKILL::` 字串分享技能 |
 
@@ -141,6 +144,8 @@ Dashboard 後端主要 API 與即時通訊能力如下：
 | `GET /api/system/security/events` | 讀取安全事件紀錄 |
 | `GET /api/golems` | 取得 Golem 列表 |
 | `POST /api/chat` | 發送 Web 端對話訊息 |
+| `GET /api/skills/export` | 匯出技能書（整本或指定技能） |
+| `POST /api/skills/import` | 匯入技能書（支援 JSON/Markdown） |
 | `GET /api/memory` | 查詢向量記憶條目 |
 | `POST /api/upload` | 上傳檔案（受大小限制） |
 | `GET /api/mcp/servers` | 取得 MCP Server 列表 |

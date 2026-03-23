@@ -168,8 +168,14 @@ class SkillArchitect {
                 throw new Error("⚠️ Security: Generated skill contains restricted calls. Deployment blocked.");
             }
 
-            // 修正檔名 (強制 .js)
-            if (!skillData.filename.endsWith('.js')) skillData.filename += '.js';
+            // 修正檔名 (限制為安全字元 + 強制 .js)
+            const safeBase = path.basename(String(skillData.filename))
+                .replace(/[^a-z0-9._-]/gi, '_')
+                .replace(/^\.+/, '');
+            skillData.filename = safeBase.endsWith('.js') ? safeBase : `${safeBase}.js`;
+            if (!skillData.filename || skillData.filename === '.js') {
+                skillData.filename = `learned-skill-${Date.now()}.js`;
+            }
 
             const filePath = path.join(this.skillsDir, skillData.filename);
 
@@ -184,8 +190,10 @@ class SkillArchitect {
             return {
                 success: true,
                 path: finalPath,
+                id: path.basename(skillData.filename, '.js').toLowerCase(),
                 name: skillData.name,
-                preview: skillData.description
+                preview: skillData.description,
+                code: skillData.code
             };
 
         } catch (error) {

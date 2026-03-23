@@ -44,6 +44,9 @@ Features:
 The central hub for managing Golem's capabilities:
 - **List Skills**: View descriptions of CORE and USER skills.
 - **Toggle Skills**: Enable or disable specific functions.
+- **Export Skill Book**: Download the full skill book as Markdown.
+- **Export Single Skill**: Download the selected skill as a `.md` file.
+- **Import Skill Book**: Upload `.md/.json` backups with pre-import preview and conflict strategy.
 - **Inject Skills**: Reload skill books into Gemini (equivalent to `/reload`).
 
 ---
@@ -99,6 +102,8 @@ System configuration and status monitoring:
 | `GET /api/system/security/events` | Read security audit events |
 | `GET /api/golems` | Get Golem list |
 | `POST /api/chat` | Send a web chat message to Golem |
+| `GET /api/skills/export` | Export full skill book or a specific skill |
+| `POST /api/skills/import` | Import skill book from JSON/Markdown |
 | `GET /api/memory` | Read memory entries |
 | `POST /api/upload` | Upload file (size-limited) |
 | `GET /api/mcp/servers` | Get MCP Server list |

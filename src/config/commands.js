@@ -37,6 +37,15 @@ module.exports = [
         description: '解除觀察者模式。',
         options: [{ name: '@username', description: '請輸入目標 Bot ID' }]
     },
+    {
+        command: '/learn',
+        description: '讓 Golem 學習新技能（輸入需求描述，自動生成可執行技能）。',
+        options: [
+            { name: '建立一個股票查詢技能', description: '範例：學習即時查股價與新聞摘要' },
+            { name: '建立一個每日報告技能', description: '範例：學習產出固定格式日報' },
+            { name: '建立一個資料清理技能', description: '範例：學習清洗與格式化輸入資料' }
+        ]
+    },
     { command: '/patch', description: '執行自我反思與代碼優化。' },
     { command: '/dashboard', description: '顯示控制台連線網址：包含本地 (Local) 與遠端 (Remote) 存取網址。' },
     { 

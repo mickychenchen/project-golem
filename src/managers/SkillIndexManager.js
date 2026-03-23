@@ -165,6 +165,42 @@ class SkillIndexManager {
     }
 
     /**
+     * 取得完整技能索引 (含 content/path 等欄位)
+     */
+    async listSkillEntries() {
+        await this.init();
+        return new Promise((resolve, reject) => {
+            this.db.all(
+                "SELECT id, name, description, content, path, category, last_modified FROM skills ORDER BY id ASC",
+                (err, rows) => {
+                    if (err) reject(err);
+                    else resolve(rows || []);
+                }
+            );
+        });
+    }
+
+    /**
+     * 直接寫入一筆技能索引紀錄（不依賴 lib/*.md）
+     * 適用於 /learn 動態生成的 runtime skill
+     */
+    async upsertSkillRecord(record = {}) {
+        await this.init();
+        const id = String(record.id || '').trim().toLowerCase();
+        if (!id) throw new Error('upsertSkillRecord: missing skill id');
+
+        await this._upsertSkill({
+            id,
+            name: String(record.name || id).trim(),
+            description: String(record.description || '').trim(),
+            content: String(record.content || '').trim(),
+            path: String(record.path || '').trim(),
+            category: String(record.category || 'user_dynamic').trim(),
+            last_modified: Number(record.last_modified || Date.now())
+        });
+    }
+
+    /**
      * 取得啟用的技能內容
      */
     async getEnabledSkills(skillIds) {
