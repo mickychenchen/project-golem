@@ -27,7 +27,11 @@ class SecurityManager {
             .map(cmd => cmd.trim())
             .filter(cmd => cmd.length > 0);
 
-        const dangerousOps = ['rm', 'mv', 'chmod', 'chown', 'sudo', 'su', 'reboot', 'shutdown', 'npm uninstall', 'Remove-Item', 'Stop-Computer'];
+        const safeguard = require('../utils/CommandSafeguard');
+        const dangerousOps = Array.from(new Set([
+            'rm', 'mv', 'chmod', 'chown', 'sudo', 'su', 'reboot', 'shutdown', 'npm uninstall', 'Remove-Item', 'Stop-Computer',
+            ...safeguard.dangerousOps.map(op => op.split(' ')[0])
+        ]));
 
         // 處理解析複合指令 (&&, ||, ;, |)
         if (/([;&|])/.test(safeCmd)) {

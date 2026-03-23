@@ -380,14 +380,7 @@ class ChatLogManager {
         }
     }
 
-    readRecentHourly(limit = 1000, maxChars = 200000) {
-        // Because original readRecentHourly is synchronous, but sqlite3 is async,
-        // we might have a problem if callers don't await. 
-        // In project-golem, readRecentHourly is often called synchronously!
-        // This is a CRITICAL ISSUE for SQLite refactor. We would need to refactor all callers.
-        console.warn('⚠️ readRecentHourly was called synchronously. Returning empty or cached. Use readRecentHourlyAsync instead.');
-        return '';
-    }
+
 
     async readTierAsync(tier, limit = 50, maxChars = 200000) {
         if (!this._isInitialized || !this.db) return [];
@@ -408,10 +401,7 @@ class ChatLogManager {
         }
     }
 
-    readTier(tier, limit = 50, maxChars = 200000) {
-        console.warn('⚠️ readTier was called synchronously. Use readTierAsync instead.');
-        return [];
-    }
+
 }
 
 module.exports = ChatLogManager;

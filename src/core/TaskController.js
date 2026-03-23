@@ -16,7 +16,7 @@ class TaskController {
         this.pendingTasks = new Map(); // Moved from global to here
 
         // ✨ [v9.1] 防止記憶體流失: 定期清理過期的待審批任務 (5 分鐘)
-        setInterval(() => {
+        this._cleanupTimer = setInterval(() => {
             const now = Date.now();
             for (const [id, task] of this.pendingTasks.entries()) {
                 if (now - task.timestamp > 5 * 60 * 1000) {
@@ -24,6 +24,13 @@ class TaskController {
                 }
             }
         }, 60 * 1000);
+    }
+
+    destroy() {
+        if (this._cleanupTimer) {
+            clearInterval(this._cleanupTimer);
+            this._cleanupTimer = null;
+        }
     }
 
     // ✨ [v9.1] 處理多 Agent 請求

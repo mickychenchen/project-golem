@@ -356,6 +356,20 @@ function getOrCreateGolem() {
                         console.error(`❌ [Scheduler] Era 壓縮失敗: ${err.message}`);
                     });
                 }
+                if (month === 1 && day === 1) {
+                    const lastYear = mgr._getLastYearString();
+                    mgr.compressYearly(lastYear, instance.brain).catch(e => console.error(e));
+                }
+                if (day === 1) {
+                    const lastMonth = mgr._getLastMonthString();
+                    mgr.compressMonthly(lastMonth, instance.brain).catch(e => console.error(e));
+                }
+                
+                // 每天執行昨日的摘要壓縮
+                const yesterday = new Date(now);
+                yesterday.setDate(yesterday.getDate() - 1);
+                const yesterdayStr = mgr._formatDate(yesterday);
+                mgr.compressLogsForDate(yesterdayStr, instance.brain).catch(e => console.error(e));
             }
         }
     }
@@ -511,7 +525,7 @@ async function handleUnifiedMessage(ctx, forceTargetId = null) {
         convoManager.silentMode = isEnable;
         if (isEnable) convoManager.observerMode = false; // 開啟全靜默時關閉觀察者
 
-        const displayName = ctx.instance.username ? `@${ctx.instance.username}` : `[${targetId}]`;
+        const displayName = ctx.instance.username ? `@${ctx.instance.username}` : `[${forceTargetId || 'golem_A'}]`;
         if (isEnable) {
             await ctx.reply(`🤫 ${displayName} 已進入「完全靜默模式」。\n我將暫時關閉感知，且不會記錄任何對話。`);
         } else {
@@ -561,8 +575,8 @@ async function handleUnifiedMessage(ctx, forceTargetId = null) {
 
     const lowerText = ctx.text ? ctx.text.toLowerCase() : '';
     if (autonomy.pendingPatch) {
-        if (['ok', 'deploy', 'y', '部署'].includes(lowerText)) return executeDeploy(ctx, targetId);
-        if (['no', 'drop', 'n', '丟棄'].includes(lowerText)) return executeDrop(ctx, targetId);
+        if (['ok', 'deploy', 'y', '部署'].includes(lowerText)) return executeDeploy(ctx, forceTargetId || 'golem_A');
+        if (['no', 'drop', 'n', '丟棄'].includes(lowerText)) return executeDrop(ctx, forceTargetId || 'golem_A');
     }
 
     if (lowerText.startsWith('/patch') || lowerText.includes('優化代碼')) {

@@ -389,8 +389,9 @@ class GolemBrain {
         try {
             await this.memoryDriver.init();
         } catch (e) {
-            console.warn("🔄 [System] 記憶引擎降級為 Browser/Native...");
-            this.memoryDriver = new BrowserMemoryDriver(this);
+            console.warn("🔄 [System] 記憶引擎降級為 SystemNativeDriver...");
+            const SystemNativeDriver = require('../memory/SystemNativeDriver');
+            this.memoryDriver = new SystemNativeDriver();
             await this.memoryDriver.init();
         }
     }

@@ -228,6 +228,8 @@ class SystemUpdater {
         const { keepOldData, keepMemory } = options;
         const AdmZip = require('adm-zip');
         const rootDir = process.cwd();
+        let backupDir = null;
+        let tempDir = null;
 
         try {
             // 1. Download
@@ -241,7 +243,7 @@ class SystemUpdater {
 
             // 2. Extract to temp
             this.broadcast(io, 'running', '解壓縮更新檔...', 40);
-            const tempDir = path.join(rootDir, 'temp_update_' + Date.now());
+            tempDir = path.join(rootDir, 'temp_update_' + Date.now());
             const zip = new AdmZip(buffer);
             zip.extractAllTo(tempDir, true);
 
@@ -250,13 +252,11 @@ class SystemUpdater {
             if (extractedFolders.length === 0) throw new Error('ZIP 包內沒有檔案');
             const sourceDir = path.join(tempDir, extractedFolders[0]);
 
-            // 3. Backup old files
+            // 3. Backup old files (always backup for rollback safety)
             this.broadcast(io, 'running', '備份現有資料並清理...', 60);
             await this.sleep(100); // let UI update
-            const backupDir = path.join(rootDir, 'backup_' + new Date().toISOString().replace(/[:.]/g, '-'));
-            if (keepOldData) {
-                fs.mkdirSync(backupDir, { recursive: true });
-            }
+            backupDir = path.join(rootDir, 'backup_' + new Date().toISOString().replace(/[:.]/g, '-'));
+            fs.mkdirSync(backupDir, { recursive: true });
 
             const currentFiles = fs.readdirSync(rootDir);
             for (const file of currentFiles) {
@@ -276,14 +276,9 @@ class SystemUpdater {
                 }
 
                 const srcPath = path.join(rootDir, file);
-
-                if (keepOldData) {
-                    const destPath = path.join(backupDir, file);
-                    try { fs.renameSync(srcPath, destPath); } catch (e) {
-                        try { fs.rmSync(srcPath, { recursive: true, force: true }); } catch (ignore) { }
-                    }
-                } else {
-                    try { fs.rmSync(srcPath, { recursive: true, force: true }); } catch (e) { }
+                const destPath = path.join(backupDir, file);
+                try { fs.renameSync(srcPath, destPath); } catch (e) {
+                    try { fs.rmSync(srcPath, { recursive: true, force: true }); } catch (ignore) { }
                 }
             }
 
@@ -309,11 +304,15 @@ class SystemUpdater {
                     fs.renameSync(srcPath, destPath);
                 } catch (e) {
                     console.error(`Failed to move ${file}: ${e.message}`);
+                    throw new Error(`套用新檔案失敗: ${file}`);
                 }
             }
 
-            // Cleanup temp
+            // Cleanup temp and backup if not keeping old data
             try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch (e) { }
+            if (!keepOldData && backupDir) {
+                try { fs.rmSync(backupDir, { recursive: true, force: true }); } catch (e) { }
+            }
 
             // 5. Npm install
             this.broadcast(io, 'running', '安裝依賴套件 (npm install)...', 85);
@@ -328,6 +327,29 @@ class SystemUpdater {
             this.broadcast(io, 'requires_restart', '✨ 更新完成！舊檔案已備份。請點擊重啟按鈕。', 100);
         } catch (error) {
             console.error('[SystemUpdater] ZIP update failed:', error);
+            
+            if (backupDir && fs.existsSync(backupDir)) {
+                this.broadcast(io, 'running', '更新失敗，執行安全回滾...', 95);
+                try {
+                    const backupFiles = fs.readdirSync(backupDir);
+                    for (const file of backupFiles) {
+                        const bPath = path.join(backupDir, file);
+                        const rPath = path.join(rootDir, file);
+                        if (fs.existsSync(rPath)) fs.rmSync(rPath, { recursive: true, force: true });
+                        fs.renameSync(bPath, rPath);
+                    }
+                    console.log('[SystemUpdater] 回滾成功');
+                } catch (rbError) {
+                    console.error('[SystemUpdater] 回滾失敗:', rbError);
+                }
+                if (!keepOldData) {
+                    try { fs.rmSync(backupDir, { recursive: true, force: true }); } catch (e) {}
+                }
+            }
+            if (tempDir && fs.existsSync(tempDir)) {
+                try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch (e) { }
+            }
+
             this.broadcast(io, 'error', `更新失敗: ${error.message}`);
         }
     }
