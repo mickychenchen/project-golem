@@ -220,5 +220,43 @@ module.exports = function(server) {
         }
     });
 
+    router.get('/api/metacognition/stats', async (req, res) => {
+        try {
+            const { golemId } = req.query;
+            if (!golemId) return res.status(400).json({ error: 'golemId required' });
+            
+            const index = require('../../index.js');
+            const instance = index.getOrCreateGolem ? index.getOrCreateGolem(golemId) : null;
+            if (!instance || !instance.conversationManager || !instance.conversationManager.confidenceTracker) {
+                return res.status(404).json({ error: 'ConfidenceTracker not found for this golem instance' });
+            }
+
+            const stats = await instance.conversationManager.confidenceTracker.getStats();
+            return res.json({ success: true, stats });
+        } catch (e) {
+            console.error('Failed to fetch metacognition stats:', e);
+            return res.status(500).json({ error: e.message });
+        }
+    });
+
+    router.get('/api/metacognition/history', async (req, res) => {
+        try {
+            const { golemId, limit } = req.query;
+            if (!golemId) return res.status(400).json({ error: 'golemId required' });
+
+            const index = require('../../index.js');
+            const instance = index.getOrCreateGolem ? index.getOrCreateGolem(golemId) : null;
+            if (!instance || !instance.conversationManager || !instance.conversationManager.confidenceTracker) {
+                return res.status(404).json({ error: 'ConfidenceTracker not found for this golem instance' });
+            }
+
+            const history = await instance.conversationManager.confidenceTracker.getHistory(limit ? parseInt(limit, 10) : 20);
+            return res.json({ success: true, history });
+        } catch (e) {
+            console.error('Failed to fetch metacognition history:', e);
+            return res.status(500).json({ error: e.message });
+        }
+    });
+
     return router;
 };

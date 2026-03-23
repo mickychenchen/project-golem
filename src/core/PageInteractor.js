@@ -102,7 +102,8 @@ class PageInteractor {
 
             return {
                 text: ResponseExtractor.cleanResponse(finalResponse.text, startTag, endTag),
-                attachments: finalResponse.attachments || []
+                attachments: finalResponse.attachments || [],
+                status: finalResponse.status
             };
 
         } catch (e) {

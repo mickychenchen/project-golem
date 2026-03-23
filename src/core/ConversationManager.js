@@ -1,5 +1,6 @@
 const { v4: uuidv4 } = require('uuid');
 const ConfigManager = require('../config');
+const ConfidenceTracker = require('../managers/ConfidenceTracker');
 
 // ============================================================
 // 🚦 Conversation Manager (隊列與防抖系統 - 多用戶隔離版)
@@ -18,6 +19,9 @@ class ConversationManager {
         this.interventionLevel = options.interventionLevel || 'CONSERVATIVE';
         this.DEBOUNCE_MS = 1500;
         this.autoTurnCount = 0; // 🎯 [v9.1.15] Track autonomous turns
+
+        // 初始化信心追蹤器
+        this.confidenceTracker = new ConfidenceTracker(this.brain.chatLogManager);
 
         // 🔄 [Instance Pooling] 背景監控與定時重啟定時器
         this.UPTIME_LIMIT_MS = 24 * 60 * 60 * 1000; // 24H
@@ -246,7 +250,22 @@ class ConversationManager {
                 ...task.options // 🎯 [v9.1.13] 透傳來自隊列的自定義選項 (如 suppressReply)
             });
 
-            const { text: raw, attachments: responseAttachments } = brainResponse;
+            let { text: raw, attachments: responseAttachments, status: extractorStatus } = brainResponse;
+
+            // ✨ [Metacognition] AUQ 信心評分與標記
+            const evaluation = this.confidenceTracker.evaluate(raw, extractorStatus, task.text);
+            if (evaluation.score < 0.5) {
+                raw += `\n\n🔶 *(系統提示: AI 信心指數 ${(evaluation.score * 100).toFixed(0)}% · ${evaluation.label})*`;
+            }
+            // 非同步寫入歷史紀錄
+            this.confidenceTracker.record({
+                query: task.text,
+                response: raw,
+                score: evaluation.score,
+                label: evaluation.label,
+                flags: evaluation.flags,
+                extractor_status: extractorStatus
+            }).catch(e => console.error("[ConfidenceTracker] Record error:", e));
 
             await this.NeuroShunter.dispatch(task.ctx, raw, this.brain, this.controller, {
                 suppressReply: shouldSuppressReply || task.options.suppressReply === true,
