@@ -210,5 +210,15 @@ module.exports = function(server) {
         }
     });
 
+    router.get('/api/commands', (req, res) => {
+        try {
+            const commands = require('../../src/config/commands.js');
+            return res.json({ success: true, commands });
+        } catch (e) {
+            console.error('Failed to fetch commands:', e);
+            return res.status(500).json({ error: e.message });
+        }
+    });
+
     return router;
 };

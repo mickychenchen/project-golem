@@ -3,7 +3,36 @@
 // ============================================================
 // ==================== [KERNEL PROTECTED START] ====================
 class SecurityManager {
+    static LEVELS = {
+        L0: { name: 'L0 (Safe)', value: 0 },
+        L1: { name: 'L1 (Low)', value: 1 },
+        L2: { name: 'L2 (Medium)', value: 2 },
+        L3: { name: 'L3 (Critical)', value: 3 }
+    };
+    static currentLevel = parseInt(process.env.AUTONOMY_LEVEL || '2', 10);
+
     constructor() {
+        this.patterns = {
+            L0: [
+                /^ls(\s|$)/, /^cat(\s|$)/, /^echo(\s|$)/, /^pwd(\s|$)/, /^whoami(\s|$)/,
+                /^node\s+src\/skills\/.*\.js/, /^grep(\s|$)/, /^find(\s|$)/, /^date(\s|$)/, /^tail(\s|$)/
+            ],
+            L1: [
+                /^git(\s+)(status|commit|add|diff|log)(\s|$)/,
+                /^touch(\s|$)/, /^mkdir(\s|$)/, /^cp(\s|$)/, /^mv(\s|$)/,
+                /^npm(\s+)(run|test|install)(\s|$)/
+            ],
+            L2: [
+                /^git(\s+)(push|pull|fetch|reset|checkout)(\s|$)/,
+                /^npm(\s+)(install(\s+-g|.*)|uninstall)(\s|$)/,
+                /^rm(\s+)(?!-rf)(.*)/, /^kill(\s|$)/, /^systemctl(\s+)(status|restart)(\s|$)/,
+                /^apt(\s+)(update|install)(\s|$)/
+            ],
+            L3: [
+                /rm\s+-rf/, /sudo(\s|$)/, /chmod(\s|$)/, /chown(\s|$)/,
+                /mkfs/, /dd(\s|$)/, />\s*\//, /curl.*\|\s*(bash|sh)/, /wget.*\|\s*(bash|sh)/
+            ]
+        };
         this.SAFE_COMMANDS = ['ls', 'dir', 'pwd', 'date', 'echo', 'cat', 'grep', 'find', 'whoami', 'tail', 'head', 'df', 'free', 'Get-ChildItem', 'Select-String', 'golem-check'];
         this.BLOCK_PATTERNS = [/rm\s+-rf\s+\//, /rd\s+\/s\s+\/q\s+[c-zC-Z]:\\$/, />\s*\/dev\/sd/, /:(){:|:&};:/, /mkfs/, /Format-Volume/, /dd\s+if=/, /chmod\s+[-]x\s+/];
     }
@@ -69,6 +98,31 @@ class SecurityManager {
         if (dangerousOps.includes(baseCmd)) return { level: 'DANGER', reason: '高風險操作' };
 
         return { level: 'WARNING', reason: '需確認' };
+    }
+
+    /**
+     * 評估指令的風險等級
+     * @param {string} cmd 
+     * @returns {number} 0-3 (對應 L0-L3)
+     */
+    evaluateCommandLevel(cmd) {
+        if (!cmd) return 0;
+        const trimmed = cmd.trim();
+
+        for (const pattern of this.patterns.L3) {
+            if (pattern.test(trimmed)) return 3;
+        }
+        for (const pattern of this.patterns.L2) {
+            if (pattern.test(trimmed)) return 2;
+        }
+        for (const pattern of this.patterns.L1) {
+            if (pattern.test(trimmed)) return 1;
+        }
+        for (const pattern of this.patterns.L0) {
+            if (pattern.test(trimmed)) return 0;
+        }
+
+        return 2;
     }
 }
 // ==================== [KERNEL PROTECTED END] ====================

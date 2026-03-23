@@ -95,6 +95,11 @@ class TaskController {
                 reportBuffer.push(toolName ? `🔍 [ToolCheck] ${ToolScanner.check(toolName)}` : `⚠️ 缺少參數`);
                 continue;
             }
+            const evaluatedLevel = this.security.evaluateCommandLevel(cmdToRun);
+            if (evaluatedLevel > SecurityManager.currentLevel) {
+                console.log(`⛔ [TaskController] 指令風險等級 (L${evaluatedLevel}) 大於當前安全設定 (L${SecurityManager.currentLevel}): ${cmdToRun}`);
+                return `⛔ 安全攔截：該指令風險等級為 L${evaluatedLevel}，但系統目前僅允許執行 L${SecurityManager.currentLevel} (含) 以下的指令。\n請管理員使用 \`/level ${evaluatedLevel}\` 暫時調高權限後重試。`;
+            }
             if (risk.level === 'BLOCKED') {
                 console.log(`⛔ [TaskController] 指令被系統攔截: ${cmdToRun}`);
                 return `⛔ 指令被系統攔截：${cmdToRun}`;

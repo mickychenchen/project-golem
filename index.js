@@ -203,18 +203,16 @@ function getOrCreateGolem() {
                         console.log(`🤖 [Bot] ${golemConfig.id} 已掛載 (@${me.username})`);
                         
                         // ✨ [新增] 更新 Telegram 指令選單
-                        const tgCommands = [
-                            { command: 'sos', description: '輕量級急救：清除網頁快取' },
-                            { command: 'new', description: '物理重生：開啟全新對話' },
-                            { command: 'new_memory', description: '徹底轉生：清空 DB 並重置' },
-                            { command: 'model', description: '模型切換 (fast/thinking/pro)' },
-                            { command: 'dashboard', description: '顯示控制台連線網址' },
-                            { command: 'enable_silent', description: '開啟完全靜默模式' },
-                            { command: 'disable_silent', description: '解除靜默模式' },
-                            { command: 'enable_observer', description: '同步對話但不發言' },
-                            { command: 'disable_observer', description: '解除觀察者模式' },
-                            { command: 'patch', description: '執行自我反思與代碼優化' }
-                        ];
+                        const unifiedCommands = require('./src/config/commands.js');
+                        // 轉換並過濾至 Telegram 支援的格式 (小寫、大寫、底線、不能有斜線，長度1-32)
+                        // 若含有中文字或是特殊字元，Telegram 會報錯，故透過正則過濾
+                        const tgCommands = unifiedCommands
+                            .map(cmdObj => ({
+                                command: cmdObj.command.replace(/^\/+/, ''), // 將前面的 / 移除
+                                description: (cmdObj.description || "").substring(0, 255) // Telegram 限制敘述不超過256字
+                            }))
+                            .filter(cmd => /^[a-z0-9_]{1,32}$/i.test(cmd.command));
+
                         bot.setMyCommands(tgCommands).catch(e => console.error(`❌ [Bot] Set TG Commands Error:`, e.message));
                     }).catch(e => {
                         if (!e.message.includes('401')) {
@@ -499,6 +497,25 @@ async function handleUnifiedMessage(ctx, forceTargetId = null) {
         }
         
         await ctx.reply(message, { parse_mode: 'Markdown' });
+        return;
+    }
+
+    // ✨ [新增] /level 指令實作 (熱切換自主安全等級)
+    if (ctx.isAdmin && ctx.text && ctx.text.trim().toLowerCase().startsWith('/level')) {
+        const args = ctx.text.trim().split(/\s+/);
+        const targetLevel = parseInt(args[1], 10);
+        
+        if (isNaN(targetLevel) || targetLevel < 0 || targetLevel > 3) {
+            const SecurityManager = require('./src/managers/SecurityManager');
+            const lvlName = SecurityManager.LEVELS['L'+SecurityManager.currentLevel] ? SecurityManager.LEVELS['L'+SecurityManager.currentLevel].name : 'Unknown';
+            await ctx.reply(`ℹ️ 目前的安全指令風險等級為：**L${SecurityManager.currentLevel} (${lvlName})**\n\n請輸入 0-3 的數字切換等級，例如：\n\`/level 0\` (最安全，唯讀)\n\`/level 1\` (低風險)\n\`/level 2\` (中風險，預設)\n\`/level 3\` (最高權限)\n\n當指令風險超過目前設定時，將自動受到安全系統攔截。`, { parse_mode: 'Markdown' });
+            return;
+        }
+
+        const SecurityManager = require('./src/managers/SecurityManager');
+        SecurityManager.currentLevel = targetLevel;
+        const levelInfo = SecurityManager.LEVELS['L'+targetLevel];
+        await ctx.reply(`🛡️ **安全等級已動態切換**\n目前的自主控制權限已調整為：**L${targetLevel} (${levelInfo.name})**\n所有風險等級高於此設定的指令都將遭到自動攔截。`, { parse_mode: 'Markdown' });
         return;
     }
 

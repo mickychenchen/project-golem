@@ -69,7 +69,14 @@ class CommandSafeguard {
             return { safe: true, sanitizedCmd: trimmedCmd };
         }
 
-        // 4. ✨ [v9.1] 整合自適應白名單 (與 SecurityManager 同步)
+        // 4. ✨ [v9.1] 整合 L0-L3 分級與自適應白名單
+        const SecurityManager = require('../managers/SecurityManager');
+        const sm = new SecurityManager();
+        const evaluatedLevel = sm.evaluateCommandLevel(trimmedCmd);
+        if (evaluatedLevel > SecurityManager.currentLevel) {
+            return { safe: false, reason: `指令風險等級 (L${evaluatedLevel}) 大於當前安全設定 (L${SecurityManager.currentLevel})` };
+        }
+
         const userWhitelist = (process.env.COMMAND_WHITELIST || "")
             .split(',')
             .map(c => c.trim())
