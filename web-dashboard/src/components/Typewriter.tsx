@@ -23,23 +23,32 @@ export function Typewriter({ content, speed = 20, onComplete }: TypewriterProps)
         // Reset when content changes completely (e.g., new message)
         // If content is just appending, we don't want to reset
         // For our use case, `content` is a static string passed in, and we animate it
-        setDisplayedContent("");
-        indexRef.current = 0;
+        let interval: ReturnType<typeof setInterval> | null = null;
 
-        const chars = Array.from(content);
+        const startTyping = () => {
+            setDisplayedContent("");
+            indexRef.current = 0;
+            const chars = Array.from(content);
 
-        const interval = setInterval(() => {
-            if (indexRef.current < chars.length) {
-                const char = chars[indexRef.current];
-                setDisplayedContent((prev) => prev + char);
-                indexRef.current += 1;
-            } else {
-                clearInterval(interval);
-                if (onCompleteRef.current) onCompleteRef.current();
-            }
-        }, speed);
+            interval = setInterval(() => {
+                if (indexRef.current < chars.length) {
+                    const char = chars[indexRef.current];
+                    setDisplayedContent((prev) => prev + char);
+                    indexRef.current += 1;
+                } else if (interval) {
+                    clearInterval(interval);
+                    interval = null;
+                    if (onCompleteRef.current) onCompleteRef.current();
+                }
+            }, speed);
+        };
 
-        return () => clearInterval(interval);
+        const rafId = requestAnimationFrame(startTyping);
+
+        return () => {
+            cancelAnimationFrame(rafId);
+            if (interval) clearInterval(interval);
+        };
     }, [content, speed]);
 
     return (

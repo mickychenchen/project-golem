@@ -9,6 +9,7 @@ import {
     ExternalLink, Eye, EyeOff, AlertTriangle, MessageSquare, ChevronRight, ChevronLeft, CheckCircle2
 } from "lucide-react";
 import Link from "next/link";
+import { apiGet, apiPost } from "@/lib/api-client";
 
 type AuthMode = "ADMIN" | "CHAT";
 
@@ -41,18 +42,17 @@ export default function CreateGolemPage() {
 
     // Discord
     const [dcToken, setDcToken] = useState("");
-    const [dcAuthMode, setDcAuthMode] = useState<AuthMode>("ADMIN");
+    const [dcAuthMode] = useState<AuthMode>("ADMIN");
     const [dcAdminId, setDcAdminId] = useState("");
-    const [dcChatId, setDcChatId] = useState("");
+    const [dcChatId] = useState("");
     const [showDcToken, setShowDcToken] = useState(false);
 
     const suggestId = () => {
         if (!id) {
             const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-            fetch("/api/golems")
-                .then(r => r.json())
-                .then(data => {
-                    const existing = (data.golems || []).map((g: any) => g.id);
+            apiGet<{ golems?: Array<{ id?: string }> }>("/api/golems")
+                .then((data) => {
+                    const existing = (data.golems || []).map((g) => g.id).filter(Boolean);
                     for (const ch of letters) {
                         const candidate = `golem_${ch}`;
                         if (!existing.includes(candidate)) {
@@ -74,7 +74,7 @@ export default function CreateGolemPage() {
             if (!platforms.telegram && !platforms.discord && !platforms.direct) return setError("請至少選擇一種通訊方式");
             if (platforms.direct) {
                 // 如果是直接交談，直接送出
-                handleSubmit(null as any);
+                handleSubmit();
             } else {
                 setStep(3);
             }
@@ -94,7 +94,7 @@ export default function CreateGolemPage() {
         });
     };
 
-    const handleSubmit = async (e: React.FormEvent) => {
+    const handleSubmit = async (e?: React.FormEvent) => {
         if (e) e.preventDefault();
         setError(null);
 
@@ -112,33 +112,28 @@ export default function CreateGolemPage() {
 
         setIsLoading(true);
         try {
-            const res = await fetch("/api/golems/create", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    id: id.trim(),
-                    role: role.trim(),
-                    tgToken: platforms.telegram ? tgToken.trim() || undefined : undefined,
-                    tgAuthMode: platforms.telegram ? tgAuthMode : undefined,
-                    tgAdminId: platforms.telegram && tgAuthMode === "ADMIN" ? tgAdminId.trim() : undefined,
-                    tgChatId: platforms.telegram && tgAuthMode === "CHAT" ? tgChatId.trim() : undefined,
-                    dcToken: platforms.discord ? dcToken.trim() || undefined : undefined,
-                    dcAuthMode: platforms.discord ? "ADMIN" : undefined,
-                    dcAdminId: platforms.discord ? dcAdminId.trim() : undefined,
-                    dcChatId: undefined,
-                }),
+            const data = await apiPost<{ success?: boolean; error?: string }>("/api/golems/create", {
+                id: id.trim(),
+                role: role.trim(),
+                tgToken: platforms.telegram ? tgToken.trim() || undefined : undefined,
+                tgAuthMode: platforms.telegram ? tgAuthMode : undefined,
+                tgAdminId: platforms.telegram && tgAuthMode === "ADMIN" ? tgAdminId.trim() : undefined,
+                tgChatId: platforms.telegram && tgAuthMode === "CHAT" ? tgChatId.trim() : undefined,
+                dcToken: platforms.discord ? dcToken.trim() || undefined : undefined,
+                dcAuthMode: platforms.discord ? "ADMIN" : undefined,
+                dcAdminId: platforms.discord ? dcAdminId.trim() : undefined,
+                dcChatId: undefined,
             });
-            const data = await res.json();
 
-            if (!res.ok || !data.success) {
+            if (!data.success) {
                 throw new Error(data.error || "建立失敗，請稍後再試");
             }
 
             // ✅ 改用軟路由加上預先刷新背景快取，避免重複閃屏
             await refreshGolems();
             router.push("/dashboard/setup");
-        } catch (err: any) {
-            setError(err.message);
+        } catch (err: unknown) {
+            setError(err instanceof Error ? err.message : "建立失敗，請稍後再試");
         } finally {
             setIsLoading(false);
         }

@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import { Typewriter } from "@/components/Typewriter";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { apiGet, apiPost } from "@/lib/api-client";
 
 interface ChatMessage {
     id: string;
@@ -15,7 +16,7 @@ interface ChatMessage {
     content: string;
     timestamp: string;
     isSystem: boolean;
-    actionData?: any;
+    actionData?: ChatActionButton[];
     isHistory?: boolean;
     isThinking?: boolean;
     attachments?: {
@@ -36,8 +37,34 @@ interface CommandItem {
     options?: CommandOption[];
 }
 
+interface ChatActionButton {
+    text: string;
+    callback_data: string;
+}
+
+interface ChatHistoryRecord {
+    time: string;
+    msg: string;
+    actionData?: ChatActionButton[];
+    attachments?: ChatMessage["attachments"];
+    attachment?: ChatMessage["attachments"] extends Array<infer T> ? T : never;
+}
+
+type SocketLogPayload = {
+    type?: string;
+    msg?: string;
+    time?: string;
+    actionData?: ChatActionButton[];
+    attachments?: ChatMessage["attachments"];
+    attachment?: ChatMessage["attachments"] extends Array<infer T> ? T : never;
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null;
+}
+
 export default function DirectChatPage() {
-    const { activeGolem, isSingleNode } = useGolem();
+    const { activeGolem } = useGolem();
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [completedTypingMsgs, setCompletedTypingMsgs] = useState<Set<string>>(new Set());
     const [input, setInput] = useState("");
@@ -50,15 +77,18 @@ export default function DirectChatPage() {
     const [allCommands, setAllCommands] = useState<CommandItem[]>([]);
 
     useEffect(() => {
-        fetch('/api/commands')
-            .then(res => res.json())
-            .then(data => {
+        const fetchCommands = async () => {
+            try {
+                const data = await apiGet<{ success?: boolean; commands?: CommandItem[] }>("/api/commands");
                 if (data.success && data.commands) {
                     setAllCommands(data.commands);
                     setFilteredCommands(data.commands);
                 }
-            })
-            .catch(err => console.error("Failed to fetch commands:", err));
+            } catch (err) {
+                console.error("Failed to fetch commands:", err);
+            }
+        };
+        fetchCommands();
     }, []);
     const [suggestionIndex, setSuggestionIndex] = useState(0);
     const suggestionListRef = useRef<HTMLDivElement>(null);
@@ -68,11 +98,17 @@ export default function DirectChatPage() {
     const dragCounterRef = useRef(0);
 
     useEffect(() => {
-        socket.on("log", (data: any) => {
-            const isThinkingMessage = data.type === 'thinking';
+        const handleSocketLog = (payload: unknown) => {
+            if (!isRecord(payload)) return;
 
-            if (isThinkingMessage || data.type === 'agent' || data.type === 'approval' || data.msg.includes('[MultiAgent]') || data.msg.includes('[User]')) {
-                let rawMsg = data.msg;
+            const data = payload as SocketLogPayload;
+            const type = typeof data.type === "string" ? data.type : "";
+            const rawPayloadMessage = typeof data.msg === "string" ? data.msg : "";
+            if (!rawPayloadMessage) return;
+            const isThinkingMessage = type === 'thinking';
+
+            if (isThinkingMessage || type === 'agent' || type === 'approval' || rawPayloadMessage.includes('[MultiAgent]') || rawPayloadMessage.includes('[User]')) {
+                let rawMsg = rawPayloadMessage;
 
                 if (rawMsg.startsWith('[MultiAgent]')) {
                     rawMsg = rawMsg.replace('[MultiAgent]', '').trim();
@@ -110,10 +146,11 @@ export default function DirectChatPage() {
                     }];
                 });
             }
-        });
+        };
+        socket.on("log", handleSocketLog);
 
         return () => {
-            socket.off("log");
+            socket.off("log", handleSocketLog);
         };
     }, []);
 
@@ -123,10 +160,11 @@ export default function DirectChatPage() {
         let isMounted = true;
         const fetchHistory = async () => {
             try {
-                const res = await fetch(`/api/chat/history?golemId=${activeGolem}`);
-                const data = await res.json();
+                const data = await apiGet<{ success?: boolean; history?: ChatHistoryRecord[] }>(
+                    `/api/chat/history?golemId=${encodeURIComponent(activeGolem)}`
+                );
                 if (data.success && data.history && isMounted) {
-                    const parsedHistory = data.history.map((h: any) => {
+                    const parsedHistory = data.history.map((h) => {
                         let rawMsg = h.msg;
                         if (rawMsg.startsWith('[MultiAgent]')) rawMsg = rawMsg.replace('[MultiAgent]', '').trim();
                         let sender = "System";
@@ -151,7 +189,7 @@ export default function DirectChatPage() {
                     });
 
                     setMessages(parsedHistory);
-                    setCompletedTypingMsgs(new Set(parsedHistory.map((m: any) => m.id)));
+                    setCompletedTypingMsgs(new Set(parsedHistory.map((m) => m.id)));
                 }
             } catch (err) {
                 console.error("Failed to fetch chat history:", err);
@@ -190,11 +228,7 @@ export default function DirectChatPage() {
         if (!activeGolem) return;
         setIsSending(true);
         try {
-            await fetch('/api/chat/callback', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ golemId: activeGolem, callback_data: callbackData })
-            });
+            await apiPost("/api/chat/callback", { golemId: activeGolem, callback_data: callbackData });
         } catch (e) {
             console.error("Failed to send action:", e);
         } finally {
@@ -291,15 +325,10 @@ export default function DirectChatPage() {
             let attachmentInfo = null;
             
             if (selectedFile) {
-                const uploadRes = await fetch('/api/upload', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        fileName: selectedFile.name,
-                        base64Data: selectedFile.base64
-                    })
+                const uploadData = await apiPost<{ success?: boolean; path?: string; url?: string }>("/api/upload", {
+                    fileName: selectedFile.name,
+                    base64Data: selectedFile.base64,
                 });
-                const uploadData = await uploadRes.json();
                 if (uploadData.success) {
                     attachmentInfo = {
                         path: uploadData.path,
@@ -310,14 +339,10 @@ export default function DirectChatPage() {
                 setSelectedFile(null);
             }
 
-            await fetch('/api/chat', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ 
-                    golemId: activeGolem, 
-                    message: val,
-                    attachment: attachmentInfo
-                })
+            await apiPost("/api/chat", {
+                golemId: activeGolem,
+                message: val,
+                attachment: attachmentInfo
             });
         } catch (e) {
             console.error("Failed to send message:", e);
@@ -432,6 +457,7 @@ export default function DirectChatPage() {
                                             <div className="mb-2 flex flex-col gap-2">
                                                 {msg.attachments.map((att, attIdx) => (
                                                     (att.mimeType || "").startsWith('image/') ? (
+                                                        // eslint-disable-next-line @next/next/no-img-element
                                                         <img
                                                             key={attIdx}
                                                             src={att.url}
@@ -470,7 +496,7 @@ export default function DirectChatPage() {
                                     </div>
                                     {msg.actionData && Array.isArray(msg.actionData) && (!msg.isSystem || msg.isHistory || completedTypingMsgs.has(msg.id)) && (
                                         <div className="flex flex-wrap gap-2 mt-3">
-                                            {msg.actionData.map((btn: any, idx: number) => {
+                                            {msg.actionData.map((btn, idx) => {
                                                 const isApprove = btn.text.includes('批准') || btn.text.includes('Approve');
                                                 const isDeny = btn.text.includes('拒絕') || btn.text.includes('Reject') || btn.text.includes('Deny');
 
@@ -556,6 +582,7 @@ export default function DirectChatPage() {
                     {selectedFile && (
                         <div className="mb-3 flex items-center p-2 bg-secondary/50 border border-border rounded-lg relative group w-fit">
                             {selectedFile.type.startsWith('image/') ? (
+                                // eslint-disable-next-line @next/next/no-img-element
                                 <img 
                                     src={`data:${selectedFile.type};base64,${selectedFile.base64}`} 
                                     alt="preview" 

@@ -1,20 +1,21 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Loader2, ShieldCheck, Cpu, Globe, Zap } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 export function BootScreen({ isBooting }: { isBooting: boolean }) {
     const [progress, setProgress] = useState(0);
-    const [statusText, setStatusText] = useState("正在初始化系統核心...");
     const [isVisible, setIsVisible] = useState(false);
 
     // Sync isVisible with isBooting, but only if not already booting
     useEffect(() => {
         if (isBooting) {
-            setIsVisible(true);
-            setProgress(0);
-            setStatusText("正在初始化系統核心...");
+            const rafId = requestAnimationFrame(() => {
+                setIsVisible(true);
+                setProgress(0);
+            });
+            return () => cancelAnimationFrame(rafId);
         }
     }, [isBooting]);
 
@@ -22,7 +23,7 @@ export function BootScreen({ isBooting }: { isBooting: boolean }) {
         if (!isVisible) return;
 
         // If backend finished booting but progress isn't 100, accelerate
-        const isAccelerating = !isBooting && progress < 100;
+        const isAccelerating = !isBooting;
         const intervalTime = isAccelerating ? 50 : 400;
         const increment = isAccelerating ? 15 : 1.5;
 
@@ -40,28 +41,18 @@ export function BootScreen({ isBooting }: { isBooting: boolean }) {
         }, intervalTime);
 
         return () => clearInterval(interval);
-    }, [isBooting, isVisible]); // Re-run effect when backend status changes to check for acceleration
+    }, [isBooting, isVisible]);
 
-    useEffect(() => {
-        if (!isVisible) return;
-
-        const stages = [
-            { threshold: 20, text: "啟動雙子引擎 (Gemini Dual-Engine)..." },
-            { threshold: 40, text: "載入長期記憶與金字塔式索引..." },
-            { threshold: 60, text: "建立 Chrome DevTools Protocol 連線..." },
-            { threshold: 80, text: "注入核心協議 (Titan Protocol)..." },
-            { threshold: 95, text: "正在進行最後的系統巡檢..." },
-        ];
-
-        // Find the current stage based on progress
-        const eligibleStages = stages.filter(s => progress >= s.threshold);
-        if (eligibleStages.length > 0) {
-            const currentStage = eligibleStages[eligibleStages.length - 1];
-            setStatusText(currentStage.text);
-        } else if (progress < 20) {
-            setStatusText("正在初始化系統核心...");
+    const statusText = useMemo(() => {
+        if (!isVisible || progress < 20) {
+            return "正在初始化系統核心...";
         }
-    }, [progress, isVisible]);
+        if (progress >= 95) return "正在進行最後的系統巡檢...";
+        if (progress >= 80) return "注入核心協議 (Titan Protocol)...";
+        if (progress >= 60) return "建立 Chrome DevTools Protocol 連線...";
+        if (progress >= 40) return "載入長期記憶與金字塔式索引...";
+        return "啟動雙子引擎 (Gemini Dual-Engine)...";
+    }, [isVisible, progress]);
 
     return (
         <AnimatePresence>

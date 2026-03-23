@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { spawn } from "child_process";
+import fs from "fs";
 import path from "path";
+import { pingEndpoint } from "@/lib/server-http";
 
 export async function POST() {
   console.log("🚀 [Launcher] Received remote start request...");
@@ -13,7 +15,6 @@ export async function POST() {
   const rootDir = normalizedCwd.endsWith("web-dashboard") ? path.resolve(normalizedCwd, "..") : normalizedCwd;
   
   // Verify if we are in the right place by checking for package.json
-  const fs = require("fs");
   const hasPackageJson = fs.existsSync(path.join(rootDir, "package.json"));
   console.log(`🔍 [Launcher] Target Root: ${rootDir} (package.json: ${hasPackageJson})`);
 
@@ -23,13 +24,11 @@ export async function POST() {
   }
 
   // Check Port 3001
-  try {
-    const checkRes = await fetch("http://127.0.0.1:3001/api/system/status", { signal: AbortSignal.timeout(500) }).catch(() => null);
-    if (checkRes && checkRes.ok) {
-      console.log("⚠️ [Launcher] Backend is already running on Port 3001.");
-      return NextResponse.json({ success: true, message: "Backend is already active" });
-    }
-  } catch (e) {}
+  const isBackendReady = await pingEndpoint("http://127.0.0.1:3001/api/system/status", { timeoutMs: 500 });
+  if (isBackendReady) {
+    console.log("⚠️ [Launcher] Backend is already running on Port 3001.");
+    return NextResponse.json({ success: true, message: "Backend is already active" });
+  }
 
   console.log(`📡 [Launcher] Spawning Golem process...`);
 

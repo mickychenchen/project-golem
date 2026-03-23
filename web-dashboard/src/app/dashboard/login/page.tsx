@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import { Lock, ArrowRight, ShieldAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { apiPost } from "@/lib/api-client";
 
 export default function LoginPage() {
     const [password, setPassword] = useState("");
@@ -15,21 +16,17 @@ export default function LoginPage() {
         setIsLoading(true);
 
         try {
-            const res = await fetch("/api/system/login", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ password })
-            });
-            const data = await res.json();
-            
-            if (res.ok && data.success) {
+            const data = await apiPost<{ success?: boolean; message?: string }>("/api/system/login", { password });
+
+            if (data.success) {
                 // Redirect back to dashboard root
                 window.location.href = "/dashboard";
             } else {
                 setError(data.message || "登入失敗");
             }
-        } catch (err: any) {
-            setError(err.message || "網路錯誤");
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : "網路錯誤";
+            setError(message);
         } finally {
             setIsLoading(false);
         }

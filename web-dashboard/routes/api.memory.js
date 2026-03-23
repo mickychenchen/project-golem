@@ -8,7 +8,7 @@ module.exports = function registerMemoryRoutes(server) {
     const requireMemoryAdmin = buildOperationGuard(server, 'memory_mutation');
 
     router.get('/api/memory', async (req, res) => {
-        const { golemId, context } = resolveActiveContext(server, req.query.golemId);
+        const { context } = resolveActiveContext(server, req.query.golemId);
         if (!context || !context.memory) return res.status(503).json({ error: 'Memory not engaged' });
 
         try {
@@ -95,7 +95,7 @@ module.exports = function registerMemoryRoutes(server) {
                 .trim()
                 .split('\n')
                 .map((line) => {
-                    try { return JSON.parse(line); } catch (e) { return null; }
+                    try { return JSON.parse(line); } catch { return null; }
                 })
                 .filter((x) => x);
 

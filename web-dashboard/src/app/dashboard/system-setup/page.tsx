@@ -7,10 +7,29 @@ import {
     Sparkles, ExternalLink, CheckCircle2, ArrowRight, Lock
 } from "lucide-react";
 import { useGolem } from "@/components/GolemContext";
+import { apiGet, apiPostWrite } from "@/lib/api-client";
 
 type MemoryMode = "lancedb-pro";
 type BackendMode = "gemini" | "ollama";
 type EmbeddingProvider = "local" | "ollama";
+type SystemConfigResponse = {
+    userDataDir?: string;
+    golemMemoryMode?: string;
+    golemBackend?: string;
+    golemEmbeddingProvider?: string;
+    golemLocalEmbeddingModel?: string;
+    golemOllamaBaseUrl?: string;
+    golemOllamaBrainModel?: string;
+    golemOllamaEmbeddingModel?: string;
+    golemOllamaRerankModel?: string;
+    golemOllamaTimeoutMs?: string | number;
+    allowRemoteAccess?: boolean | string;
+};
+
+function getErrorMessage(error: unknown, fallback = "儲存失敗，請稍後再試"): string {
+    if (error instanceof Error && error.message) return error.message;
+    return fallback;
+}
 
 function normalizeMemoryMode(value: unknown): MemoryMode {
     const mode = String(value || "").trim().toLowerCase();
@@ -82,9 +101,9 @@ export default function SystemSetupPage() {
 
     // 載入現有設定
     useEffect(() => {
-        fetch("/api/system/config")
-            .then(r => r.json())
-            .then(data => {
+        const loadConfig = async () => {
+            try {
+                const data = await apiGet<SystemConfigResponse>("/api/system/config");
                 setUserDataDir(data.userDataDir || "./golem_memory");
                 setMemoryMode(normalizeMemoryMode(data.golemMemoryMode));
                 setBackend(data.golemBackend === "ollama" ? "ollama" : "gemini");
@@ -97,9 +116,14 @@ export default function SystemSetupPage() {
                 setOllamaRerankModel(data.golemOllamaRerankModel || "");
                 setOllamaTimeoutMs(String(data.golemOllamaTimeoutMs || "60000"));
                 setAllowRemoteAccess(data.allowRemoteAccess === true || data.allowRemoteAccess === "true");
-            })
-            .catch(console.error)
-            .finally(() => setIsFetching(false));
+            } catch (fetchError) {
+                console.error(fetchError);
+            } finally {
+                setIsFetching(false);
+            }
+        };
+
+        loadConfig();
     }, []);
 
     const handleSubmit = async (e: React.FormEvent) => {
@@ -108,32 +132,28 @@ export default function SystemSetupPage() {
 
         setIsLoading(true);
         try {
-            const res = await fetch("/api/system/config", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    userDataDir: userDataDir.trim(),
-                    golemBackend: backend,
-                    golemMemoryMode: memoryMode,
-                    golemEmbeddingProvider: embeddingProvider,
-                    golemLocalEmbeddingModel: localEmbeddingModel,
-                    golemOllamaBaseUrl: ollamaBaseUrl.trim(),
-                    golemOllamaBrainModel: ollamaBrainModel.trim(),
-                    golemOllamaEmbeddingModel: ollamaEmbeddingModel.trim(),
-                    golemOllamaRerankModel: ollamaRerankModel.trim(),
-                    golemOllamaTimeoutMs: ollamaTimeoutMs.trim(),
-                    golemMode: golemMode,
-                    allowRemoteAccess: allowRemoteAccess,
-                    remoteAccessPassword: remoteAccessPassword
-                }),
+            const data = await apiPostWrite<{ success?: boolean; error?: string }>("/api/system/config", {
+                userDataDir: userDataDir.trim(),
+                golemBackend: backend,
+                golemMemoryMode: memoryMode,
+                golemEmbeddingProvider: embeddingProvider,
+                golemLocalEmbeddingModel: localEmbeddingModel,
+                golemOllamaBaseUrl: ollamaBaseUrl.trim(),
+                golemOllamaBrainModel: ollamaBrainModel.trim(),
+                golemOllamaEmbeddingModel: ollamaEmbeddingModel.trim(),
+                golemOllamaRerankModel: ollamaRerankModel.trim(),
+                golemOllamaTimeoutMs: ollamaTimeoutMs.trim(),
+                golemMode: golemMode,
+                allowRemoteAccess: allowRemoteAccess,
+                remoteAccessPassword: remoteAccessPassword
             });
-            const data = await res.json();
-            if (!res.ok || !data.success) {
+
+            if (!data.success) {
                 throw new Error(data.error || "儲存失敗，請稍後再試");
             }
             window.location.href = "/dashboard/agents/create";
-        } catch (err: any) {
-            setError(err.message);
+        } catch (error: unknown) {
+            setError(getErrorMessage(error));
         } finally {
             setIsLoading(false);
         }

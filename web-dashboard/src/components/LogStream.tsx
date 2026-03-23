@@ -11,35 +11,63 @@ interface LogMessage {
     raw?: string;
 }
 
-export function LogStream({ className, types, autoScroll = true }: { className?: string, types?: string[], autoScroll?: boolean }) {
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null;
+}
+
+function isLogMessage(value: unknown): value is LogMessage {
+    if (!isRecord(value)) return false;
+    return (
+        typeof value.time === "string" &&
+        typeof value.msg === "string" &&
+        typeof value.type === "string"
+    );
+}
+
+export function LogStream({
+    className,
+    types,
+    autoScroll = true
+}: {
+    className?: string;
+    types?: LogMessage["type"][];
+    autoScroll?: boolean;
+}) {
     const [logs, setLogs] = useState<LogMessage[]>([]);
     const scrollRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
-        socket.on("init", (data: any) => {
-            if (data.logs && Array.isArray(data.logs)) {
-                setLogs(data.logs);
+        const handleInit = (payload: unknown) => {
+            if (!isRecord(payload) || !Array.isArray(payload.logs)) return;
+            const parsed = payload.logs.filter(isLogMessage);
+            if (parsed.length > 0) {
+                setLogs(parsed);
             }
-        });
+        };
 
-        socket.on("log", (data: LogMessage) => {
-            setLogs((prev) => [...prev.slice(-199), data]); // Keep last 200 logs
-        });
+        const handleLog = (payload: unknown) => {
+            if (!isLogMessage(payload)) return;
+            setLogs((prev) => [...prev.slice(-199), payload]); // Keep last 200 logs
+        };
+
+        socket.on("init", handleInit);
+        socket.on("log", handleLog);
 
         // Explicitly request logs on mount (handles navigation)
         socket.emit("request_logs");
 
         return () => {
-            socket.off("log");
-            socket.off("init");
+            socket.off("log", handleLog);
+            socket.off("init", handleInit);
         };
     }, []);
 
     useEffect(() => {
+        if (!autoScroll) return;
         if (scrollRef.current) {
             scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
         }
-    }, [logs]);
+    }, [autoScroll, logs]);
 
     const getLogColor = (type: LogMessage['type']) => {
         switch (type) {
@@ -67,15 +95,13 @@ export function LogStream({ className, types, autoScroll = true }: { className?:
                     // 1. Try ISO Match
                     const isoMatch = trimmedMsg.match(isoRegex);
                     if (isoMatch) {
-                        try {
-                            const date = new Date(isoMatch[1]);
-                            if (!isNaN(date.getTime())) {
-                                displayTime = date.toLocaleTimeString('zh-TW', { 
-                                    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false 
-                                });
-                                trimmedMsg = trimmedMsg.replace(isoRegex, "").trim();
-                            }
-                        } catch (e) {}
+                        const date = new Date(isoMatch[1]);
+                        if (!Number.isNaN(date.getTime())) {
+                            displayTime = date.toLocaleTimeString('zh-TW', {
+                                hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
+                            });
+                            trimmedMsg = trimmedMsg.replace(isoRegex, "").trim();
+                        }
                     }
                     
                     // 2. Secondary check: if message starts with another timestamp [HH:mm:ss], strip it

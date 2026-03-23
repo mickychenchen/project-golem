@@ -1,15 +1,27 @@
 "use client";
 
-import { useEffect, useState, useMemo, useRef } from "react";
+import { useEffect, useState, useMemo, useRef, useCallback } from "react";
 import { Button } from "@/components/ui/button";
+import { useToast } from "@/components/ui/toast-provider";
 import { Copy, Plus, RefreshCw, Trash2, Search, Filter, Database, Download, Upload, ChevronDown, ChevronUp } from "lucide-react";
 import { useGolem } from "@/components/GolemContext";
 import { cn } from "@/lib/utils";
+import { apiDeleteWrite, apiGet, apiPost } from "@/lib/api-client";
 
 interface MemoryItem {
     text: string;
-    metadata?: any;
+    metadata?: Record<string, unknown>;
     score?: number;
+}
+
+function getErrorMessage(error: unknown): string {
+    if (error instanceof Error && error.message) return error.message;
+    return "未知錯誤";
+}
+
+function getMemoryType(metadata?: Record<string, unknown>): string {
+    const type = metadata?.type;
+    return typeof type === "string" && type.trim() ? type : "general";
 }
 
 function ExpandableText({ text, limit = 150 }: { text: string; limit?: number }) {
@@ -41,6 +53,7 @@ function ExpandableText({ text, limit = 150 }: { text: string; limit?: number })
 }
 
 export function MemoryTable() {
+    const toast = useToast();
     const { activeGolem } = useGolem();
     const [memories, setMemories] = useState<MemoryItem[]>([]);
     const [loading, setLoading] = useState(false);
@@ -51,30 +64,34 @@ export function MemoryTable() {
     const [filterType, setFilterType] = useState<string>("all");
     const fileInputRef = useRef<HTMLInputElement>(null);
 
-    const fetchMemories = async () => {
+    const fetchMemories = useCallback(async () => {
         if (!activeGolem) return;
         setLoading(true);
         try {
-            const res = await fetch(`/api/memory?golemId=${encodeURIComponent(activeGolem)}`);
-            if (res.ok) {
-                const data = await res.json();
-                const list = Array.isArray(data) ? data : (data.avoidList ? data.avoidList.map((t: string) => ({ text: t, metadata: { type: 'avoid' } })) : []);
-                setMemories(list);
-            }
+            const data = await apiGet<MemoryItem[] | { avoidList?: string[] }>(
+                `/api/memory?golemId=${encodeURIComponent(activeGolem)}`,
+                undefined,
+                { profile: "none" }
+            );
+            const list = Array.isArray(data)
+                ? data
+                : (Array.isArray(data?.avoidList)
+                    ? data.avoidList.map((t: string) => ({ text: t, metadata: { type: 'avoid' } }))
+                    : []);
+            setMemories(list);
         } catch (e) {
             console.error("Failed to fetch memories", e);
         } finally {
             setLoading(false);
         }
-    };
+    }, [activeGolem]);
 
     const addMemory = async () => {
         if (!newMemory.trim() || !activeGolem) return;
         try {
-            await fetch(`/api/memory?golemId=${encodeURIComponent(activeGolem)}`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ text: newMemory, metadata: { type: "manual", source: "dashboard" } }),
+            await apiPost(`/api/memory?golemId=${encodeURIComponent(activeGolem)}`, {
+                text: newMemory,
+                metadata: { type: "manual", source: "dashboard" },
             });
             setNewMemory("");
             // Optimistically fetch
@@ -91,17 +108,11 @@ export function MemoryTable() {
         }
         setIsWiping(true);
         try {
-            const res = await fetch(`/api/memory?golemId=${encodeURIComponent(activeGolem)}`, {
-                method: "DELETE"
-            });
-            if (res.ok) {
-                setMemories([]);
-            } else {
-                const data = await res.json();
-                alert(`清除失敗：${data.error}`);
-            }
-        } catch (e) {
+            await apiDeleteWrite(`/api/memory?golemId=${encodeURIComponent(activeGolem)}`);
+            setMemories([]);
+        } catch (e: unknown) {
             console.error("Failed to wipe memory", e);
+            toast.error("清除失敗", getErrorMessage(e));
         } finally {
             setIsWiping(false);
         }
@@ -127,27 +138,21 @@ export function MemoryTable() {
             try {
                 parsed = JSON.parse(text);
                 if (!Array.isArray(parsed)) throw new Error("Must be an array");
-            } catch (e) {
-                alert("無效的 JSON 檔案格式。");
+            } catch {
+                toast.error("匯入失敗", "無效的 JSON 檔案格式。");
                 setIsImporting(false);
                 return;
             }
 
-            const res = await fetch(`/api/memory/import?golemId=${encodeURIComponent(activeGolem)}`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(parsed)
-            });
-            const data = await res.json();
-            if (res.ok) {
-                alert(`成功匯入 ${data.count} 條記憶。`);
-                fetchMemories();
-            } else {
-                alert(`匯入失敗：${data.error}`);
-            }
-        } catch (e: any) {
+            const data = await apiPost<{ count?: number }>(
+                `/api/memory/import?golemId=${encodeURIComponent(activeGolem)}`,
+                parsed
+            );
+            toast.success("匯入成功", `成功匯入 ${data.count ?? parsed.length} 條記憶。`);
+            fetchMemories();
+        } catch (e: unknown) {
             console.error("Import failed:", e);
-            alert(`匯入錯誤：${e.message}`);
+            toast.error("匯入錯誤", getErrorMessage(e));
         } finally {
             setIsImporting(false);
             if (fileInputRef.current) fileInputRef.current.value = "";
@@ -158,19 +163,19 @@ export function MemoryTable() {
         fetchMemories();
         setSearchQuery("");
         setFilterType("all");
-    }, [activeGolem]);
+    }, [activeGolem, fetchMemories]);
 
     const uniqueTypes = useMemo(() => {
         const types = new Set<string>();
-        memories.forEach(m => types.add(m.metadata?.type || 'general'));
+        memories.forEach((memory) => types.add(getMemoryType(memory.metadata)));
         return Array.from(types);
     }, [memories]);
 
     const filteredMemories = useMemo(() => {
-        return memories.filter(m => {
-            const matchesSearch = m.text.toLowerCase().includes(searchQuery.toLowerCase());
-            const type = m.metadata?.type || 'general';
-            const matchesType = filterType === 'all' || type === filterType;
+        return memories.filter((memory) => {
+            const matchesSearch = memory.text.toLowerCase().includes(searchQuery.toLowerCase());
+            const type = getMemoryType(memory.metadata);
+            const matchesType = filterType === "all" || type === filterType;
             return matchesSearch && matchesType;
         });
     }, [memories, searchQuery, filterType]);
@@ -270,6 +275,7 @@ export function MemoryTable() {
                                 // Show newest first
                                 [...filteredMemories].reverse().map((mem, index) => {
                                     const displayIndex = filteredMemories.length - index;
+                                    const memoryType = getMemoryType(mem.metadata);
                                     return (
                                         <tr key={index} className="hover:bg-accent/40 transition-colors group">
                                             <td className="px-5 py-4 text-xs text-muted-foreground/40 font-mono text-center">
@@ -278,13 +284,13 @@ export function MemoryTable() {
                                             <td className="px-4 py-3 text-center">
                                                 <span className={cn(
                                                     "px-2 py-0.5 rounded text-[10px] uppercase font-bold border",
-                                                    (mem.metadata?.type === 'manual' || mem.metadata?.type === 'dashboard')
+                                                    (memoryType === "manual" || memoryType === "dashboard")
                                                         ? "bg-cyan-500/10 text-cyan-400 border-cyan-500/20"
-                                                        : mem.metadata?.type === 'avoid'
+                                                        : memoryType === "avoid"
                                                             ? "bg-red-500/10 text-red-400 border-red-500/20"
                                                             : "bg-blue-500/10 text-blue-400 border-blue-500/20 shadow-[0_0_10px_rgba(59,130,246,0.1)]"
                                                 )}>
-                                                    {mem.metadata?.type || 'general'}
+                                                    {memoryType}
                                                 </span>
                                             </td>
                                             <td className="px-4 py-4 text-foreground/90 text-sm leading-relaxed min-w-[300px]">

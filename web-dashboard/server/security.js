@@ -33,7 +33,7 @@ function parseCookies(cookieHeader) {
                 .map((cookie) => cookie.trim().split('='))
                 .filter((parts) => parts.length === 2)
         );
-    } catch (e) {
+    } catch {
         return {};
     }
 }
@@ -63,7 +63,7 @@ function appendAuditRecord(record) {
         const logDir = path.dirname(auditLogPath);
         if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
         fs.appendFile(auditLogPath, `${JSON.stringify(record)}\n`, () => { });
-    } catch (e) {
+    } catch {
         // avoid recursive logging failures
     }
 }
@@ -179,6 +179,7 @@ function buildApiSecurityMiddleware(server) {
         const normalizedPath = req.path.length > 1 ? req.path.replace(/\/+$/, '') : req.path;
         const isUpload = normalizedPath === '/api/upload';
         const isLogin = normalizedPath === '/api/system/login';
+        const isLocal = server.isLocalRequest(req);
 
         let limiter = apiLimiter;
         let scope = 'api';
@@ -190,6 +191,12 @@ function buildApiSecurityMiddleware(server) {
         } else if (isLogin) {
             limiter = loginLimiter;
             scope = 'login';
+        }
+
+        // Local dashboard traffic can burst due to polling + route prefetch; avoid self-throttling.
+        // Keep strict limiter for login/upload paths.
+        if (isLocal && scope === 'api') {
+            return next();
         }
 
         const limiterKey = `${clientIp}:${scope}`;

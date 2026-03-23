@@ -26,7 +26,6 @@ export function ChatBubble({ text, role, className }: ChatBubbleProps) {
     const [displayedText, setDisplayedText] = useState("");
     const [isTyping, setIsTyping] = useState(false);
     const scrollRef = useRef<HTMLDivElement>(null);
-    const textRef = useRef(text);
 
     useEffect(() => {
         if (!text) {

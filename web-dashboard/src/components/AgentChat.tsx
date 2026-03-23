@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { socket } from "@/lib/socket";
 import { User, Bot } from "lucide-react";
+import { apiGet } from "@/lib/api-client";
 
 interface AgentMessage {
     id: string;
@@ -13,17 +14,44 @@ interface AgentMessage {
     isSystem: boolean;
 }
 
+interface AgentLogRecord {
+    timestamp: string;
+    sender: string;
+    content: string;
+    isSystem: boolean;
+}
+
+interface SocketLogPayload {
+    type?: string;
+    msg?: string;
+    time?: string;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null;
+}
+
+function isAgentLogRecord(value: unknown): value is AgentLogRecord {
+    if (!isRecord(value)) return false;
+    return (
+        typeof value.timestamp === "string" &&
+        typeof value.sender === "string" &&
+        typeof value.content === "string" &&
+        typeof value.isSystem === "boolean"
+    );
+}
+
 export function AgentChat() {
     const [messages, setMessages] = useState<AgentMessage[]>([]);
     const scrollRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
-        // Fetch history
-        fetch('/api/agent/logs')
-            .then(res => res.json())
-            .then(data => {
+        const fetchHistory = async () => {
+            try {
+                const data = await apiGet<unknown>("/api/agent/logs", undefined, { profile: "none" });
                 if (Array.isArray(data)) {
-                    setMessages(data.map((log: any) => ({
+                    const logs = data.filter(isAgentLogRecord);
+                    setMessages(logs.map((log) => ({
                         id: log.timestamp + Math.random().toString(),
                         sender: log.sender,
                         content: log.content,
@@ -31,13 +59,21 @@ export function AgentChat() {
                         isSystem: log.isSystem
                     })));
                 }
-            })
-            .catch(err => console.error("Failed to load history:", err));
+            } catch (err) {
+                console.error("Failed to load history:", err);
+            }
+        };
+        fetchHistory();
 
-        socket.on("log", (data: any) => {
+        const handleSocketLog = (data: unknown) => {
+            if (!isRecord(data)) return;
+            const payload = data as SocketLogPayload;
+            const rawSocketMsg = typeof payload.msg === "string" ? payload.msg : "";
+            const socketType = typeof payload.type === "string" ? payload.type : "";
+
             // Filter for agent related logs
-            if (data.type === 'agent' || data.msg.includes('[MultiAgent]')) {
-                let rawMsg = data.msg;
+            if (socketType === 'agent' || rawSocketMsg.includes('[MultiAgent]')) {
+                let rawMsg = rawSocketMsg;
 
                 // Strip [MultiAgent] tag if present to clean up
                 if (rawMsg.startsWith('[MultiAgent]')) {
@@ -61,14 +97,16 @@ export function AgentChat() {
                     id: Date.now().toString() + Math.random(),
                     sender,
                     content,
-                    timestamp: data.time,
+                    timestamp: typeof payload.time === "string" ? payload.time : new Date().toLocaleTimeString(),
                     isSystem
                 }]);
             }
-        });
+        };
+
+        socket.on("log", handleSocketLog);
 
         return () => {
-            socket.off("log");
+            socket.off("log", handleSocketLog);
         };
     }, []);
 

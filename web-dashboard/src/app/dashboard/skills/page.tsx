@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { Card, CardHeader, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -15,6 +15,40 @@ import { BookOpen, AlertCircle, CheckCircle2, RefreshCcw, ChevronRight, Zap, Tri
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
+import { useToast } from "@/components/ui/toast-provider";
+import { apiGet, apiPost, apiPostWrite } from "@/lib/api-client";
+
+type InstalledSkill = {
+    id: string;
+    title: string;
+    content: string;
+    isOptional: boolean;
+    isEnabled: boolean;
+};
+
+type MarketplaceSkill = {
+    id: string;
+    title: string;
+    description: string;
+    description_zh?: string;
+    category?: string;
+    category_name?: {
+        zh?: string;
+        en?: string;
+    };
+    repoUrl?: string;
+};
+
+type MarketplaceResponse = {
+    skills?: MarketplaceSkill[];
+    total?: number;
+    categoryCounts?: Record<string, number>;
+};
+
+function getErrorMessage(error: unknown, fallback: string): string {
+    if (error instanceof Error && error.message) return error.message;
+    return fallback;
+}
 
 // ── Inject Confirm Dialog ───────────────────────────────────────────────────
 function InjectConfirmDialog({
@@ -117,20 +151,18 @@ function SkillEditorDialog({
         setIsLoading(true); setError(null);
         try {
             const endpoint = mode === "create" ? "/api/skills/create" : "/api/skills/update";
-            const res = await fetch(endpoint, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ id: id.trim(), content }),
+            const data = await apiPost<{ success?: boolean; error?: string }>(endpoint, {
+                id: id.trim(),
+                content,
             });
-            const data = await res.json();
-            if (res.ok && data.success) {
+            if (data.success) {
                 onOpenChange(false);
                 onSaved();
             } else {
                 setError(data.error || "儲存失敗");
             }
-        } catch {
-            setError("請求發送失敗");
+        } catch (error: unknown) {
+            setError(getErrorMessage(error, "請求發送失敗"));
         } finally {
             setIsLoading(false);
         }
@@ -309,16 +341,17 @@ const MARKET_CATEGORIES = [
 
 // ── Main Page ───────────────────────────────────────────────────────────────
 export default function SkillsPage() {
+    const toast = useToast();
     const [activeTab, setActiveTab] = useState<"installed" | "marketplace">("installed");
 
     // Installed Skills
-    const [skills, setSkills] = useState<any[]>([]);
-    const [selectedSkill, setSelectedSkill] = useState<any | null>(null);
+    const [skills, setSkills] = useState<InstalledSkill[]>([]);
+    const [selectedSkill, setSelectedSkill] = useState<InstalledSkill | null>(null);
     const [hasUnsyncedChanges, setHasUnsyncedChanges] = useState(false);
 
     // Marketplace
-    const [marketSkills, setMarketSkills] = useState<any[]>([]);
-    const [selectedMarketSkill, setSelectedMarketSkill] = useState<any | null>(null);
+    const [marketSkills, setMarketSkills] = useState<MarketplaceSkill[]>([]);
+    const [selectedMarketSkill, setSelectedMarketSkill] = useState<MarketplaceSkill | null>(null);
     const [marketTotal, setMarketTotal] = useState(0);
     const [marketPage, setMarketPage] = useState(1);
     const [marketSearchText, setMarketSearchText] = useState("");
@@ -349,22 +382,21 @@ export default function SkillsPage() {
     const [syncHintType, setSyncHintType] = useState<"enable" | "delete">("enable");
 
     const loadSkills = useCallback(() => {
-        fetch("/api/skills")
-            .then((res) => res.json())
+        apiGet<InstalledSkill[]>("/api/skills")
             .then((data) => {
                 if (Array.isArray(data)) {
                     setSkills(data);
-                    // Update selected skill if it exists
-                    if (selectedSkill) {
-                        const updated = data.find(s => s.id === selectedSkill.id);
-                        if (updated) setSelectedSkill(updated);
-                    }
+                    setSelectedSkill((previousSelected) => {
+                        if (!previousSelected) return previousSelected;
+                        const updated = data.find((skill) => skill.id === previousSelected.id);
+                        return updated ?? previousSelected;
+                    });
                 }
             })
             .catch((err) => console.error(err));
-    }, [selectedSkill]);
+    }, []);
 
-    const loadMarketplace = useCallback(async (page = 1, search = marketSearchQuery, category = marketCategory) => {
+    const loadMarketplace = useCallback(async (page: number, search: string, category: string) => {
         setIsMarketLoading(true);
         try {
             const params = new URLSearchParams({
@@ -373,8 +405,7 @@ export default function SkillsPage() {
                 search,
                 category
             });
-            const res = await fetch(`/api/skills/marketplace?${params.toString()}`);
-            const data = await res.json();
+            const data = await apiGet<MarketplaceResponse>(`/api/skills/marketplace?${params.toString()}`);
             setMarketSkills(data.skills || []);
             setMarketTotal(data.total || 0);
             if (data.categoryCounts) {
@@ -386,18 +417,16 @@ export default function SkillsPage() {
         } finally {
             setIsMarketLoading(false);
         }
-    }, [marketSearchQuery, marketCategory, selectedMarketSkill]);
+    }, []);
 
     useEffect(() => {
         loadSkills();
-        loadMarketplace(1, "", "all");
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
+    }, [loadSkills]);
 
     // Re-fetch marketplace when page or search query changes
     useEffect(() => {
         loadMarketplace(marketPage, marketSearchQuery, marketCategory);
-    }, [marketPage, marketSearchQuery, marketCategory]);
+    }, [loadMarketplace, marketPage, marketSearchQuery, marketCategory]);
 
     const handleSearchSubmit = (e: React.FormEvent) => {
         e.preventDefault();
@@ -412,18 +441,16 @@ export default function SkillsPage() {
 
     const toggleSkill = async (id: string, enabled: boolean) => {
         try {
-            const res = await fetch("/api/skills/toggle", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ id, enabled }),
+            const data = await apiPostWrite<{ success?: boolean; error?: string }>("/api/skills/toggle", {
+                id,
+                enabled,
             });
-            const data = await res.json();
             if (data.success) {
                 setSkills((prev) =>
                     prev.map((s) => (s.id === id ? { ...s, isEnabled: enabled } : s))
                 );
                 if (selectedSkill?.id === id) {
-                    setSelectedSkill((prev: any) => prev ? { ...prev, isEnabled: enabled } : null);
+                    setSelectedSkill((prev) => prev ? { ...prev, isEnabled: enabled } : null);
                 }
                 if (enabled) {
                     setSyncHintType("enable");
@@ -436,15 +463,17 @@ export default function SkillsPage() {
         }
     };
 
-    const installSkill = async (skill: any) => {
+    const installSkill = async (skill: MarketplaceSkill) => {
+        if (!skill.repoUrl) {
+            toast.error("安裝失敗", "技能來源缺少 repo URL。");
+            return;
+        }
         setInstallingId(skill.id);
         try {
-            const res = await fetch("/api/skills/marketplace/install", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ id: skill.id, repoUrl: skill.repoUrl }),
+            const data = await apiPost<{ success?: boolean; error?: string }>("/api/skills/marketplace/install", {
+                id: skill.id,
+                repoUrl: skill.repoUrl,
             });
-            const data = await res.json();
             if (data.success) {
                 setHasUnsyncedChanges(true);
                 loadSkills();
@@ -452,6 +481,7 @@ export default function SkillsPage() {
             }
         } catch (err) {
             console.error("Install failed:", err);
+            toast.error("安裝失敗", "技能安裝失敗，請稍後再試。");
         } finally {
             setInstallingId(null);
         }
@@ -460,18 +490,7 @@ export default function SkillsPage() {
     const handleInject = async () => {
         setIsInjecting(true);
         try {
-            const res = await fetch("/api/skills/inject", { method: "POST" });
-            
-            // ── [v9.1.12] 強化非 JSON 回應處理 ──
-            const contentType = res.headers.get("content-type");
-            let data: any;
-            
-            if (contentType && contentType.includes("application/json")) {
-                data = await res.json();
-            } else {
-                const text = await res.text();
-                data = { success: false, message: text || `Server error (${res.status})` };
-            }
+            const data = await apiPost<{ success?: boolean; message?: string; error?: string }>("/api/skills/inject");
 
             if (data.success) {
                 setShowConfirm(false);
@@ -485,12 +504,12 @@ export default function SkillsPage() {
                 }, 3000);
             } else {
                 console.error("Injection failed:", data.message || data.error);
-                alert(`注入失敗: ${data.message || data.error || "未知伺服器錯誤"}`);
+                toast.error("注入失敗", data.message || data.error || "未知伺服器錯誤");
                 setIsInjecting(false);
             }
-        } catch (err: any) {
-            console.error(err);
-            alert(`請求失敗: ${err.message || "請檢查網路連線或伺服器狀態"}`);
+        } catch (error: unknown) {
+            console.error(error);
+            toast.error("請求失敗", getErrorMessage(error, "請檢查網路連線或伺服器狀態"));
             setIsInjecting(false);
         }
     };
@@ -499,12 +518,9 @@ export default function SkillsPage() {
         if (!selectedSkill) return;
         setIsDeleting(true);
         try {
-            const res = await fetch("/api/skills/delete", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ id: selectedSkill.id }),
+            const data = await apiPost<{ success?: boolean; error?: string }>("/api/skills/delete", {
+                id: selectedSkill.id,
             });
-            const data = await res.json();
             if (data.success) {
                 setShowDeleteConfirm(false);
                 setHasUnsyncedChanges(true); // 檔案刪除後也需要重新注入以同步內部狀態
@@ -526,11 +542,11 @@ export default function SkillsPage() {
                     setSelectedSkill(null);
                 }
             } else {
-                alert(data.error || "刪除失敗");
+                toast.error("刪除失敗", data.error || "刪除失敗");
             }
         } catch (err) {
             console.error(err);
-            alert("請求發送失敗");
+            toast.error("請求失敗", "請求發送失敗");
         } finally {
             setIsDeleting(false);
         }
@@ -542,7 +558,7 @@ export default function SkillsPage() {
         setShowEditor(true);
     };
 
-    const handleEditSkill = (e: React.MouseEvent, skill: any) => {
+    const handleEditSkill = (e: React.MouseEvent, skill: InstalledSkill) => {
         e.stopPropagation();
         setEditorMode("edit");
         setEditTarget({ id: skill.id, content: skill.content });

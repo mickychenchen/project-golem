@@ -23,47 +23,37 @@ function getSystemTheme(): "light" | "dark" {
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-    const [theme, setThemeState] = useState<Theme>("system");
-    const [resolvedTheme, setResolvedTheme] = useState<"light" | "dark">("dark");
+    const [theme, setThemeState] = useState<Theme>(() => {
+        if (typeof window === "undefined") return "system";
+        const stored = localStorage.getItem(STORAGE_KEY);
+        return stored === "light" || stored === "dark" || stored === "system"
+            ? stored
+            : "system";
+    });
+    const [systemTheme, setSystemTheme] = useState<"light" | "dark">(() => getSystemTheme());
+    const resolvedTheme = theme === "system" ? systemTheme : theme;
 
-    // Initialize from localStorage
+    // Apply resolved theme to <html>
     useEffect(() => {
-        const stored = localStorage.getItem(STORAGE_KEY) as Theme | null;
-        if (stored && ["light", "dark", "system"].includes(stored)) {
-            setThemeState(stored);
-        }
-    }, []);
-
-    // Resolve theme and apply to <html>
-    useEffect(() => {
-        const resolved = theme === "system" ? getSystemTheme() : theme;
-        setResolvedTheme(resolved);
-
         const root = document.documentElement;
         root.classList.remove("light", "dark");
-        root.classList.add(resolved);
-        root.style.colorScheme = resolved;
-    }, [theme]);
+        root.classList.add(resolvedTheme);
+        root.style.colorScheme = resolvedTheme;
+    }, [resolvedTheme]);
 
-    // Listen for system theme changes
+    // Listen for system theme changes.
     useEffect(() => {
         const media = window.matchMedia("(prefers-color-scheme: dark)");
-        const handler = () => {
-            if (theme === "system") {
-                const resolved = getSystemTheme();
-                setResolvedTheme(resolved);
-                document.documentElement.classList.remove("light", "dark");
-                document.documentElement.classList.add(resolved);
-                document.documentElement.style.colorScheme = resolved;
-            }
-        };
+        const handler = () => setSystemTheme(getSystemTheme());
         media.addEventListener("change", handler);
         return () => media.removeEventListener("change", handler);
-    }, [theme]);
+    }, []);
 
     const setTheme = (newTheme: Theme) => {
         setThemeState(newTheme);
-        localStorage.setItem(STORAGE_KEY, newTheme);
+        if (typeof window !== "undefined") {
+            localStorage.setItem(STORAGE_KEY, newTheme);
+        }
     };
 
     const toggleTheme = () => {

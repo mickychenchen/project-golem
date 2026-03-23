@@ -63,7 +63,7 @@ module.exports = function registerSystemRoutes(server) {
                 osName: 'Unknown'
             };
 
-            try { runtime.npm = `v${execSync('npm -v').toString().trim()}`; } catch (e) { }
+            try { runtime.npm = `v${execSync('npm -v').toString().trim()}`; } catch { }
 
             try {
                 if (process.platform === 'darwin') {
@@ -79,7 +79,7 @@ module.exports = function registerSystemRoutes(server) {
                 } else {
                     runtime.osName = `${os.type()} ${os.release()}`;
                 }
-            } catch (e) {
+            } catch {
                 runtime.osName = `${os.type()} ${os.release()}`;
             }
 
@@ -97,7 +97,7 @@ module.exports = function registerSystemRoutes(server) {
                 if (process.platform === 'darwin' || process.platform === 'linux') {
                     diskUsage = execSync("df -h . | awk 'NR==2{print $4}'").toString().trim();
                 }
-            } catch (e) { }
+            } catch { }
 
             const system = {
                 totalMem: `${Math.floor(os.totalmem() / 1024 / 1024)} MB`,
@@ -391,7 +391,7 @@ module.exports = function registerSystemRoutes(server) {
         let skillCount = 0;
         try {
             skillCount = resolveEnabledSkills(process.env.OPTIONAL_SKILLS || '', []).size;
-        } catch (e) { }
+        } catch { }
 
         res.json({
             status: 'ok',

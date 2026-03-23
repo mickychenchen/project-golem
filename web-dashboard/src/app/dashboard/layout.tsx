@@ -4,7 +4,7 @@ import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { LayoutDashboard, Users, Database, Globe, ChevronLeft, ChevronRight, Terminal, BrainCircuit, BookOpen, Settings, User, UserPlus, MessageSquare, Plug } from "lucide-react";
+import { LayoutDashboard, Users, Globe, ChevronLeft, ChevronRight, Terminal, BrainCircuit, BookOpen, Settings, User, MessageSquare, Plug } from "lucide-react";
 import { GolemProvider, useGolem } from "@/components/GolemContext";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { BootScreen } from "@/components/BootScreen";
@@ -17,7 +17,7 @@ function DashboardSidebar({
     setIsSidebarOpen: (v: boolean) => void
 }) {
     const pathname = usePathname();
-    const { activeGolem, setActiveGolem, golems, isSingleNode, version } = useGolem();
+    const { activeGolem, setActiveGolem, golems, version } = useGolem();
 
     const navItems = [
         { name: "直接交談", href: "/dashboard/chat", icon: MessageSquare },
@@ -198,7 +198,7 @@ function DashboardContent({
     isSidebarOpen: boolean,
     setIsSidebarOpen: (v: boolean) => void
 }) {
-    const { activeGolem, activeGolemStatus, isSystemConfigured, isLoadingSystem, isLoadingGolems, hasGolems, isBooting } = useGolem();
+    const { activeGolemStatus, isSystemConfigured, isLoadingSystem, isLoadingGolems, hasGolems, isBooting } = useGolem();
     const router = useRouter();
     const pathname = usePathname();
 

@@ -3,10 +3,15 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { socket } from "@/lib/socket";
 import { apiUrl } from "@/lib/api";
+import { apiGet, apiPost } from "@/lib/api-client";
 
 interface GolemInfo {
     id: string;
     status: string;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null;
 }
 
 interface GolemContextType {
@@ -65,23 +70,23 @@ export function GolemProvider({ children }: { children: React.ReactNode }) {
     const fetchGolems = async () => {
         setIsLoadingGolems(true);
         try {
-            const res = await fetch(apiUrl("/api/golems"));
-            if (!res.ok) return;
+            const data = await apiGet<{ golems?: GolemInfo[] }>(
+                apiUrl("/api/golems"),
+                undefined,
+                { profile: "none" }
+            );
 
-            // Use a safer JSON parsing that won't throw SyntaxError on non-JSON bodies
-            const data = await res.json().catch(() => null);
-            if (!data) return;
-
-            if (data.golems && data.golems.length > 0) {
-                setGolems(data.golems);
+            if (Array.isArray(data?.golems) && data.golems.length > 0) {
+                const golemList = data.golems;
+                setGolems(golemList);
                 setActiveGolem((currentActive) => {
-                    const ids = data.golems.map((g: GolemInfo) => g.id);
+                    const ids = golemList.map((g: GolemInfo) => g.id);
                     if (!currentActive || !ids.includes(currentActive)) {
                         const saved = localStorage.getItem("golem_active_id");
                         if (saved && ids.includes(saved)) {
                             return saved;
                         }
-                        return data.golems[0].id;
+                        return golemList[0].id;
                     }
                     return currentActive;
                 });
@@ -89,7 +94,7 @@ export function GolemProvider({ children }: { children: React.ReactNode }) {
                 setGolems([]);
                 setActiveGolem("");
             }
-        } catch (err) {
+        } catch {
             // Silently handle connection errors (e.g. during shutdown/restart)
             console.debug("Golem API unavailable (fetchGolems)");
             // 在離線狀態下，為了保持 Sidebar 可見以便重啟，我們保留一個虛擬的 Golem
@@ -103,30 +108,38 @@ export function GolemProvider({ children }: { children: React.ReactNode }) {
     const fetchSystemStatus = async () => {
         setIsLoadingSystem(true);
         try {
-            const statusRes = await fetch(apiUrl("/api/system/status"));
-            if (statusRes.ok) {
-                const data = await statusRes.json().catch(() => null);
-                if (data) {
-                    setIsSystemConfigured(data.isSystemConfigured ?? true);
-                    setIsBooting(data.isBooting ?? false);
-                    setAllowRemote(data.allowRemote ?? false);
-                    setLocalIp(data.localIp ?? "127.0.0.1");
-                    setDashboardPort(data.dashboardPort ?? 3000);
-                }
+            const data = await apiGet<{
+                isSystemConfigured?: boolean;
+                isBooting?: boolean;
+                allowRemote?: boolean;
+                localIp?: string;
+                dashboardPort?: number;
+            }>(
+                apiUrl("/api/system/status"),
+                undefined,
+                { profile: "none" }
+            );
+            if (data) {
+                setIsSystemConfigured(data.isSystemConfigured ?? true);
+                setIsBooting(data.isBooting ?? false);
+                setAllowRemote(data.allowRemote ?? false);
+                setLocalIp(data.localIp ?? "127.0.0.1");
+                setDashboardPort(data.dashboardPort ?? 3000);
             }
-        } catch (e) {
+        } catch {
             setIsSystemConfigured(true); // default on error
         } finally {
             setIsLoadingSystem(false);
         }
 
         try {
-            const configRes = await fetch(apiUrl("/api/system/config"));
-            if (configRes.ok) {
-                const data = await configRes.json().catch(() => null);
-                if (data && data.version) setVersion(`v${data.version}`);
-            }
-        } catch (e) {
+            const data = await apiGet<{ version?: string }>(
+                apiUrl("/api/system/config"),
+                undefined,
+                { profile: "none" }
+            );
+            if (data?.version) setVersion(`v${data.version}`);
+        } catch {
             console.debug("Golem API unavailable (fetchSystemStatus)");
         }
     };
@@ -135,23 +148,24 @@ export function GolemProvider({ children }: { children: React.ReactNode }) {
         try {
             console.log("🌀 [GolemContext] Requesting remote launch...");
             // 首先調用 Launcher API
-            await fetch("/api/system/launcher/start", { method: "POST" }).catch(() => null);
+            await apiPost("/api/system/launcher/start").catch(() => null);
             
             // 輪詢後端是否已完成啟動 (最多等待 30 秒)
             console.log("⏳ [GolemContext] Waiting for backend to finish booting...");
             let backendReady = false;
             for (let i = 0; i < 60; i++) {
                 try {
-                    const check = await fetch(apiUrl("/api/system/status"), { signal: AbortSignal.timeout(500) });
-                    if (check.ok) {
-                        const data = await check.json();
-                        setIsBooting(data.isBooting);
-                        if (!data.isBooting) {
-                            backendReady = true;
-                            break;
-                        }
+                    const data = await apiGet<{ isBooting?: boolean }>(
+                        apiUrl("/api/system/status"),
+                        { signal: AbortSignal.timeout(500) },
+                        { profile: "none", retries: 0 }
+                    );
+                    setIsBooting(Boolean(data?.isBooting));
+                    if (!data?.isBooting) {
+                        backendReady = true;
+                        break;
                     }
-                } catch (e) {}
+                } catch {}
                 await new Promise(r => setTimeout(r, 500));
             }
 
@@ -161,12 +175,7 @@ export function GolemProvider({ children }: { children: React.ReactNode }) {
             }
 
             console.log("✅ [GolemContext] Backend ready. Sending start command...");
-            const res = await fetch(apiUrl("/api/golems/start"), {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ id }),
-            });
-            const data = await res.json();
+            const data = await apiPost<{ success?: boolean }>(apiUrl("/api/golems/start"), { id });
             if (data.success) {
                 fetchGolems();
                 fetchSystemStatus(); // 重整系統狀態
@@ -197,11 +206,11 @@ export function GolemProvider({ children }: { children: React.ReactNode }) {
     }, [isBooting]);
 
     useEffect(() => {
-        const handleInit = (data: any) => {
-            if (data.golems) {
-                const formattedGolems = typeof data.golems[0] === 'string'
-                    ? data.golems.map((id: string) => ({ id, status: 'running' }))
-                    : data.golems;
+        const handleInit = (payload: unknown) => {
+            if (isRecord(payload) && Array.isArray(payload.golems)) {
+                const formattedGolems = typeof payload.golems[0] === 'string'
+                    ? payload.golems.map((id) => ({ id: String(id), status: 'running' }))
+                    : payload.golems as GolemInfo[];
 
                 setGolems(formattedGolems);
                 setActiveGolem(prev => {

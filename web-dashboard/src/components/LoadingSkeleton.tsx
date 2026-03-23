@@ -78,7 +78,7 @@ export function LogSkeleton({ lines = 8 }: { lines?: number }) {
                 <Skeleton
                     key={i}
                     className="h-4"
-                    style={{ width: `${50 + Math.random() * 50}%` } as React.CSSProperties}
+                    style={{ width: `${50 + ((i * 17) % 51)}%` } as React.CSSProperties}
                 />
             ))}
         </div>

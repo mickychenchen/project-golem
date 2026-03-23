@@ -2,8 +2,8 @@
 
 import React, { useState, useEffect } from "react";
 import { 
-    Plus, Trash2, GripVertical, AlertCircle, 
-    Globe, ShieldCheck, ArrowRight, ExternalLink,
+    Plus, Trash2, AlertCircle, 
+    Globe, ShieldCheck, ExternalLink,
     AlertTriangle
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -13,24 +13,30 @@ interface UrlsTabProps {
     onChange: (newValue: string) => void;
 }
 
+function normalizeUrls(raw: string): string[] {
+    const urlArray = raw ? raw.split(",").map((url) => url.trim()) : [];
+    if (urlArray.length === 0 || (urlArray.length === 1 && !urlArray[0])) {
+        return ["https://gemini.google.com/app"];
+    }
+    return urlArray;
+}
+
 export default function UrlsTab({ geminiUrls, onChange }: UrlsTabProps) {
     // Current URLs as an array
-    const [urls, setUrls] = useState<string[]>([]);
+    const [urls, setUrls] = useState<string[]>(() => normalizeUrls(geminiUrls));
     
-    // Initialize urls from the string
+    // Sync URLs from parent config without triggering sync setState in effect
     useEffect(() => {
-        const urlArray = geminiUrls ? geminiUrls.split(',').map(u => u.trim()) : [];
-        const currentJoined = urls.join(',');
-        
-        // Only update if the prop-derived value actually differs from our local state
-        // This prevents "Add URL" from being immediately reset because of the empty field.
-        if (geminiUrls !== currentJoined) {
-            if (urlArray.length === 0 || (urlArray.length === 1 && !urlArray[0])) {
-                setUrls(["https://gemini.google.com/app"]);
-            } else {
-                setUrls(urlArray);
-            }
-        }
+        const nextUrls = normalizeUrls(geminiUrls);
+        const rafId = requestAnimationFrame(() => {
+            setUrls((prev) => {
+                if (prev.length === nextUrls.length && prev.every((value, index) => value === nextUrls[index])) {
+                    return prev;
+                }
+                return nextUrls;
+            });
+        });
+        return () => cancelAnimationFrame(rafId);
     }, [geminiUrls]);
 
     const handleUpdateUrls = (newUrls: string[]) => {

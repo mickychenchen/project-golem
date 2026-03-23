@@ -98,7 +98,7 @@ module.exports = function(server) {
 
                 for (const targetUrl of uniqueUrls) {
                     try {
-                        const data = await new Promise((resolve, reject) => {
+                        const data = await new Promise((resolve) => {
                             const options = { headers: { 'User-Agent': 'Golem-Dashboard-Installer' } };
                             https.get(targetUrl, options, (response) => {
                                 if (response.statusCode === 200) {
@@ -108,10 +108,10 @@ module.exports = function(server) {
                                 } else {
                                     resolve(null);
                                 }
-                            }).on('error', (e) => resolve(null));
+                            }).on('error', () => resolve(null));
                         });
                         if (data) return data;
-                    } catch (e) {
+                    } catch {
                         continue;
                     }
                 }

@@ -173,7 +173,7 @@ module.exports = function registerPersonaRoutes(server) {
                     console.error('⚠️ [WebServer] Failed to hot-reload persona:', e);
                 }
             } else {
-                try { ProtocolFormatter._lastScanTime = 0; } catch (e) { }
+                try { ProtocolFormatter._lastScanTime = 0; } catch { }
             }
 
             console.log(`🎭 [WebServer] Persona saved & injection requested for Golem [${golemId}]`);
