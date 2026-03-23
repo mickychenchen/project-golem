@@ -4,7 +4,7 @@
   <p><b>Ultimate Chronos + MultiAgent + Social Node Edition</b></p>
 
   <p>
-    <img src="https://img.shields.io/badge/Version-9.1.3-blue?style=for-the-badge" alt="Version">
+    <img src="https://img.shields.io/badge/Version-9.1.6-blue?style=for-the-badge" alt="Version">
     <img src="https://img.shields.io/badge/Engine-Node.js%2020-green?style=for-the-badge&logo=nodedotjs" alt="Engine">
     <img src="https://img.shields.io/badge/Brain-Web%20Gemini-orange?style=for-the-badge&logo=google" alt="Brain">
     <img src="https://img.shields.io/badge/Platform-Telegram%20%7C%20Discord-blue?style=for-the-badge" alt="Platform">
@@ -38,7 +38,7 @@
 
 ## ✨ What is this?
 
-**Project Golem** is not just another chatbot. It is an autonomous AI agent that uses **Web Gemini's infinite context** as its brain and **Puppeteer** as its hands.
+**Project Golem** is not just another chatbot. It is an autonomous AI agent that uses **Web Gemini's infinite context** as its brain and **pure Playwright** as its execution engine.
 
 - 🧠 **Remember You** — Pyramidal 5-tier memory compression, theoretically preserving **50 years** of conversational essence.
 - 🤖 **Autonomous Action** — While you're away, it proactively browses news, introspects, and sends messages to you.
@@ -116,7 +116,7 @@ To help you better monitor and manage your Golem, we provide a fully functional 
 
 ### Prerequisites
 - **Node.js** v20+
-- **Google Chrome** (Required for Puppeteer)
+- **Chromium / Google Chrome** (Required for Playwright)
 - **Telegram Bot Token** (Get from [@BotFather](https://t.me/BotFather))
 
 ### ⚡ Recommended: One-click Magic Mode
@@ -133,6 +133,16 @@ chmod +x setup.sh
 
 # Start directly
 ./setup.sh --start
+```
+
+**🔐 Recommended baseline config (Playwright + Security)**
+```env
+GOLEM_MEMORY_MODE=lancedb-pro
+PLAYWRIGHT_STEALTH_ENABLED=true
+ALLOW_REMOTE_ACCESS=false
+# If remote admin is needed, set both:
+# REMOTE_ACCESS_PASSWORD=your-strong-password
+# SYSTEM_OP_TOKEN=your-operation-token
 ```
 
 ### Windows
@@ -174,7 +184,7 @@ graph TD
 ```
 
 ### 🧠 Technical Deep Dive
-- **Browser-in-the-Loop**: Unlike traditional API-based bots, Golem uses Puppeteer to simulate human behavior on Web Gemini. This provides access to the **1M+ Token Infinite Context Window** for free.
+- **Browser-in-the-Loop**: Unlike traditional API-based bots, Golem uses **Playwright** to simulate human behavior on Web Gemini. This provides access to the **1M+ Token Infinite Context Window** for free.
 - **Reflex Shunting**: Golem's brain produces structured `GOLEM_PROTOCOL` instructions instead of raw text. This allows the agent to precisely determine when to talk, when to remember, and when to execute skill scripts.
 
 ---

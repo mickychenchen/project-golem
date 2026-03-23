@@ -200,7 +200,7 @@ golems_wizard() {
 
 step_install_core() {
     echo -e "  📦 安裝核心依賴..."
-    echo -e "  ${DIM}  (puppeteer, blessed, gemini-ai, discord.js ...)${NC}"
+    echo -e "  ${DIM}  (playwright, blessed, gemini-ai, discord.js ...)${NC}"
     log "Installing core dependencies"
     
     local arch=$(uname -m)
@@ -211,7 +211,7 @@ step_install_core() {
     if [[ "$arch" == "arm64" ]] || [[ "$arch" == "aarch64" ]]; then
         ui_info "偵測到 ARM64 架構 (${arch})，正在調整安裝策略..."
         if [[ "$os" == "linux" ]] || [[ "$os" == "wsl" ]]; then
-            # Linux ARM64 上的 Puppeteer 預設下載 amd64 Chromium 會失敗
+            # Linux ARM64 上若下載預設 Chromium 常見相容性問題
             ui_warn "Linux ARM64 環境建議使用系統 Chromium 以確保相容性。"
             echo -e "  ${DIM}提示: sudo apt install chromium-browser -y${NC}"
             export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=true

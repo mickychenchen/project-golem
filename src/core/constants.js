@@ -32,8 +32,8 @@ const BROWSER_ARGS = Object.freeze([
     '--no-sandbox',
     '--disable-dev-shm-usage',
     '--disable-setuid-sandbox',
-    '--window-size=50,50',
-    '--window-position=0,1000',
+    '--window-size=1366,768',
+    '--disable-blink-features=AutomationControlled',
     '--disable-gpu',
 
     // --- 記憶體與程序最佳化 ---

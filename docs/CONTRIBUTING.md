@@ -23,7 +23,7 @@ Be respectful, constructive, and collaborative. We welcome contributors of all e
 
 ### Prerequisites
 
-- **Node.js** 18+ (LTS recommended)
+- **Node.js** 20+ (LTS recommended)
 - **Docker** (optional, for containerized deployment)
 - **Google Gemini API Key** (free tier available at [aistudio.google.com](https://aistudio.google.com))
 
@@ -39,10 +39,7 @@ npm install
 
 # Copy environment template
 cp .env.example .env
-# Edit .env and add your GEMINI_API_KEY
-
-# Run in API mode (no browser required)
-node index.js --api-brain
+# Edit .env and add your GEMINI_API_KEYS (comma-separated if multiple keys)
 
 # Run with browser (requires Chromium)
 node index.js
@@ -52,7 +49,7 @@ node index.js
 
 ```bash
 docker build -t project-golem .
-docker run -e GEMINI_API_KEY=your-key project-golem
+docker run -e GEMINI_API_KEYS=key1,key2 project-golem
 ```
 
 ## Development Setup
@@ -78,8 +75,7 @@ project-golem/
 ├── index.js                    # Entry point
 ├── src/
 │   ├── core/                   # Brain, Page Interaction, Multi-Agent
-│   │   ├── GolemBrain.js       # Gemini AI brain (Puppeteer-based)
-│   │   ├── ApiBrain.js         # API-only brain (no Chromium)
+│   │   ├── GolemBrain.js       # Gemini AI brain (Playwright-based)
 │   │   ├── PageInteractor.js   # DOM interaction engine
 │   │   ├── InteractiveMultiAgent.js  # Multi-agent orchestration
 │   │   └── action_handlers/    # Action routing (Android, etc.)
@@ -88,9 +84,8 @@ project-golem/
 │   │   ├── SecurityManager.js  # Input validation & security
 │   │   └── DashboardManager.js # Dashboard data provider
 │   ├── memory/                 # Memory drivers
-│   │   ├── BrowserMemoryDriver.js  # IndexedDB via Puppeteer
-│   │   ├── SystemNativeDriver.js   # File-based (.md)
-│   │   └── SystemQmdDriver.js      # QMD format
+│   │   ├── LanceDBProDriver.js     # Vector memory (lancedb-pro)
+│   │   └── SystemNativeDriver.js   # Native fallback memory
 │   ├── services/               # Utility services
 │   │   ├── ProtocolFormatter.js    # Titan Protocol formatting
 │   │   └── Introspection.js        # Self-analysis
@@ -114,13 +109,13 @@ project-golem/
 
 ### Key Concepts
 
-1. **GolemBrain** — The AI core that connects to Google Gemini via Puppeteer (browser mode) or API (api-brain mode).
+1. **GolemBrain** — The AI core that connects to Google Gemini via **Playwright** in browser mode.
 
 2. **Titan Protocol** — The structured response format Golem uses internally. Responses contain blocks like `[GOLEM_ACTION]`, `[GOLEM_MEMORY]`, `[GOLEM_REPLY]`.
 
 3. **Skills** — Modular capabilities defined as markdown files in `src/skills/`. Skills can be loaded, reloaded, and shared.
 
-4. **Memory Drivers** — Pluggable storage backends for Golem's memory. Currently supports browser IndexedDB, native files, and QMD format.
+4. **Memory Drivers** — Pluggable storage backends for Golem's memory. Current production default is `LanceDBProDriver` (`GOLEM_MEMORY_MODE=lancedb-pro`) with `SystemNativeDriver` as fallback.
 
 5. **EventBus** — Decoupled pub/sub system for inter-component communication.
 

@@ -24,7 +24,7 @@
   "keywords": [
     "golem",
     "ai",
-    "puppeteer",
+    "playwright",
     "gemini",
     "neural-memory",
     "blessed",
@@ -49,8 +49,6 @@
     "memory-lancedb-pro": "^1.1.0-beta.9",
     "opossum": "^9.0.0",
     "playwright": "^1.42.1",
-    "playwright-extra": "^4.3.6",
-    "puppeteer-extra-plugin-stealth": "2.11.2",
     "socket.io": "4.8.3",
     "socket.io-client": "4.8.3",
     "sqlite3": "^6.0.1",

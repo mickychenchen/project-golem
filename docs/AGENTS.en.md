@@ -7,7 +7,7 @@
 ## 🏗️ Core Architecture Pattern: "Browser-in-the-Loop"
 
 - **Entry Point**: `src/index.js` or `src/main.js`.
-- **LLM Control**: DO NOT rewrite `GolemBrain` to use official REST APIs unless explicitly requested. The core value of Golem is its ability to pilot a browser via Puppeteer to access Web Gemini.
+- **LLM Control**: DO NOT rewrite `GolemBrain` to use official REST APIs unless explicitly requested. The core value of Golem is its ability to pilot a browser via **Playwright** to access Web Gemini.
 - **State Management**: Most state is held in `ConversationManager`. Cross-platform logic is abstracted in `UniversalContext`.
 
 ## 🧠 Memory Protocol: "Pyramid Memory"

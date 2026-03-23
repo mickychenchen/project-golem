@@ -4,7 +4,7 @@
   <p><b>Ultimate Chronos + MultiAgent + Social Node Edition</b></p>
 
   <p>
-    <img src="https://img.shields.io/badge/Version-9.1.3-blue?style=for-the-badge" alt="Version">
+    <img src="https://img.shields.io/badge/Version-9.1.6-blue?style=for-the-badge" alt="Version">
     <img src="https://img.shields.io/badge/Engine-Node.js%2020-green?style=for-the-badge&logo=nodedotjs" alt="Engine">
     <img src="https://img.shields.io/badge/Brain-Web%20Gemini-orange?style=for-the-badge&logo=google" alt="Brain">
     <img src="https://img.shields.io/badge/Platform-Telegram%20%7C%20Discord-blue?style=for-the-badge" alt="Platform">
@@ -38,7 +38,7 @@
 
 ## ✨ 這是什麼？
 
-**Project Golem** 不是一個普通的聊天機器人。它是一個以 **Web Gemini 的無限上下文**為大腦、以 **Puppeteer** 為雙手的自主 AI 代理系統。
+**Project Golem** 不是一個普通的聊天機器人。它是一個以 **Web Gemini 的無限上下文**為大腦、以 **純 Playwright** 為執行引擎的自主 AI 代理系統。
 
 - 🧠 **記住你** — 金字塔式 5 層記憶壓縮，理論上可保存 **50 年**的對話精華。
 - 🤖 **自主行動** — 當你不在時，它會主動瀏覽新聞、自省思考、發送消息給你。
@@ -116,7 +116,7 @@
 
 ### 環境需求
 - **Node.js** v20+
-- **Google Chrome** (供 Puppeteer 自動化操控使用)
+- **Chromium / Google Chrome** (供 Playwright 自動化操控使用)
 - **Telegram/Discord Bot Token** (非必填，若只需本機操作可免)
 
 ### ⚡ 最推薦：一鍵安裝與啟動模式 (Magic Mode)
@@ -133,6 +133,16 @@ chmod +x setup.sh
 
 # 直接啟動
 ./setup.sh --start
+```
+
+**🔐 建議設定（純 Playwright + 安全）**
+```env
+GOLEM_MEMORY_MODE=lancedb-pro
+PLAYWRIGHT_STEALTH_ENABLED=true
+ALLOW_REMOTE_ACCESS=false
+# 若需要遠端管理，務必設定：
+# REMOTE_ACCESS_PASSWORD=your-strong-password
+# SYSTEM_OP_TOKEN=your-operation-token
 ```
 
 
@@ -175,7 +185,7 @@ graph TD
 ```
 
 ### 🧠 技術深潛
-- **Browser-in-the-Loop**: 與傳統基於 API 的機器人不同，Golem 使用 Puppeteer 在 Web Gemini 上模擬人類行為。這提供了免費訪問 **1M+ Token 無限上下文視窗** 的能力。
+- **Browser-in-the-Loop**: 與傳統基於 API 的機器人不同，Golem 使用 **Playwright** 在 Web Gemini 上模擬人類行為。這提供了免費訪問 **1M+ Token 無限上下文視窗** 的能力。
 - **Reflex Shunting**: Golem 的大腦產出結構化的 `GOLEM_PROTOCOL` 指令而非純文字。這讓代理人能精準決定何時該說話、何時該記憶、以及何時該執行技能腳本。
 
 ---

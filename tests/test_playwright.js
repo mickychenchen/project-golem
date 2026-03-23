@@ -1,4 +1,4 @@
-const { chromium } = require('playwright-extra');
+const { chromium } = require('playwright');
 const { execSync } = require('child_process');
 
 async function main() {

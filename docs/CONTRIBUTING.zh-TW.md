@@ -21,7 +21,7 @@
 
 ### 必備條件
 
-- **Node.js** 18+ (建議 LTS)
+- **Node.js** 20+ (建議 LTS)
 - **Docker** (選填，用於容器化部署)
 - **Google Gemini API Key** (可在 [aistudio.google.com](https://aistudio.google.com) 取得免費額度)
 
@@ -37,7 +37,7 @@ npm install
 
 # 複製環境變數範本
 cp .env.example .env
-# 編輯 .env 並加入您的 GEMINI_API_KEY
+# 編輯 .env 並加入您的 GEMINI_API_KEYS（可用逗號分隔多組）
 ```
 
 ## 開發環境設置
@@ -55,7 +55,7 @@ node index.js --doctor
 
 ## 架構概覽
 
-- **GolemBrain**：AI 核心，透過 Puppeteer (瀏覽器模式) 或 API 模式連結 Google Gemini。
+- **GolemBrain**：AI 核心，透過 **Playwright（瀏覽器模式）** 連結 Google Gemini。
 - **Titan Protocol**：Golem 內部使用的結構化回應格式，包含 `[GOLEM_ACTION]`, `[GOLEM_MEMORY]`, `[GOLEM_REPLY]`。
 - **Skills**：在 `src/skills/` 中定義的模組化能力。
 - **EventBus**：用於組件間通訊的解耦發佈/訂閱系統。

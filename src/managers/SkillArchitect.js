@@ -32,7 +32,7 @@ class SkillArchitect {
         USER REQUEST: "${intent}"
         
         ### CONTEXT
-        - Environment: Node.js + Puppeteer
+        - Environment: Node.js + Playwright
         - Input: 'run' function receives (ctx, args)
         - CTX: { page, browser, log, io, metadata }
         - Existing Skills: ${existingSkills.map(s => s.name).join(', ')}
@@ -55,7 +55,7 @@ class SkillArchitect {
         ### CODE RULES
         1. Use 'ctx.log.info()' not console.log.
         2. Wrap logic in try/catch.
-        3. If using puppeteer, assume 'ctx.page' is active.
+        3. If using Playwright, assume 'ctx.page' is active.
         4. Return a string message at the end of execution.
         `;
 

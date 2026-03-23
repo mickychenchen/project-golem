@@ -9,7 +9,7 @@ const WORKSPACE_SAVE_KEYWORDS = ['儲存活動', '儲存', '建立', '建立活�
 
 class PageInteractor {
     /**
-     * @param {import('puppeteer').Page} page - Puppeteer 頁面實例
+     * @param {import('playwright').Page} page - Playwright 頁面實例
      * @param {import('../services/DOMDoctor')} doctor - DOM 修復服務
      */
     constructor(page, doctor) {

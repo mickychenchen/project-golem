@@ -7,7 +7,7 @@
 ## 🏗️ 核心架構模式: "Browser-in-the-Loop"
 
 - **入口點**: `src/index.js` 或 `src/main.js`。
-- **LLM 控制**: 除非明確要求，否則**不得**將 `GolemBrain` 改寫為官方 REST API。Golem 的核心價值在於透過 Puppeteer 操控瀏覽器以存取 Web Gemini。
+- **LLM 控制**: 除非明確要求，否則**不得**將 `GolemBrain` 改寫為官方 REST API。Golem 的核心價值在於透過 **Playwright** 操控瀏覽器以存取 Web Gemini。
 - **狀態管理**: 大部分狀態保存在 `ConversationManager` 中。跨平台邏輯抽象於 `UniversalContext`。
 
 ## 🧠 記憶協定: "Pyramid Memory" (金字塔記憶)

@@ -1,4 +1,4 @@
-const { chromium } = require('playwright-extra');
+const { chromium } = require('playwright');
 
 async function main() {
     console.log("Launching headless browser...");

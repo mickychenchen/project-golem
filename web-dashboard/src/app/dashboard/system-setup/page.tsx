@@ -202,7 +202,7 @@ export default function SystemSetupPage() {
                                 placeholder="./golem_memory"
                             />
                             <p className="text-xs text-gray-600 mt-1.5">
-                                存放 Puppeteer Login Session 與長期記憶。
+                                存放 Playwright Login Session 與長期記憶。
                             </p>
                         </div>
 
