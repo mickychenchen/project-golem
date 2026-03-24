@@ -12,6 +12,7 @@ import { apiGet, apiPost } from "@/lib/api-client";
 import { socket } from "@/lib/socket";
 import { cn } from "@/lib/utils";
 import DashboardMetricsGrid, { type DashboardMetricCard } from "./DashboardMetricsGrid";
+import DeveloperPlaque from "./DeveloperPlaque";
 import NoGolemsState from "./NoGolemsState";
 import UpdateMarqueeNotice from "./UpdateMarqueeNotice";
 
@@ -67,7 +68,6 @@ type UnifiedConsoleProps = {
 };
 
 type MetricCardId =
-    | "memoryUsage"
     | "queueLoad"
     | "systemUptime"
     | "nextSchedule"
@@ -86,7 +86,6 @@ type MetricCardId =
 const METRIC_SELECTION_STORAGE_KEY = "golem-dashboard-selected-metrics-v1";
 
 const ALL_METRIC_IDS: MetricCardId[] = [
-    "memoryUsage",
     "queueLoad",
     "systemUptime",
     "nextSchedule",
@@ -104,7 +103,6 @@ const ALL_METRIC_IDS: MetricCardId[] = [
 ];
 
 const DEFAULT_SELECTED_METRIC_IDS: MetricCardId[] = [
-    "memoryUsage",
     "queueLoad",
     "systemUptime",
     "backendStatus",
@@ -390,7 +388,6 @@ export default function UnifiedConsole({
         }
         if (preset === "observability") {
             setSelectedMetricIds([
-                "memoryUsage",
                 "queueLoad",
                 "backendStatus",
                 "healthScore",
@@ -403,7 +400,7 @@ export default function UnifiedConsole({
             return;
         }
         if (preset === "minimal") {
-            setSelectedMetricIds(["memoryUsage", "backendStatus", "logsPerMinute"]);
+            setSelectedMetricIds(["backendStatus", "logsPerMinute"]);
             return;
         }
         setSelectedMetricIds(DEFAULT_SELECTED_METRIC_IDS);
@@ -550,7 +547,6 @@ export default function UnifiedConsole({
     }, [recentLogEvents]);
 
     const metricOptions = useMemo(() => ([
-        { id: "memoryUsage", label: isEnglish ? "Memory Usage" : "記憶體使用量", description: isEnglish ? "Single memory metric source" : "單一記憶體指標來源（已統一）" },
         { id: "queueLoad", label: isEnglish ? "Queue Load" : "任務佇列", description: isEnglish ? "Current queued workload" : "目前佇列負載量" },
         { id: "systemUptime", label: isEnglish ? "System Uptime" : "系統運行時間", description: isEnglish ? "Runtime duration since boot" : "系統啟動後運行時間" },
         { id: "nextSchedule", label: isEnglish ? "Next Schedule" : "下次排程", description: isEnglish ? "Upcoming schedule trigger" : "下一個排程觸發資訊" },
@@ -572,14 +568,6 @@ export default function UnifiedConsole({
             ? activeGolemStatus.replaceAll("_", " ")
             : (isEnglish ? "unknown" : "未知");
         return [
-            {
-                id: "memoryUsage",
-                title: isEnglish ? "Memory Usage" : "記憶體使用量",
-                value: `${metrics.memUsage.toFixed(1)} MB`,
-                icon: Activity,
-                data: memHistory,
-                color: "#14b8a6",
-            },
             {
                 id: "queueLoad",
                 title: isEnglish ? "Queue Load" : "任務佇列",
@@ -677,9 +665,7 @@ export default function UnifiedConsole({
         logStats.agentEventsLastMinute,
         logStats.fiveMinuteErrorRate,
         logStats.logsPerMinute,
-        memHistory,
         metrics.lastSchedule,
-        metrics.memUsage,
         metrics.queueCount,
         metrics.uptime,
         queueHistory,
@@ -788,8 +774,8 @@ export default function UnifiedConsole({
                                     </h3>
                                     <p className="text-xs text-muted-foreground mt-0.5">
                                         {isEnglish
-                                            ? "Memory is unified as one card, while CPU is presented in trend view only."
-                                            : "記憶體已統一為單一卡片，CPU 僅保留趨勢視圖。"}
+                                            ? "Memory usage is now part of persistent telemetry and excluded from removable metric cards."
+                                            : "記憶體用量已納入常駐遙測，不再出現在可移除的指標卡。"}
                                     </p>
                                 </div>
                                 <div className="flex items-center gap-2">
@@ -940,7 +926,12 @@ export default function UnifiedConsole({
                             )}
                         </div>
 
-                        <DashboardMetricsGrid cards={visibleMetricCards} />
+                        <DashboardMetricsGrid
+                            cards={visibleMetricCards}
+                            fixedIndicator={{
+                                node: <DeveloperPlaque variant="indicator" />,
+                            }}
+                        />
 
                         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
                             <MetricChart
@@ -963,7 +954,7 @@ export default function UnifiedConsole({
                                 unit="MB"
                                 history={memHistory}
                                 hoveredPoint={null}
-                                onHover={(_event) => { }}
+                                onHover={() => { }}
                                 onLeave={() => { }}
                                 gradientId="memTrendGradient"
                                 color="primary"

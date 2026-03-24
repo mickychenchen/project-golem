@@ -87,7 +87,7 @@
     --ops-sidebar-tint: oklch(0.72 0.11 220 / 0.16);
 }
 
-/* ===== Ops Style Presets (12) ===== */
+/* ===== Ops Style Presets (11) ===== */
 :root[data-ops-style="ops-command"] {
     --primary: oklch(0.74 0.12 220);
     --accent: oklch(0.29 0.035 210);
@@ -221,23 +221,6 @@
     --ops-shell-glow-b: oklch(0.72 0.05 210 / 0.12);
     --ops-card-tint: oklch(0.69 0.04 245 / 0.08);
     --ops-sidebar-tint: oklch(0.69 0.04 245 / 0.14);
-}
-
-:root[data-ops-style="solar-dawn"] {
-    --background: oklch(0.99 0.007 235);
-    --card: oklch(0.995 0.004 240);
-    --primary: oklch(0.62 0.12 240);
-    --accent: oklch(0.92 0.03 220);
-    --ring: oklch(0.64 0.1 240);
-    --chart-1: oklch(0.62 0.12 240);
-    --chart-2: oklch(0.66 0.12 190);
-    --chart-3: oklch(0.68 0.11 150);
-    --chart-4: oklch(0.65 0.11 310);
-    --chart-5: oklch(0.72 0.1 70);
-    --ops-shell-glow-a: oklch(0.62 0.13 240 / 0.15);
-    --ops-shell-glow-b: oklch(0.66 0.12 190 / 0.12);
-    --ops-card-tint: oklch(0.64 0.1 240 / 0.08);
-    --ops-sidebar-tint: oklch(0.62 0.1 240 / 0.12);
 }
 
 :root[data-ops-style="teal-nightshift"] {

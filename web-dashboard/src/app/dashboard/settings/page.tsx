@@ -113,7 +113,6 @@ export default function SettingsPage() {
     };
 
     const handleSave = async () => {
-        setIsSaving(true);
         setStatusMessage(null);
 
         const changedEnv: Record<string, string> = {};
@@ -128,10 +127,24 @@ export default function SettingsPage() {
 
         if (hasEnvChanges === false) {
             setStatusMessage({ type: "warning", text: t("settings.warning.noChanges") });
-            setIsSaving(false);
             return;
         }
 
+        const runtimePlatform = String(systemStatus?.runtime?.platform || "").toLowerCase();
+        const runtimeArch = String(systemStatus?.runtime?.arch || "").toLowerCase();
+        const isIntelMac = runtimePlatform === "darwin" && runtimeArch === "x64";
+        const changedMemoryMode = String(changedEnv.GOLEM_MEMORY_MODE || "").trim().toLowerCase();
+        const wantsLanceDbPro = changedMemoryMode === "lancedb" || changedMemoryMode === "lancedb-pro" || changedMemoryMode === "lancedb-legacy" || changedMemoryMode === "lancedb_legacy";
+
+        if (isIntelMac && wantsLanceDbPro) {
+            const confirmed = window.confirm(t("settings.confirm.intelMacLanceDbPro"));
+            if (!confirmed) {
+                setStatusMessage({ type: "warning", text: t("settings.warning.intelMacLanceDbProCancelled") });
+                return;
+            }
+        }
+
+        setIsSaving(true);
         try {
             const data = await apiPostWrite<{ success?: boolean; message?: string; error?: string }>("/api/config", {
                 env: changedEnv
@@ -206,37 +219,43 @@ export default function SettingsPage() {
     return (
         <div className="flex-1 p-4 md:p-6 overflow-y-auto">
             <div className="max-w-6xl mx-auto space-y-6">
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-border pb-4 sticky top-0 bg-background/95 backdrop-blur z-20">
-                    <div>
-                        <h1 className="text-2xl font-bold flex items-center gap-2">
-                            <Settings className="w-6 h-6 text-primary" />
-                            {t("settings.title")}
-                        </h1>
-                        <p className="text-sm text-muted-foreground mt-1">
-                            {t("settings.subtitle")}
-                        </p>
-                    </div>
-                    <div className="flex items-center gap-3">
-                        <button
-                            onClick={handleRestartSystem}
-                            className="px-4 py-2 bg-secondary hover:bg-destructive/10 text-muted-foreground hover:text-destructive border border-border hover:border-destructive/30 rounded-lg text-sm transition-all flex items-center gap-2"
-                        >
-                            <RefreshCw className="w-4 h-4" />
-                            {t("settings.restartSystem")}
-                        </button>
-                        <button
-                            onClick={handleSave}
-                            disabled={isSaving}
-                            className={cn(
-                                "px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2",
-                                isSaving
-                                    ? "bg-muted text-muted-foreground cursor-not-allowed border border-border"
-                                    : "bg-primary/10 text-primary hover:bg-primary/20 border border-primary/30 hover:border-primary"
-                            )}
-                        >
-                            {isSaving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                            {isSaving ? t("settings.saving") : t("settings.saveSettings")}
-                        </button>
+                <div className="sticky top-0 z-20 enterprise-card border border-border rounded-2xl px-4 py-4 md:px-5 md:py-5">
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                        <div className="min-w-0">
+                            <h1 className="text-2xl font-bold flex items-center gap-2 tracking-tight">
+                                <span className="w-9 h-9 rounded-xl border border-primary/25 bg-primary/12 flex items-center justify-center shrink-0">
+                                    <Settings className="w-5 h-5 text-primary" />
+                                </span>
+                                <span className="bg-clip-text text-transparent bg-gradient-to-r from-primary via-foreground to-primary/70 truncate">
+                                    {t("settings.title")}
+                                </span>
+                            </h1>
+                            <p className="text-sm text-muted-foreground mt-1.5 leading-relaxed">
+                                {t("settings.subtitle")}
+                            </p>
+                        </div>
+                        <div className="flex items-center gap-3">
+                            <button
+                                onClick={handleRestartSystem}
+                                className="px-4 py-2 bg-secondary hover:bg-destructive/10 text-muted-foreground hover:text-destructive border border-border hover:border-destructive/30 rounded-lg text-sm transition-all flex items-center gap-2"
+                            >
+                                <RefreshCw className="w-4 h-4" />
+                                {t("settings.restartSystem")}
+                            </button>
+                            <button
+                                onClick={handleSave}
+                                disabled={isSaving}
+                                className={cn(
+                                    "px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2",
+                                    isSaving
+                                        ? "bg-muted text-muted-foreground cursor-not-allowed border border-border"
+                                        : "bg-primary/10 text-primary hover:bg-primary/20 border border-primary/30 hover:border-primary"
+                                )}
+                            >
+                                {isSaving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                                {isSaving ? t("settings.saving") : t("settings.saveSettings")}
+                            </button>
+                        </div>
                     </div>
                 </div>
 

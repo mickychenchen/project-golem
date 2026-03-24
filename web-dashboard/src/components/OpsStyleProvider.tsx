@@ -97,16 +97,8 @@ export const OPS_STYLE_PRESETS: OpsStylePreset[] = [
         swatches: ["#cbd5e1", "#64748b", "#0f172a"],
     },
     {
-        id: "solar-dawn",
-        rank: 10,
-        name: { zh: "晨曦運維", en: "Solar Dawn" },
-        profile: { zh: "亮色值班 · 日間模式", en: "Light Shift · Day Mode" },
-        description: { zh: "亮色維運模板，適合白天辦公與報表展示。", en: "Bright operations template ideal for daytime reporting and office use." },
-        swatches: ["#2563eb", "#0ea5e9", "#f8fafc"],
-    },
-    {
         id: "teal-nightshift",
-        rank: 11,
+        rank: 10,
         name: { zh: "夜班深青", en: "Teal Nightshift" },
         profile: { zh: "夜班值守 · 護眼對比", en: "Night Shift · Eye-friendly" },
         description: { zh: "深青色護眼主題，適合夜間值班。", en: "Low-glare teal palette tailored for overnight monitoring." },
@@ -114,7 +106,7 @@ export const OPS_STYLE_PRESETS: OpsStylePreset[] = [
     },
     {
         id: "gold-control",
-        rank: 12,
+        rank: 11,
         name: { zh: "金曜控制", en: "Gold Control" },
         profile: { zh: "高階展示 · 決策儀表", en: "Executive Display · Decision Deck" },
         description: { zh: "金色點綴配色，適合管理層展示與戰情簡報。", en: "Gold-accented palette designed for executive briefings and control rooms." },
