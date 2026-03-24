@@ -37,6 +37,10 @@ show_menu() {
     
     options+=("Install|📦 更新依賴與系統建置 (Update / Build)")
     options+=("Magic|✨ 魔法一鍵安裝 (One-Click Setup)")
+    options+=("DeployLinux|🐧 Linux 無桌面一鍵安裝 (含 noVNC)")
+    options+=("DeployDocker|🐳 Docker 一鍵安裝部署 (含 noVNC)")
+    options+=("DesktopStatus|🖥️ Headless/VNC 狀態檢查")
+    options+=("HeadlessStop|🛑 停止 Headless/VNC 服務")
     
     show_menu_tools # Call the new function for the tools header
     
@@ -58,6 +62,10 @@ show_menu() {
         "Stop")    stop_system; show_menu ;;
         "Install") run_full_install ;;
         "Magic")   export GOLEM_MAGIC_MODE=true; run_full_install ;;
+        "DeployLinux") headless_one_click_deploy local; echo ""; read -r -p "  按 Enter 返回主選單..."; show_menu ;;
+        "DeployDocker") headless_one_click_deploy docker; echo ""; read -r -p "  按 Enter 返回主選單..."; show_menu ;;
+        "DesktopStatus") headless_status_local_desktop; echo ""; read -r -p "  按 Enter 返回主選單..."; show_menu ;;
+        "HeadlessStop") headless_one_click_stop; echo ""; read -r -p "  按 Enter 返回主選單..."; show_menu ;;
         "Doctor")  run_health_check; echo ""; read -r -p "  按 Enter 返回主選單..."; show_menu ;;
         "Clean")   run_clean_dependencies; show_menu ;;
         "Init")    run_clean_init; show_menu ;;

@@ -43,6 +43,23 @@ function isOfficeLogPayload(payload: unknown): payload is OfficeLogPayload {
     return typeof data.msg === "string" || typeof data.raw === "string" || typeof data.cleanMsg === "string";
 }
 
+function extractGolemReplyOnly(rawText: string): string {
+    const text = String(rawText || "").trim();
+    if (!text) return "";
+
+    const cleaned = text.replace(/^🤖\s*\[Golem\]\s*說:\s*/i, "").trim();
+    const hasTitanTags = /\[GOLEM_(MEMORY|ACTION|REPLY)\]/i.test(cleaned);
+    const replyMatch = cleaned.match(/\[GOLEM_REPLY\]([\s\S]*?)(?=\[\/?GOLEM_[A-Z]+\]|$)/i);
+
+    if (replyMatch && replyMatch[1]) {
+        return replyMatch[1].trim();
+    }
+    if (hasTitanTags) {
+        return "";
+    }
+    return cleaned;
+}
+
 const DEFAULT_LAYOUT: OfficeItem[] = [
     // Characters
     { id: 'user', type: 'character', name: 'user', src: '/characters/user.png', x: 8, y: 75, zIndex: 40, team: 'all', width: 192, height: 192 },
@@ -120,11 +137,7 @@ export default function OfficePage() {
                 const name = multiAgentMatch[1].trim().toLowerCase();
                 role = name;
                 if (['alex', 'bob', 'carol'].includes(name)) setSelectedTeam('tech');
-            } else if (text.includes('[GOLEM_MEMORY]')) {
-                role = "memory";
-            } else if (text.includes('[GOLEM_ACTION]')) {
-                role = "action";
-            } else if (text.includes('🤖 [Golem] 說:') || text.includes('[GOLEM_REPLY]')) {
+            } else if (text.includes('🤖 [Golem] 說:') || /\[GOLEM_(MEMORY|ACTION|REPLY)\]/i.test(text)) {
                 role = "brain";
             } else if (text.includes('🗣️ [User] 說:') || lowerText.includes('[user]') || lowerText.includes('you:') || lowerText.includes('使用者:')) {
                 role = "user";
@@ -136,9 +149,10 @@ export default function OfficePage() {
             if (multiAgentMatch) {
                 displayText = text.replace(/\[MultiAgent\]\s*\[.*?\]\s*/i, '').trim();
             } else {
-                if (role === "memory") displayText = text.replace(/\[GOLEM_MEMORY\]\n?/i, '').trim();
-                if (role === "action") displayText = text.replace(/\[GOLEM_ACTION\]\n?/i, '').trim();
-                if (role === "brain") displayText = text.replace(/🤖 \[Golem\] 說:\s*/i, '').replace(/\[GOLEM_REPLY\]\n?/i, '').trim();
+                if (role === "brain") {
+                    displayText = extractGolemReplyOnly(text);
+                    if (!displayText) return;
+                }
                 if (role === "user") displayText = text.replace(/🗣️ \[User\] 說:\s*/i, '').trim();
             }
 

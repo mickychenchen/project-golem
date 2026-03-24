@@ -1,6 +1,6 @@
 # 🖥️ Project Golem Web Dashboard 使用說明
 
-> 最後更新：2026-03-23  
+> 最後更新：2026-03-24  
 > Dashboard 技術棧：Next.js (Static Export) + Tailwind CSS + Socket.IO
 
 ## 一、啟動方式
@@ -55,6 +55,46 @@ node server.js     # 預設：http://localhost:3000
 | 匯入技能書 | 上傳 `.md/.json` 還原技能庫（含匯入前預覽與衝突策略） |
 | 注入技能書 | 重新將技能書注入 Gemini（相當於 `/reload`） |
 | 匯出/匯入膠囊 | 透過 `GOLEM_SKILL::` 字串分享技能 |
+
+---
+
+### 🎭 人格設定 (`/dashboard/persona`)
+
+人格模板管理與人格市集頁面：
+
+- 本地模板管理（建立、編輯、刪除、搜尋、分類）
+- 人格市集瀏覽與一鍵套用
+- 套用後可直接進入設定彈窗調整，並透過 **Save & Restart Window** 寫回設定
+
+---
+
+### 🗂️ Prompt 指令池 (`/dashboard/prompt-pool`)
+
+快捷指令管理中心：
+
+- 建立/編輯/刪除 Prompt 快捷指令
+- 顯示最近使用紀錄與快速複製
+- 提供舊資料衝突檢測與一鍵修復
+
+---
+
+### 📈 Prompt 趨勢視圖 (`/dashboard/prompt-trends`)
+
+可視化分析 Prompt 使用量：
+
+- 整體 14 天趨勢
+- 單指令 14 天趨勢
+- 快捷指令使用排行與區間切換
+
+---
+
+### 📓 繫絆日記 (`/dashboard/diary`)
+
+AI 與使用者互動日記中心：
+
+- 新增使用者日記、AI 日記與 AI 想法
+- 一鍵 Rotate（分層摘要）
+- 備份/還原/預檢流程
 
 ---
 
@@ -118,6 +158,33 @@ node server.js     # 預設：http://localhost:3000
 
 ---
 
+## 三、近期功能更新（2026-03-24）
+
+### 1) 全站 i18n 雙語切換（繁中 / English）
+
+- 新增語系切換器（側欄可見），支援 `繁體中文` / `English`
+- 語系偏好會保存於瀏覽器（`localStorage`）並在下次開啟沿用
+- 已補齊主要頁面與關鍵彈窗的雙語文字（含技能、人格、Prompt、MCP、記憶、日記、設定等）
+
+### 2) 首頁更新跑馬燈（GitHub 更新提醒）
+
+- Dashboard 首頁會定期檢查 `/api/system/update/check`
+- 若偵測到 Git 分支落後或新版本可用，會顯示更新跑馬燈提示
+- 提供快速入口引導到「系統總表」的一鍵更新區塊
+
+### 3) 技能市集 / 人格市集顯示策略調整
+
+- 技能市集優先顯示原文字段（如 `original_description`、`category_name.en`）
+- 人格市集優先顯示原文 `name / description / role`，避免被本地語系覆蓋
+- 目的：保留外部市場資料語意，降低翻譯落差
+
+### 4) 人格套用穩定性修正
+
+- 修正人格設定頁重複 hydration 造成欄位被覆蓋問題
+- 現在從市集點擊套用後，可穩定編輯並成功保存套用
+
+---
+
 ## 四、Setup 流程 (`/dashboard/system-setup`)
 
 首次使用或系統尚未初始化時，會導向 System Setup 頁面：
@@ -144,6 +211,15 @@ Dashboard 後端主要 API 與即時通訊能力如下：
 | `GET /api/system/security/events` | 讀取安全事件紀錄 |
 | `GET /api/golems` | 取得 Golem 列表 |
 | `POST /api/chat` | 發送 Web 端對話訊息 |
+| `GET /api/diary` | 讀取日記時間軸（含 rotate 結果） |
+| `POST /api/diary/rotate` | 強制執行日記 rotate（7 天保留 + 週/月/年摘要） |
+| `GET /api/diary/rotation/history` | 查詢 rotate 歷史紀錄 |
+| `GET /api/diary/backups` | 列出可用的日記 SQLite 備份 |
+| `GET /api/diary/backup/download?file=...` | 下載指定日記 SQLite 備份檔 |
+| `POST /api/diary/backup` | 建立日記 SQLite 備份 |
+| `POST /api/diary/backup/cleanup` | 立即清理舊備份（依策略） |
+| `GET /api/diary/restore/preview?file=...` | 還原前差異/風險預檢 |
+| `POST /api/diary/restore` | 從指定備份還原日記 SQLite |
 | `GET /api/skills/export` | 匯出技能書（整本或指定技能） |
 | `POST /api/skills/import` | 匯入技能書（支援 JSON/Markdown） |
 | `GET /api/memory` | 查詢向量記憶條目 |
@@ -159,6 +235,19 @@ Dashboard 後端主要 API 與即時通訊能力如下：
 - 敏感操作（例如 system restart/shutdown、MCP 寫入、技能/記憶異動）需通過 operation guard。
 - 若設定 `SYSTEM_OP_TOKEN`，敏感操作需額外提供 `x-system-op-token`。
 - 上傳與附件路徑已做大小與目錄邊界檢查（防止濫用與越界路徑）。
+
+### 日記 Rotate 建議參數
+
+可在設定頁（進階）或 `.env` 調整：
+
+- `DIARY_RAW_RETENTION_DAYS`：原始日記保留天數（最少 7）
+- `DIARY_WEEKLY_RETENTION_DAYS`：週摘要保留天數
+- `DIARY_MONTHLY_RETENTION_DAYS`：月摘要保留天數
+- `DIARY_ROTATE_MIN_INTERVAL_MS`：自動 rotate 最小間隔（毫秒）
+- `DIARY_BACKUP_MAX_FILES`：備份最大保留份數
+- `DIARY_BACKUP_RETENTION_DAYS`：備份保留天數
+
+> 日記儲存已改為 SQLite（WAL），舊版 `diary-book.json` 會在首次啟動時自動遷移。
 
 ---
 

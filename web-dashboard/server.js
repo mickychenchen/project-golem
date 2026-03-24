@@ -19,6 +19,8 @@ const registerPersonaRoutes = require('./routes/api.persona');
 const registerGolemRoutes = require('./routes/api.golems');
 const registerMemoryRoutes = require('./routes/api.memory');
 const registerMcpRoutes = require('./routes/api.mcp');
+const registerDiaryRoutes = require('./routes/api.diary');
+const registerPromptPoolRoutes = require('./routes/api.prompt-pool');
 
 class WebServer {
     constructor(dashboard) {
@@ -168,6 +170,8 @@ class WebServer {
             registerGolemRoutes,
             registerMemoryRoutes,
             registerMcpRoutes,
+            registerDiaryRoutes,
+            registerPromptPoolRoutes,
         ];
 
         routeFactories.forEach((factory) => {

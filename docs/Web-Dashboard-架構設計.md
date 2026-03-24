@@ -136,3 +136,16 @@
 - 測試與除錯定位更直接（依 domain 找檔）
 - 後續可逐步把 `api.skills.js`、`api.chat.js` 內部再細分 service 層
 
+## 6) 前端補充（2026-03）
+
+以下為近期 Dashboard 前端層的重要更新：
+
+- i18n 雙語層：`web-dashboard/src/components/I18nProvider.tsx`
+  - 提供 `zh-TW / en` 語系切換與文字查詢（`t()`）
+  - 語系偏好儲存在 `localStorage`（`golem-locale`）
+- 首頁更新跑馬燈：`web-dashboard/src/app/dashboard/components/UpdateMarqueeNotice.tsx`
+  - 透過 `/api/system/update/check` 取得版本差異資訊
+  - 偵測到可更新時，以跑馬燈引導前往系統總表的一鍵更新區塊
+- 市場原文顯示策略：
+  - 技能市集：優先採用 `original_description` 與 `category_name.en`
+  - 人格市集：優先採用原文 `name / description / role` 欄位，避免語系覆蓋來源語意

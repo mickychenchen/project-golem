@@ -1,6 +1,6 @@
 # 🖥️ Project Golem Web Dashboard Guide
 
-> Last Updated: 2026-03-23  
+> Last Updated: 2026-03-24  
 > Tech Stack: Next.js + Tailwind CSS + Socket.io
 
 ## 1. How to Start
@@ -51,6 +51,38 @@ The central hub for managing Golem's capabilities:
 
 ---
 
+### 🎭 Persona Settings (`/dashboard/persona`)
+Template management and Persona Market page:
+- Manage local presets (create, edit, delete, search, categorize).
+- Browse market personas and apply with one click.
+- Fine-tune in the settings drawer, then save via **Save & Restart Window**.
+
+---
+
+### 🗂️ Prompt Pool (`/dashboard/prompt-pool`)
+Shortcut command management center:
+- Create, edit, and delete shortcut prompts.
+- View recent usage records and quick-copy actions.
+- Detect legacy conflicts and auto-repair in one click.
+
+---
+
+### 📈 Prompt Trends (`/dashboard/prompt-trends`)
+Visual analytics for prompt usage:
+- 14-day overall usage trend
+- 14-day single-shortcut trend
+- Shortcut ranking with period filters
+
+---
+
+### 📓 Bond Journal (`/dashboard/diary`)
+AI/User journal center:
+- Create user journal entries, AI journals, and AI thoughts.
+- One-click diary rotation with multi-tier summaries.
+- Backup, restore, and restore-preview workflows.
+
+---
+
 ### 👥 Agent Room (`/dashboard/agents`)
 **The visual interface for the InteractiveMultiAgent system**.
 - Configure the participating agent list (Name, Role, Personality).
@@ -91,7 +123,30 @@ System configuration and status monitoring:
 
 ---
 
-## 3. Backend APIs (`web-dashboard/server.js`)
+## 3. Recent Updates (2026-03-24)
+
+### 3.1 Global i18n (Traditional Chinese / English)
+- Added a language toggle in the dashboard sidebar.
+- Locale preference is persisted in browser storage (`localStorage`).
+- Core pages and key drawers/modals are now fully bilingual.
+
+### 3.2 Home Update Marquee (GitHub Update Signal)
+- The dashboard home checks `/api/system/update/check` periodically.
+- When the Git branch is behind or a newer version is available, an update marquee is shown.
+- The marquee includes a shortcut CTA to System Settings for one-click update.
+
+### 3.3 Skill/Persona Market Source-text Policy
+- Skill Market now prefers source fields (such as `original_description`, `category_name.en`).
+- Persona Market now prefers original `name / description / role` fields.
+- This keeps market content semantically faithful to upstream sources.
+
+### 3.4 Persona Apply Stability Fix
+- Fixed repeated form hydration overriding applied persona values.
+- Applying a market persona can now be edited and saved reliably.
+
+---
+
+## 4. Backend APIs (`web-dashboard/server.js`)
 
 | Route | Description |
 |------|------|
@@ -102,6 +157,15 @@ System configuration and status monitoring:
 | `GET /api/system/security/events` | Read security audit events |
 | `GET /api/golems` | Get Golem list |
 | `POST /api/chat` | Send a web chat message to Golem |
+| `GET /api/diary` | Read diary timeline (with rotation metadata) |
+| `POST /api/diary/rotate` | Force diary rotation (7-day raw retention + weekly/monthly/yearly summaries) |
+| `GET /api/diary/rotation/history` | Read diary rotation history |
+| `GET /api/diary/backups` | List available diary SQLite backups |
+| `GET /api/diary/backup/download?file=...` | Download a specific diary SQLite backup |
+| `POST /api/diary/backup` | Create a diary SQLite backup |
+| `POST /api/diary/backup/cleanup` | Trigger immediate cleanup for old diary backups |
+| `GET /api/diary/restore/preview?file=...` | Preview restore diff/risk before restore |
+| `POST /api/diary/restore` | Restore diary SQLite from a selected backup |
 | `GET /api/skills/export` | Export full skill book or a specific skill |
 | `POST /api/skills/import` | Import skill book from JSON/Markdown |
 | `GET /api/memory` | Read memory entries |
@@ -118,9 +182,22 @@ System configuration and status monitoring:
 - If `SYSTEM_OP_TOKEN` is set, sensitive operations additionally require `x-system-op-token`.
 - Uploads and attachment paths are validated with size and directory-boundary checks.
 
+### Diary Rotation Policy (Recommended)
+
+You can tune these in `.env`:
+
+- `DIARY_RAW_RETENTION_DAYS` (minimum 7)
+- `DIARY_WEEKLY_RETENTION_DAYS`
+- `DIARY_MONTHLY_RETENTION_DAYS`
+- `DIARY_ROTATE_MIN_INTERVAL_MS`
+- `DIARY_BACKUP_MAX_FILES`
+- `DIARY_BACKUP_RETENTION_DAYS`
+
+Diary storage now uses SQLite (WAL). Legacy `diary-book.json` is auto-migrated on first access.
+
 ---
 
-## 4. Multi-Agent Workflow
+## 5. Multi-Agent Workflow
 
 ```
 User Configuration:

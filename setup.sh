@@ -23,6 +23,7 @@ source "$LIB_DIR/ui_components.sh"
 source "$LIB_DIR/system_check.sh"
 source "$LIB_DIR/installer.sh"
 source "$LIB_DIR/docker_manager.sh"
+source "$LIB_DIR/headless_manager.sh"
 source "$LIB_DIR/menu_system.sh"
 
 # ─── Graceful Exit Trap ──────────────────────────────────
@@ -62,8 +63,19 @@ if [ "${1:-}" = "--magic" ]; then
     export GOLEM_MAGIC_MODE=true
 fi
 
-# Check basic dependencies first
-check_dependencies
+# Docker / Headless 指令允許在未安裝 Node.js 的主機上執行
+LIGHTWEIGHT_ONLY_MODE=false
+case "${1:-}" in
+    --docker|--headless-deploy|--headless-stop|--desktop-start|--desktop-stop|--desktop-status|--deploy-linux|--deploy-local|--deploy-docker|--deploy-auto|--status|--help|-h|--version)
+        LIGHTWEIGHT_ONLY_MODE=true
+        ;;
+esac
+
+if [ "$LIGHTWEIGHT_ONLY_MODE" = true ]; then
+    check_status
+else
+    check_dependencies
+fi
 
 case "${1:-}" in
     --magic)
@@ -88,6 +100,25 @@ case "${1:-}" in
     --init)      run_clean_init ;;
     --stop|--stop-all) stop_system ;;
     --docker)    launch_docker ;;
+    --desktop-start) headless_start_local_desktop ;;
+    --desktop-stop) headless_stop_local_desktop ;;
+    --desktop-status) headless_status_local_desktop ;;
+    --headless-deploy)
+        shift
+        deploy_mode="auto"
+        while [[ $# -gt 0 ]]; do
+            case "${1:-}" in
+                --docker) deploy_mode="docker" ;;
+                --local)  deploy_mode="local" ;;
+            esac
+            shift
+        done
+        headless_one_click_deploy "$deploy_mode"
+        ;;
+    --headless-stop) headless_one_click_stop ;;
+    --deploy-linux|--deploy-local) headless_one_click_deploy local ;;
+    --deploy-docker) headless_one_click_deploy docker ;;
+    --deploy-auto) headless_one_click_deploy auto ;;
     --doctor)    npm run doctor ;;
     --config)    step_check_env; config_wizard ;;
     --status)    print_status ;;
@@ -108,6 +139,14 @@ case "${1:-}" in
         echo "  --stop, --stop-all  關閉所有 Golem 與 Web Dashboard 程序"
         echo "  --config      啟動配置精靈 (Gemini Key / 系統選項)"
         echo "  --docker      使用 Docker 啟動系統"
+        echo "  --desktop-start   啟動 Linux 無桌面虛擬桌面 (Xvfb + noVNC)"
+        echo "  --desktop-stop    停止虛擬桌面服務"
+        echo "  --desktop-status  顯示虛擬桌面狀態"
+        echo "  --headless-deploy 一鍵 Headless 部署 (自動選 Docker/本機)"
+        echo "  --headless-stop   停止 Headless 部署服務 (Docker + 本機)"
+        echo "  --deploy-linux    Linux 本機一鍵安裝部署 (含 noVNC)"
+        echo "  --deploy-docker   Docker 一鍵安裝部署 (含 noVNC)"
+        echo "  --deploy-auto     自動判斷 Linux/Docker 一鍵部署"
         echo "  --doctor      執行系統環境自我診斷"
         echo "  --status      顯示系統狀態 (非互動)"
         echo "  --version     顯示版本號"
@@ -126,6 +165,10 @@ case "${1:-}" in
         echo "  ./setup.sh --start --bg     # 背景啟動"
         echo "  ./setup.sh --install        # 自動完整安裝"
         echo "  ./setup.sh --stop           # 關閉所有程序"
+        echo "  ./setup.sh --deploy-linux   # Linux 本機一鍵安裝部署"
+        echo "  ./setup.sh --deploy-docker  # Docker 一鍵安裝部署"
+        echo "  ./setup.sh --headless-deploy --docker  # Docker + noVNC 一鍵部署"
+        echo "  ./setup.sh --headless-deploy --local   # Linux 本機 + noVNC 一鍵部署"
         echo "  ./setup.sh --status         # 檢查狀態"
         echo ""
         exit 0

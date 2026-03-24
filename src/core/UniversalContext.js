@@ -10,6 +10,7 @@ class UniversalContext {
         this.event = event;
         this.instance = instance;
         this.isInteraction = platform === 'discord' && (event.isButton?.() || event.isCommand?.());
+        this._textOverride = null;
     }
 
     /**
@@ -110,8 +111,13 @@ class UniversalContext {
     }
 
     get text() {
+        if (typeof this._textOverride === 'string') return this._textOverride;
         if (this.platform === 'telegram') return this.event.text || this.event.caption || "";
         return this.event.content || "";
+    }
+
+    setTextOverride(text) {
+        this._textOverride = String(text || '');
     }
 
     async getAttachment() {

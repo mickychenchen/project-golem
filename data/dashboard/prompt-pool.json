@@ -1,0 +1,18 @@
+[
+  {
+    "id": "pp_mn43ys60_crftlajz",
+    "shortcut": "/test",
+    "prompt": "aaa",
+    "note": "",
+    "createdAt": "2026-03-24T04:22:10.199Z",
+    "updatedAt": "2026-03-24T04:22:10.199Z"
+  },
+  {
+    "id": "pp_mn42cgwp_mbkok5xf",
+    "shortcut": "/chinese",
+    "prompt": "幫我翻譯成中文",
+    "note": "",
+    "createdAt": "2026-03-24T03:36:49.561Z",
+    "updatedAt": "2026-03-24T03:36:49.561Z"
+  }
+]

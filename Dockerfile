@@ -39,6 +39,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxss1 \
     libxtst6 \
     lsb-release \
+    xvfb \
+    fluxbox \
+    x11vnc \
+    novnc \
+    websockify \
     wget \
     xdg-utils \
     && rm -rf /var/lib/apt/lists/*
@@ -94,9 +99,11 @@ COPY --from=builder /app/web-dashboard/public ./web-dashboard/public
 COPY --from=builder /app/web-dashboard/server.js ./web-dashboard/server.js
 COPY --from=builder /app/pw-browsers /app/pw-browsers
 COPY . .
+COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
 # Ensure golem_memory and logs directory exist and have correct permissions
 RUN mkdir -p golem_memory logs && \
+    chmod +x /usr/local/bin/docker-entrypoint.sh && \
     chown -R node:node /app
 
 # Switch to non-root user
@@ -108,6 +115,9 @@ EXPOSE 3000
 # Health check
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD curl -f http://localhost:3000/api/health || exit 1
+
+# Optional desktop stack (Xvfb + x11vnc + noVNC) is started by entrypoint when GOLEM_DESKTOP_MODE=true
+ENTRYPOINT ["docker-entrypoint.sh"]
 
 # Start the application
 CMD ["npm", "run", "dashboard"]

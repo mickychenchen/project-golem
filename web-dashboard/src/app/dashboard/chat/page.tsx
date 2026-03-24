@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef, useCallback, DragEvent, ClipboardEvent } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo, DragEvent, ClipboardEvent } from "react";
 import { useGolem } from "@/components/GolemContext";
 import { socket } from "@/lib/socket";
 import { User, Bot, Send, X, FileText, Paperclip, UploadCloud } from "lucide-react";
@@ -8,7 +8,8 @@ import { cn } from "@/lib/utils";
 import { Typewriter } from "@/components/Typewriter";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { apiGet, apiPost } from "@/lib/api-client";
+import { apiGet, apiPost, apiPostWrite } from "@/lib/api-client";
+import { useI18n } from "@/components/I18nProvider";
 
 interface ChatMessage {
     id: string;
@@ -37,6 +38,40 @@ interface CommandItem {
     options?: CommandOption[];
 }
 
+interface PromptShortcutItem {
+    id: string;
+    shortcut: string;
+    prompt: string;
+    note?: string;
+    recentUseCount?: number;
+    lastUsedAt?: string;
+}
+
+interface PromptPoolResponse {
+    success?: boolean;
+    items?: PromptShortcutItem[];
+    topUsedShortcuts?: Array<{
+        id: string;
+        shortcut: string;
+        note?: string;
+        recentUseCount?: number;
+        lastUsedAt?: string;
+    }>;
+}
+
+interface SuggestionItem {
+    key: string;
+    command: string;
+    description: string;
+    source: "command" | "prompt";
+    injectedPrompt?: string;
+}
+
+interface InjectedShortcutCandidate {
+    shortcut: string;
+    seedPrompt: string;
+}
+
 interface ChatActionButton {
     text: string;
     callback_data: string;
@@ -63,8 +98,36 @@ function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null;
 }
 
+function extractGolemReplyOnly(rawText: string): string {
+    const text = String(rawText || "").trim();
+    if (!text) return "";
+
+    const cleaned = text.replace(/^🤖\s*\[Golem\]\s*說:\s*/i, "").trim();
+    const hasTitanTags = /\[GOLEM_(MEMORY|ACTION|REPLY)\]/i.test(cleaned);
+    const replyMatch = cleaned.match(/\[GOLEM_REPLY\]([\s\S]*?)(?=\[\/?GOLEM_[A-Z]+\]|$)/i);
+
+    if (replyMatch && replyMatch[1]) {
+        return replyMatch[1].trim();
+    }
+
+    if (hasTitanTags) {
+        return "";
+    }
+
+    return cleaned;
+}
+
+function normalizeShortcutKey(input: string): string {
+    return String(input || "")
+        .trim()
+        .replace(/^((?:\/)?[a-z0-9_]{1,32})@[a-z0-9_]{3,}$/i, "$1")
+        .toLowerCase()
+        .replace(/^\/+/, "");
+}
+
 export default function DirectChatPage() {
     const { activeGolem } = useGolem();
+    const { t } = useI18n();
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [completedTypingMsgs, setCompletedTypingMsgs] = useState<Set<string>>(new Set());
     const [input, setInput] = useState("");
@@ -73,8 +136,30 @@ export default function DirectChatPage() {
     const [isDragging, setIsDragging] = useState(false);
     // Command suggestions state
     const [showSuggestions, setShowSuggestions] = useState(false);
-    const [filteredCommands, setFilteredCommands] = useState<CommandItem[]>([]);
+    const [filteredCommands, setFilteredCommands] = useState<SuggestionItem[]>([]);
     const [allCommands, setAllCommands] = useState<CommandItem[]>([]);
+    const [promptShortcuts, setPromptShortcuts] = useState<PromptShortcutItem[]>([]);
+    const [injectedShortcutCandidate, setInjectedShortcutCandidate] = useState<InjectedShortcutCandidate | null>(null);
+
+    const systemCommandSet = useMemo(() => {
+        const set = new Set<string>();
+        for (const item of allCommands) {
+            const command = normalizeShortcutKey(String(item.command || ""));
+            if (command) set.add(command);
+        }
+        return set;
+    }, [allCommands]);
+
+    const promptShortcutMap = useMemo(() => {
+        const map = new Map<string, PromptShortcutItem>();
+        for (const item of promptShortcuts) {
+            const key = normalizeShortcutKey(item.shortcut);
+            if (key && !map.has(key)) {
+                map.set(key, item);
+            }
+        }
+        return map;
+    }, [promptShortcuts]);
 
     useEffect(() => {
         const fetchCommands = async () => {
@@ -82,13 +167,31 @@ export default function DirectChatPage() {
                 const data = await apiGet<{ success?: boolean; commands?: CommandItem[] }>("/api/commands");
                 if (data.success && data.commands) {
                     setAllCommands(data.commands);
-                    setFilteredCommands(data.commands);
                 }
             } catch (err) {
                 console.error("Failed to fetch commands:", err);
             }
         };
         fetchCommands();
+    }, []);
+
+    useEffect(() => {
+        const fetchPromptPool = async () => {
+            try {
+                const data = await apiGet<PromptPoolResponse>("/api/prompt-pool");
+                if (Array.isArray(data.items)) {
+                    const sortedByUsage = [...data.items].sort((a, b) => {
+                        const countDiff = Number(b.recentUseCount || 0) - Number(a.recentUseCount || 0);
+                        if (countDiff !== 0) return countDiff;
+                        return String(a.shortcut || "").localeCompare(String(b.shortcut || ""));
+                    });
+                    setPromptShortcuts(sortedByUsage);
+                }
+            } catch (err) {
+                console.error("Failed to fetch prompt pool:", err);
+            }
+        };
+        fetchPromptPool();
     }, []);
     const [suggestionIndex, setSuggestionIndex] = useState(0);
     const suggestionListRef = useRef<HTMLDivElement>(null);
@@ -123,6 +226,11 @@ export default function DirectChatPage() {
                     sender = match[1];
                     content = match[2] || " ";
                     isSystem = !(sender === 'User' || sender === 'WebUser');
+                }
+
+                if (!isThinkingMessage && isSystem) {
+                    content = extractGolemReplyOnly(content);
+                    if (!content) return;
                 }
 
                 setMessages((prev) => {
@@ -174,18 +282,27 @@ export default function DirectChatPage() {
                             sender = match[1];
                             content = match[2] || " ";
                         }
+
+                        const isSystem = !(sender === 'User' || sender === 'WebUser');
+                        if (isSystem) {
+                            content = extractGolemReplyOnly(content);
+                        }
+
                         return {
                             id: h.time + Math.random().toString(),
                             sender,
                             content,
                             timestamp: h.time,
-                            isSystem: !(sender === 'User' || sender === 'WebUser'),
+                            isSystem,
                             actionData: h.actionData,
                             isHistory: true,
                             attachments: h.attachments
                                 ? h.attachments
                                 : (h.attachment ? [h.attachment] : undefined)
                         };
+                    }).filter((item) => {
+                        if (!item.isSystem) return true;
+                        return Boolean(item.content && item.content.trim());
                     });
 
                     setMessages(parsedHistory);
@@ -265,6 +382,11 @@ export default function DirectChatPage() {
         }
     }, [suggestionIndex, showSuggestions]);
 
+    useEffect(() => {
+        if (suggestionIndex < filteredCommands.length) return;
+        setSuggestionIndex(0);
+    }, [filteredCommands.length, suggestionIndex]);
+
     const handleDragEnter = (e: DragEvent<HTMLDivElement>) => {
         e.preventDefault();
         e.stopPropagation();
@@ -316,8 +438,36 @@ export default function DirectChatPage() {
     const handleSend = async () => {
         if ((!input.trim() && !selectedFile) || !activeGolem) return;
 
-        const val = input.trim();
+        const rawVal = input.trim();
+        const shortcutCandidate = injectedShortcutCandidate;
+        const expansion = (() => {
+            if (!rawVal) return "";
+            const tokens = rawVal.split(/\s+/);
+            const firstToken = tokens[0] || "";
+            const firstTokenKey = normalizeShortcutKey(firstToken);
+            const matched = firstTokenKey ? promptShortcutMap.get(firstTokenKey) : undefined;
+            if (firstToken.startsWith('/') && firstTokenKey && systemCommandSet.has(firstTokenKey)) {
+                return { text: rawVal, matchedShortcut: "" };
+            }
+            if (!matched) return { text: rawVal, matchedShortcut: "" };
+            const rest = tokens.slice(1).join(" ").trim();
+            if (!rest) return { text: matched.prompt, matchedShortcut: matched.shortcut };
+            return { text: `${matched.prompt}\n${rest}`, matchedShortcut: matched.shortcut };
+        })();
+        const val = typeof expansion === "string" ? expansion : expansion.text;
+        const matchedShortcut = typeof expansion === "string" ? "" : expansion.matchedShortcut;
+        const fallbackShortcut = (() => {
+            if (matchedShortcut) return "";
+            if (!shortcutCandidate) return "";
+            const seedPrompt = String(shortcutCandidate.seedPrompt || "").trim();
+            if (!seedPrompt) return "";
+            const inputForCheck = rawVal.trimStart();
+            if (!inputForCheck.startsWith(seedPrompt)) return "";
+            return String(shortcutCandidate.shortcut || "").trim();
+        })();
+        const trackShortcut = matchedShortcut || fallbackShortcut;
         setInput("");
+        setInjectedShortcutCandidate(null);
         setShowSuggestions(false);
         setIsSending(true);
 
@@ -344,6 +494,16 @@ export default function DirectChatPage() {
                 message: val,
                 attachment: attachmentInfo
             });
+
+            if (trackShortcut) {
+                apiPostWrite("/api/prompt-pool/track-use", {
+                    shortcut: trackShortcut,
+                    source: "web_dashboard",
+                    platform: "web",
+                }).catch((trackErr) => {
+                    console.warn("Failed to track prompt shortcut usage:", trackErr);
+                });
+            }
         } catch (e) {
             console.error("Failed to send message:", e);
         } finally {
@@ -351,48 +511,127 @@ export default function DirectChatPage() {
         }
     };
 
-    const handleCommandClick = (cmd: string) => {
-        setInput(cmd + " ");
+    const handleCommandClick = (item: SuggestionItem) => {
+        if (item.source === "prompt") {
+            const injectedPrompt = item.injectedPrompt || "";
+            setInput(injectedPrompt);
+            setInjectedShortcutCandidate({
+                shortcut: item.command,
+                seedPrompt: injectedPrompt,
+            });
+        } else {
+            setInput(item.command + " ");
+            setInjectedShortcutCandidate(null);
+        }
         setShowSuggestions(false);
     };
 
     const onInputChange = (val: string) => {
-        setInput(val);
-        if (val.startsWith('/')) {
-            const parts = val.split(/\s+/);
-            const cmdName = parts[0];
-            const arg = parts.length > 1 ? parts[1] : '';
+        const raw = String(val || "");
+        const trimmed = raw.trim();
 
-            // 如果有完全符合的頂層指令，且該指令有選項，且使用者已經輸入了空格
-            const exactCmd = allCommands.find(c => c.command.toLowerCase() === cmdName.toLowerCase());
+        if (!trimmed) {
+            setInput(raw);
+            setInjectedShortcutCandidate(null);
+            setShowSuggestions(false);
+            return;
+        }
 
-            if (exactCmd && exactCmd.options && val.includes(' ')) {
-                // 顯示選項
+        const parts = trimmed.split(/\s+/);
+        const token = parts[0] || "";
+        const startsWithSlash = token.startsWith('/');
+        const hasSpace = /\s/.test(trimmed);
+        const tokenKey = normalizeShortcutKey(token);
+        const exactPromptShortcut = (() => {
+            if (!startsWithSlash) return undefined;
+            const matched = promptShortcutMap.get(tokenKey);
+            if (!matched) return undefined;
+            if (tokenKey && systemCommandSet.has(tokenKey)) {
+                return undefined;
+            }
+            return matched;
+        })();
+
+        // 只輸入快捷指令後按空白，直接注入 prompt 到對話框輸入區
+        if (exactPromptShortcut && /\s$/.test(raw) && parts.length === 1) {
+            const injectedPrompt = `${exactPromptShortcut.prompt} `;
+            setInput(injectedPrompt);
+            setInjectedShortcutCandidate({
+                shortcut: exactPromptShortcut.shortcut,
+                seedPrompt: exactPromptShortcut.prompt,
+            });
+            setShowSuggestions(false);
+            return;
+        }
+
+        setInput(raw);
+        if (injectedShortcutCandidate) {
+            const seedPrompt = String(injectedShortcutCandidate.seedPrompt || "").trim();
+            const inputForCheck = raw.trimStart();
+            if (!seedPrompt || !inputForCheck.startsWith(seedPrompt)) {
+                setInjectedShortcutCandidate(null);
+            }
+        }
+
+        const promptSuggestions: SuggestionItem[] = !hasSpace && startsWithSlash
+            ? promptShortcuts
+                .filter((item) => {
+                    const shortcutKey = normalizeShortcutKey(item.shortcut);
+                    if (String(item.shortcut || "").startsWith('/') && systemCommandSet.has(shortcutKey)) {
+                        return false;
+                    }
+                    return shortcutKey.includes(tokenKey);
+                })
+                .slice(0, 20)
+                .map((item) => ({
+                    key: `prompt-${item.id}`,
+                    command: item.shortcut,
+                    description: item.note || item.prompt.replace(/\s+/g, " ").slice(0, 80) || t("chat.suggestion.promptInjectedFallback"),
+                    source: "prompt",
+                    injectedPrompt: item.prompt,
+                }))
+            : [];
+
+        const commandSuggestions: SuggestionItem[] = [];
+        if (startsWithSlash) {
+            const exactCmd = allCommands.find((c) => normalizeShortcutKey(c.command) === tokenKey);
+
+            if (exactCmd && exactCmd.options && raw.includes(' ')) {
+                const arg = parts.length > 1 ? parts[1] : '';
                 let options = exactCmd.options;
-                
-                // 動態加入目前的 Golem 作為選項 (針對需要 @username 的指令)
-                if (options.some(o => o.name === '@username') && activeGolem) {
-                    const dynamicOption = { name: `@${activeGolem}`, description: `針對目前的 ${activeGolem} 執行` };
-                    options = [dynamicOption, ...options.filter(o => o.name !== '@username')];
+
+                if (options.some((o) => o.name === '@username') && activeGolem) {
+                    const dynamicOption = { name: `@${activeGolem}`, description: t("chat.dynamicOptionForGolem", { golem: activeGolem }) };
+                    options = [dynamicOption, ...options.filter((o) => o.name !== '@username')];
                 }
 
-                const filteredOptions = options.filter(opt => opt.name.toLowerCase().includes(arg.toLowerCase()));
-                setFilteredCommands(filteredOptions.map(opt => ({
+                const filteredOptions = options
+                    .filter((opt) => opt.name.toLowerCase().includes(arg.toLowerCase()))
+                    .slice(0, 20);
+
+                commandSuggestions.push(...filteredOptions.map((opt) => ({
+                    key: `cmd-option-${exactCmd.command}-${opt.name}`,
                     command: `${exactCmd.command} ${opt.name}`,
-                    description: opt.description
+                    description: opt.description,
+                    source: "command" as const,
                 })));
-                setShowSuggestions(filteredOptions.length > 0);
-            } else {
-                // 顯示頂層指令
-                const filtered = allCommands.filter(c => c.command.toLowerCase().includes(cmdName.toLowerCase()));
-                setFilteredCommands(filtered);
-                // 只有在還沒輸入空格時才顯示頂層指令列表
-                setShowSuggestions(filtered.length > 0 && !val.includes(' '));
+            } else if (!raw.includes(' ')) {
+                const filtered = allCommands
+                    .filter((c) => normalizeShortcutKey(c.command).includes(tokenKey))
+                    .slice(0, 20);
+                commandSuggestions.push(...filtered.map((cmd) => ({
+                    key: `cmd-${cmd.command}`,
+                    command: cmd.command,
+                    description: cmd.description,
+                    source: "command" as const,
+                })));
             }
-            setSuggestionIndex(0);
-        } else {
-            setShowSuggestions(false);
         }
+
+        const nextSuggestions = [...promptSuggestions, ...commandSuggestions];
+        setFilteredCommands(nextSuggestions);
+        setShowSuggestions(nextSuggestions.length > 0);
+        setSuggestionIndex(0);
     };
 
     return (
@@ -400,10 +639,10 @@ export default function DirectChatPage() {
             <div className="flex justify-between items-center mb-6 flex-shrink-0">
                 <div>
                     <h2 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-primary to-blue-500">
-                        直接交談 (Direct Chat)
+                        {t("chat.title")}
                     </h2>
                     <p className="text-sm text-muted-foreground mt-1">
-                        與目前活躍的 Golem ({activeGolem || "未選擇"}) 進行對話測試。不須透過外部通訊軟體。
+                        {t("chat.subtitle", { golem: activeGolem || t("chat.noActiveGolem") })}
                     </p>
                 </div>
             </div>
@@ -413,7 +652,7 @@ export default function DirectChatPage() {
                 <div className="flex-1 overflow-y-auto p-4 space-y-4" ref={scrollRef}>
                     {messages.length === 0 ? (
                         <div className="flex items-center justify-center h-full text-muted-foreground/60 italic">
-                            請在下方輸入訊息開始交談...
+                            {t("chat.emptyState")}
                         </div>
                     ) : (
                         messages.map((msg, index) => {
@@ -476,14 +715,14 @@ export default function DirectChatPage() {
                                                             <FileText size={20} className="text-primary flex-shrink-0" />
                                                             <div className="overflow-hidden">
                                                                 <p className="text-[10px] text-muted-foreground truncate max-w-[150px]">{att.name || att.url.split('/').pop()}</p>
-                                                                <p className="text-[10px] text-primary/60 font-medium">點擊下載</p>
+                                                                <p className="text-[10px] text-primary/60 font-medium">{t("chat.download")}</p>
                                                             </div>
                                                         </a>
                                                     )
                                                 ))}
                                             </div>
                                         )}
-                                        {msg.isThinking ? "思考中..." : (msg.isSystem && !msg.isHistory ?
+                                        {msg.isThinking ? t("chat.thinking") : (msg.isSystem && !msg.isHistory ?
                                             <Typewriter content={msg.content.replace(/\n{2,}/g, '\n\n').trim()} onComplete={() => handleTypingComplete(msg.id)} />
                                             : (msg.isSystem ?
                                                 <div className="prose dark:prose-invert prose-sm max-w-none prose-p:m-0 prose-headings:my-1 prose-pre:my-1 prose-pre:bg-zinc-950 dark:prose-pre:bg-gray-950 prose-pre:border prose-pre:border-border dark:prose-pre:border-gray-800 prose-ul:list-disc prose-ul:ml-4 prose-ol:list-decimal prose-ol:ml-4 prose-li:m-0 leading-snug [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
@@ -545,8 +784,8 @@ export default function DirectChatPage() {
                             <div className="p-2 space-y-1">
                                 {filteredCommands.map((cmd, idx) => (
                                     <button
-                                        key={cmd.command}
-                                        onClick={() => handleCommandClick(cmd.command)}
+                                        key={cmd.key}
+                                        onClick={() => handleCommandClick(cmd)}
                                         onMouseEnter={() => setSuggestionIndex(idx)}
                                         className={cn(
                                             "w-full text-left p-2 rounded-lg transition-all duration-150 group",
@@ -560,7 +799,10 @@ export default function DirectChatPage() {
                                             )}>
                                                 {cmd.command}
                                             </span>
-                                            <span className="text-[10px] text-muted-foreground line-clamp-1 group-hover:line-clamp-none">
+                                            <span className="text-[10px] text-muted-foreground/80">
+                                                {cmd.source === "prompt" ? t("chat.suggestion.promptPool") : t("chat.suggestion.systemCommand")}
+                                            </span>
+                                            <span className="text-[10px] text-muted-foreground line-clamp-1 group-hover:line-clamp-none mt-0.5">
                                                 {cmd.description}
                                             </span>
                                         </div>
@@ -574,7 +816,7 @@ export default function DirectChatPage() {
                     {isDragging && (
                         <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 rounded-b-xl border-2 border-dashed border-primary/60 bg-primary/10 backdrop-blur-sm pointer-events-none">
                             <UploadCloud size={28} className="text-primary animate-bounce" />
-                            <p className="text-sm font-semibold text-primary">放開以上傳檔案</p>
+                            <p className="text-sm font-semibold text-primary">{t("chat.dragOverlay")}</p>
                         </div>
                     )}
 
@@ -601,7 +843,7 @@ export default function DirectChatPage() {
                             </button>
                             <div className="ml-3 pr-2">
                                 <p className="text-[10px] text-muted-foreground truncate max-w-[120px]">{selectedFile.name}</p>
-                                <p className="text-[10px] text-primary/60 font-medium">檔案已就緒</p>
+                                <p className="text-[10px] text-primary/60 font-medium">{t("chat.fileReady")}</p>
                             </div>
                         </div>
                     )}
@@ -618,7 +860,7 @@ export default function DirectChatPage() {
                             onClick={() => fileInputRef.current?.click()}
                             disabled={!activeGolem || isSending}
                             className="p-2.5 rounded-lg bg-secondary/80 border border-border text-muted-foreground hover:text-primary hover:bg-secondary transition-all"
-                            title="上傳附件（或將檔案拖曳至此）"
+                            title={t("chat.uploadTitle")}
                         >
                             <Paperclip size={20} />
                         </button>
@@ -626,11 +868,17 @@ export default function DirectChatPage() {
                         <div className="relative flex-1 flex items-center">
                             <textarea
                                 className="flex-1 max-h-32 min-h-[44px] bg-secondary/50 border border-border rounded-lg px-4 py-3 pr-12 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/50 resize-none transition-all"
-                                placeholder={activeGolem ? `傳送訊息給 ${activeGolem}… 可拖曳或 ⌘V 貼入圖片` : "請先選擇一個 Golem..."}
+                                placeholder={activeGolem
+                                    ? t("chat.placeholder.withGolem", { golem: activeGolem })
+                                    : t("chat.placeholder.noGolem")}
                                 value={input}
                                 onChange={(e) => onInputChange(e.target.value)}
                                 onKeyDown={(e) => {
                                     if (showSuggestions) {
+                                        if (filteredCommands.length === 0) {
+                                            setShowSuggestions(false);
+                                            return;
+                                        }
                                         if (e.key === 'ArrowDown') {
                                             e.preventDefault();
                                             setSuggestionIndex((prev) => (prev + 1) % filteredCommands.length);
@@ -643,7 +891,7 @@ export default function DirectChatPage() {
                                         }
                                         if (e.key === 'Enter' || e.key === 'Tab') {
                                             e.preventDefault();
-                                            handleCommandClick(filteredCommands[suggestionIndex].command);
+                                            handleCommandClick(filteredCommands[suggestionIndex]);
                                             return;
                                         }
                                         if (e.key === 'Escape') {
@@ -654,6 +902,26 @@ export default function DirectChatPage() {
                                     }
 
                                     if (e.key === 'Enter' && !e.shiftKey) {
+                                        const rawInput = input.trim();
+                                        if (rawInput) {
+                                            const maybeShortcut = rawInput.split(/\s+/)[0].toLowerCase();
+                                            if (maybeShortcut.startsWith('/') && systemCommandSet.has(maybeShortcut)) {
+                                                e.preventDefault();
+                                                handleSend();
+                                                return;
+                                            }
+                                            const shortcutItem = promptShortcutMap.get(maybeShortcut);
+                                            if (shortcutItem && rawInput.toLowerCase() === maybeShortcut) {
+                                                e.preventDefault();
+                                                setInput(shortcutItem.prompt);
+                                                setInjectedShortcutCandidate({
+                                                    shortcut: shortcutItem.shortcut,
+                                                    seedPrompt: shortcutItem.prompt,
+                                                });
+                                                setShowSuggestions(false);
+                                                return;
+                                            }
+                                        }
                                         e.preventDefault();
                                         handleSend();
                                     }

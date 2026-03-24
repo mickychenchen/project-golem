@@ -136,6 +136,18 @@ chmod +x setup.sh
 ./setup.sh --start
 ```
 
+**🖥️ VPS / 無桌面環境（Headless + noVNC）**
+```bash
+# Docker 一鍵安裝部署（含 noVNC）
+./setup.sh --deploy-docker
+
+# Linux 本機一鍵安裝部署（含 noVNC）
+./setup.sh --deploy-linux
+
+# 停止 headless 服務
+./setup.sh --headless-stop
+```
+
 **🔐 建議設定（純 Playwright + 安全）**
 ```env
 GOLEM_MEMORY_MODE=lancedb-pro
@@ -242,6 +254,37 @@ project-golem/
 * **傳統模式 (無壓縮)**: ~18,250 檔案 / 500 MB+
 * **Golem 金字塔**: **~277 檔案 / 3 MB**
 
+### 📓 日記 Rotate（7 天保留 + 週/月/年摘要）
+
+Dashboard 的「繼絆日記」已支援自動分層整理：
+
+1. **原始日記（Tier 0）**：至少保留最近 7 天完整內容。
+2. **週摘要（Tier 1）**：超過 7 天後自動彙整為週摘要，並清理對應原文。
+3. **月摘要（Tier 2）**：由週摘要再壓縮成月摘要。
+4. **年摘要（Tier 3）**：由月摘要再壓縮成年摘要。
+
+日記資料已採用 **SQLite (WAL)** 儲存（每個 Golem 一個 DB），首次啟動會自動從舊版 `diary-book.json` 遷移。
+
+可透過 `.env` 調整策略：
+
+```env
+DIARY_RAW_RETENTION_DAYS=7
+DIARY_WEEKLY_RETENTION_DAYS=365
+DIARY_MONTHLY_RETENTION_DAYS=1825
+DIARY_ROTATE_MIN_INTERVAL_MS=300000
+DIARY_BACKUP_MAX_FILES=120
+DIARY_BACKUP_RETENTION_DAYS=180
+```
+
+也可透過 API 手動觸發：
+- `POST /api/diary/rotate`
+- `GET /api/diary/rotation/history`
+- `GET /api/diary/backup/download?file=...`
+- `POST /api/diary/backup`
+- `POST /api/diary/backup/cleanup`
+- `GET /api/diary/restore/preview?file=...`
+- `POST /api/diary/restore`
+
 ---
 
 ---
@@ -257,6 +300,7 @@ project-golem/
 | [🏗️ 架構治理規範](infra/architecture/README.md) | 分層邊界規則與 `arch:check` 自動檢查 |
 | [🔌 MCP 使用與開發指南](docs/MCP-使用與開發指南.md) | **[最新]** 如何安裝、配置與調用 MCP Server (含 Hacker News 範例) |
 | [🧠 記憶系統架構說明](docs/記憶系統架構說明.md) | 金字塔壓縮原理與存放路徑解析 |
+| [🖥️ VPS Headless + VNC 指南](docs/VPS_VNC_Setup_Guide.md) | 無桌面 Linux / Docker 的 noVNC 一鍵部署 |
 | [🖥️ Web Dashboard 使用說明](docs/Web-Dashboard-使用說明.md) | Web UI 各個分頁的延伸細節 |
 | [🛠️ 開發者實作指南](docs/開發者實作指南.md) | 如何實作新的 Skill 與 Golem Protocol 格式規範 |
 | [🎮 完整指令說明一覽表](docs/golem指令說明一覽表.md) | Telegram / Discord 指令速查 |
