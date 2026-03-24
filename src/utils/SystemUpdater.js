@@ -3,6 +3,94 @@ const path = require('path');
 const { execSync } = require('child_process');
 
 class SystemUpdater {
+    static GIT_FETCH_COOLDOWN_MS = 5 * 60 * 1000;
+    static _lastGitFetchAt = 0;
+
+    static _isInterruptedError(error) {
+        return !!(error && (error.signal === 'SIGINT' || error.signal === 'SIGTERM'));
+    }
+
+    static async _exec(command, options = {}) {
+        const util = require('util');
+        const exec = util.promisify(require('child_process').exec);
+        return exec(command, { maxBuffer: 1024 * 1024 * 20, timeout: 120000, ...options });
+    }
+
+    static _splitLines(output) {
+        return String(output || '')
+            .split('\n')
+            .map(s => s.trim())
+            .filter(Boolean);
+    }
+
+    static async _fetchGitMetadata(rootDir) {
+        const now = Date.now();
+        const shouldFetch = now - this._lastGitFetchAt >= this.GIT_FETCH_COOLDOWN_MS;
+
+        if (shouldFetch) {
+            try {
+                await this._exec('git fetch --all --prune --quiet', { cwd: rootDir });
+                this._lastGitFetchAt = Date.now();
+            } catch (e) {
+                if (this._isInterruptedError(e)) {
+                    // 常見於使用者觸發 reload/shutdown 或終端 Ctrl+C；屬於預期中斷。
+                    console.warn(`[SystemUpdater] git fetch interrupted (${e.signal || 'UNKNOWN_SIGNAL'})`);
+                } else {
+                    console.warn(`[SystemUpdater] git fetch failed, fallback to local refs: ${e.message}`);
+                }
+            }
+        }
+
+        const { stdout: branchOut } = await this._exec('git rev-parse --abbrev-ref HEAD', { cwd: rootDir });
+        const currentBranch = branchOut.trim();
+
+        const { stdout: currentCommitOut } = await this._exec('git log -1 --format="%h - %s (%cr)"', { cwd: rootDir });
+        const currentCommit = currentCommitOut.trim();
+
+        const { stdout: rbOut } = await this._exec('git branch -r', { cwd: rootDir });
+        const remoteBranches = this._splitLines(rbOut);
+
+        const { stdout: rOut } = await this._exec('git remote', { cwd: rootDir });
+        const remotesList = this._splitLines(rOut);
+        const priorityRemotes = ['upstream', 'origin', ...remotesList.filter(r => r !== 'upstream' && r !== 'origin')];
+
+        let targetRemote = 'origin';
+        let foundMatch = false;
+        for (const r of priorityRemotes) {
+            if (remoteBranches.includes(`${r}/${currentBranch}`)) {
+                targetRemote = r;
+                foundMatch = true;
+                break;
+            }
+        }
+
+        let latestCommit = 'N/A';
+        let behindCount = 0;
+
+        if (foundMatch) {
+            try {
+                const targetRef = `${targetRemote}/${currentBranch}`;
+                const { stdout: latestCommitOut } = await this._exec(`git log ${targetRef} -1 --format="%h - %s (%cr)"`, { cwd: rootDir });
+                latestCommit = latestCommitOut.trim();
+
+                const { stdout: behindOut } = await this._exec(`git rev-list HEAD..${targetRef} --count`, { cwd: rootDir });
+                behindCount = parseInt(behindOut.trim(), 10) || 0;
+            } catch (err) {
+                latestCommit = '解析遠端資訊失敗';
+            }
+        } else {
+            latestCommit = '無法在任何遠端找到匹配的分支';
+        }
+
+        return {
+            currentBranch,
+            currentCommit,
+            latestCommit,
+            behindCount,
+            targetRemote: foundMatch ? targetRemote : null
+        };
+    }
+
     static async checkEnvironment() {
         const rootDir = process.cwd();
         const packageJsonPath = path.join(rootDir, 'package.json');
@@ -29,66 +117,13 @@ class SystemUpdater {
 
         if (isGit) {
             try {
-                const util = require('util');
-                const exec = util.promisify(require('child_process').exec);
-
-                // 1. Fetch from all remotes to get latest metadata
-                await exec('git fetch --all', { cwd: rootDir });
-
-                // 2. Identify current branch
-                const { stdout: branchOut } = await exec('git rev-parse --abbrev-ref HEAD', { cwd: rootDir });
-                const currentBranch = branchOut.trim();
-
-                // 3. Get current commit info
-                const { stdout: currentCommitOut } = await exec('git log -1 --format="%h - %s (%cr)"', { cwd: rootDir });
-                const currentCommit = currentCommitOut.trim();
-
-                // 4. Traverse all remotes to find matching branch
-                const { stdout: rbOut } = await exec('git branch -r', { cwd: rootDir });
-                const remoteBranches = rbOut.trim().split('\n').map(b => b.trim());
-
-                const { stdout: rOut } = await exec('git remote', { cwd: rootDir });
-                const remotesList = rOut.trim().split('\n');
-
-                const priorityRemotes = ['upstream', 'origin', ...remotesList.filter(r => r !== 'upstream' && r !== 'origin')];
-
-                let targetRemote = 'origin';
-                let foundMatch = false;
-                for (const r of priorityRemotes) {
-                    if (remoteBranches.includes(`${r}/${currentBranch}`)) {
-                        targetRemote = r;
-                        foundMatch = true;
-                        break;
-                    }
-                }
-
-                let latestCommit = 'N/A';
-                let behindCount = 0;
-
-                if (foundMatch) {
-                    try {
-                        const targetRef = `${targetRemote}/${currentBranch}`;
-                        const { stdout: latestCommitOut } = await exec(`git log ${targetRef} -1 --format="%h - %s (%cr)"`, { cwd: rootDir });
-                        latestCommit = latestCommitOut.trim();
-
-                        const { stdout: behindOut } = await exec(`git rev-list HEAD..${targetRef} --count`, { cwd: rootDir });
-                        behindCount = parseInt(behindOut.trim(), 10) || 0;
-                    } catch (err) {
-                        latestCommit = '解析遠端資訊失敗';
-                    }
-                } else {
-                    latestCommit = '無法在任何遠端找到匹配的分支';
-                }
-
-                gitInfo = {
-                    currentBranch,
-                    currentCommit,
-                    latestCommit,
-                    behindCount,
-                    targetRemote: foundMatch ? targetRemote : null
-                };
+                gitInfo = await this._fetchGitMetadata(rootDir);
             } catch (e) {
-                console.error("[SystemUpdater] Failed to get git info", e);
+                if (this._isInterruptedError(e)) {
+                    console.warn(`[SystemUpdater] Git info collection interrupted (${e.signal || 'UNKNOWN_SIGNAL'})`);
+                } else {
+                    console.error("[SystemUpdater] Failed to get git info", e);
+                }
             }
         }
 
