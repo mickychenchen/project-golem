@@ -1,6 +1,6 @@
-# 🦞 Golem Web Dashboard v2.0 (Cyber-Noir Edition)
+# 🦞 Golem Web Dashboard v2.1
 
-這是 Project Golem 的官方 Web 控制面板，基於 Next.js 15 與 Tailwind CSS 4 構建。提供實時監控、Agent 會議觀察與多模態互動介面。
+這是 Project Golem 的官方 Web 控制面板，基於 Next.js 16 與 Tailwind CSS 4 構建。提供實時監控、Agent 會議觀察與多模態互動介面。
 
 ## 🌟 核心功能
 
@@ -9,6 +9,8 @@
 -   **隊列交通 (Traffic Control)**: 即時觀察訊息處理流程與 Agent 協作狀態。
 -   **神經日誌 (Neuro-Link Stream)**: 支援過濾與分類的全域日誌流。
 -   **多智能體監控**: 專屬的互動式多 Agent 會議頻道。
+-   **技能書備份匯入/匯出**: 支援匯出整本技能書、單一技能檔案，並可從 `.md/.json` 透過預覽與衝突策略快速還原。
+-   **安全強化**: 遠端登入 Session、操作防護（`SYSTEM_OP_TOKEN`）、API rate limit、上傳邊界檢查。
 
 ## 🚀 快速啟動
 
@@ -42,6 +44,10 @@ npm run dev
 您可以透過根目錄的 `.env` 檔案調整埠號：
 ```env
 DASHBOARD_PORT=3000
+ALLOW_REMOTE_ACCESS=false
+# 若開啟遠端存取，建議一併設定：
+# REMOTE_ACCESS_PASSWORD=your-strong-password
+# SYSTEM_OP_TOKEN=your-operation-token
 ```
 
 ---

@@ -45,7 +45,7 @@ async function verifyFullRestart() {
         }
 
         // 5. Verify Protocol Cache Clear (it should be updated recently)
-        const ProtocolFormatter = require('../src/services/ProtocolFormatter');
+        const { ProtocolFormatter } = require('../packages/protocol');
         const now = Date.now();
         if (ProtocolFormatter._lastScanTime > now - 5000) {
             console.log(`✅ Protocol Cache Refreshed (lastScanTime is recent: ${ProtocolFormatter._lastScanTime}).`);

@@ -1,4 +1,4 @@
-const NeuroShunter = require('../src/core/NeuroShunter');
+const { NeuroShunter } = require('../packages/protocol');
 const ResponseParser = require('../src/utils/ResponseParser');
 const MultiAgentHandler = require('../src/core/action_handlers/MultiAgentHandler');
 const SkillHandler = require('../src/core/action_handlers/SkillHandler');
@@ -41,7 +41,7 @@ describe('NeuroShunter', () => {
         expect(mockBrain.memorize).toHaveBeenCalledWith('User likes apples', { type: 'fact', timestamp: expect.any(Number) });
     });
 
-    test('dispatch suppresses reply if options.suppressReply is true', async () => {
+    test('dispatch auto-unsuppresses reply if suppressReply is true but no actions remain', async () => {
         ResponseParser.parse.mockReturnValue({
             reply: 'Hello there',
             actions: []
@@ -49,7 +49,7 @@ describe('NeuroShunter', () => {
 
         await NeuroShunter.dispatch(mockCtx, 'raw', mockBrain, mockController, { suppressReply: true });
 
-        expect(mockCtx.reply).not.toHaveBeenCalled();
+        expect(mockCtx.reply).toHaveBeenCalledWith('Hello there');
     });
 
     test('dispatch overrides suppressReply if [INTERVENE] is present in raw text', async () => {
@@ -116,7 +116,7 @@ describe('NeuroShunter', () => {
         expect(CommandHandler.execute).toHaveBeenCalled();
     });
 
-    test('dispatch skips actions if suppressReply is true and no INTERVENE', async () => {
+    test('dispatch still executes actions when suppressReply is true and actions exist', async () => {
         ResponseParser.parse.mockReturnValue({
             reply: '',
             actions: [{ action: 'command' }]
@@ -125,7 +125,7 @@ describe('NeuroShunter', () => {
         await NeuroShunter.dispatch(mockCtx, 'raw', mockBrain, mockController, { suppressReply: true });
 
         expect(MultiAgentHandler.execute).not.toHaveBeenCalled();
-        expect(SkillHandler.execute).not.toHaveBeenCalled();
-        expect(CommandHandler.execute).not.toHaveBeenCalled();
+        expect(SkillHandler.execute).toHaveBeenCalled();
+        expect(CommandHandler.execute).toHaveBeenCalled();
     });
 });

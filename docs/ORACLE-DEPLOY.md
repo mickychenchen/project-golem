@@ -77,7 +77,7 @@ Oracle Cloud VM (ARM64, Always Free)
 ├── Docker
 │   └── golem-core container
 │       ├── Node.js 20 + Chromium (ARM64)
-│       ├── Puppeteer (headless browser)
+│       ├── Playwright (headless browser)
 │       ├── Telegram Bot integration
 │       ├── Web Dashboard (Next.js :3000)
 │       └── 16 Skill Libraries
@@ -113,7 +113,11 @@ nano .env && sudo docker compose restart
 | `ADMIN_ID` | Yes | Your Telegram user ID |
 | `DASHBOARD_PORT` | No | Dashboard port (default: 3000) |
 | `DISCORD_TOKEN` | No | Discord bot token |
-| `GOLEM_MEMORY_MODE` | No | `browser` (default) or `qmd` |
+| `GOLEM_MEMORY_MODE` | No | `lancedb-pro` (default), `native`, or `system` |
+| `PLAYWRIGHT_STEALTH_ENABLED` | No | Playwright anti-detection hardening (`true` by default) |
+| `ALLOW_REMOTE_ACCESS` | No | Allow remote dashboard access (`false` by default) |
+| `REMOTE_ACCESS_PASSWORD` | No | Password for remote dashboard login (recommended when remote enabled) |
+| `SYSTEM_OP_TOKEN` | No | Extra token for sensitive operations (restart/shutdown/config write) |
 
 ## Troubleshooting
 

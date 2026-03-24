@@ -31,6 +31,18 @@ interface OfficeItem {
 
 type Message = ChatMessage; // Alias for clarity with the snippet
 
+type OfficeLogPayload = {
+    msg?: string;
+    raw?: string;
+    cleanMsg?: string;
+};
+
+function isOfficeLogPayload(payload: unknown): payload is OfficeLogPayload {
+    if (!payload || typeof payload !== "object") return false;
+    const data = payload as Record<string, unknown>;
+    return typeof data.msg === "string" || typeof data.raw === "string" || typeof data.cleanMsg === "string";
+}
+
 const DEFAULT_LAYOUT: OfficeItem[] = [
     // Characters
     { id: 'user', type: 'character', name: 'user', src: '/characters/user.png', x: 8, y: 75, zIndex: 40, team: 'all', width: 192, height: 192 },
@@ -93,7 +105,9 @@ export default function OfficePage() {
     }, [messageHistory]);
 
     useEffect(() => {
-        const handleLog = (logData: any) => {
+        const handleLog = (payload: unknown) => {
+            if (!isOfficeLogPayload(payload)) return;
+            const logData = payload;
             if (!logData || (!logData.msg && !logData.raw)) return;
             const text = logData.cleanMsg || logData.msg || logData.raw;
             if (!text) return;
@@ -145,9 +159,10 @@ export default function OfficePage() {
         };
 
         socket.on("log", handleLog);
+        const timers = timersRef.current;
         return () => {
             socket.off("log", handleLog);
-            Object.values(timersRef.current).forEach(t => t && clearTimeout(t));
+            Object.values(timers).forEach((timer) => timer && clearTimeout(timer));
         };
     }, []);
 
@@ -205,6 +220,7 @@ export default function OfficePage() {
                                 height: item.height,
                             }}
                         >
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img
                                 src={item.src}
                                 alt={item.name}

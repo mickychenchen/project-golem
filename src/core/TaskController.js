@@ -1,6 +1,6 @@
 const { v4: uuidv4 } = require('uuid');
 const Executor = require('./Executor');
-const SecurityManager = require('../managers/SecurityManager');
+const { SecurityManager } = require('../../packages/security');
 const ToolScanner = require('../managers/ToolScanner');
 const InteractiveMultiAgent = require('./InteractiveMultiAgent');
 
@@ -16,7 +16,7 @@ class TaskController {
         this.pendingTasks = new Map(); // Moved from global to here
 
         // ✨ [v9.1] 防止記憶體流失: 定期清理過期的待審批任務 (5 分鐘)
-        setInterval(() => {
+        this._cleanupTimer = setInterval(() => {
             const now = Date.now();
             for (const [id, task] of this.pendingTasks.entries()) {
                 if (now - task.timestamp > 5 * 60 * 1000) {
@@ -24,6 +24,13 @@ class TaskController {
                 }
             }
         }, 60 * 1000);
+    }
+
+    destroy() {
+        if (this._cleanupTimer) {
+            clearInterval(this._cleanupTimer);
+            this._cleanupTimer = null;
+        }
     }
 
     // ✨ [v9.1] 處理多 Agent 請求
@@ -87,6 +94,11 @@ class TaskController {
                 const toolName = cmdToRun.split(' ')[1];
                 reportBuffer.push(toolName ? `🔍 [ToolCheck] ${ToolScanner.check(toolName)}` : `⚠️ 缺少參數`);
                 continue;
+            }
+            const evaluatedLevel = this.security.evaluateCommandLevel(cmdToRun);
+            if (evaluatedLevel > SecurityManager.currentLevel) {
+                console.log(`⛔ [TaskController] 指令風險等級 (L${evaluatedLevel}) 大於當前安全設定 (L${SecurityManager.currentLevel}): ${cmdToRun}`);
+                return `⛔ 安全攔截：該指令風險等級為 L${evaluatedLevel}，但系統目前僅允許執行 L${SecurityManager.currentLevel} (含) 以下的指令。\n請管理員使用 \`/level ${evaluatedLevel}\` 暫時調高權限後重試。`;
             }
             if (risk.level === 'BLOCKED') {
                 console.log(`⛔ [TaskController] 指令被系統攔截: ${cmdToRun}`);

@@ -2,14 +2,14 @@
 // 🎯 PageInteractor - Gemini 頁面 DOM 互動引擎 (抗 UI 改版強化版 v9.1.5)
 // ============================================================
 const { TIMINGS, LIMITS } = require('./constants');
-const ResponseExtractor = require('./ResponseExtractor');
+const { ResponseExtractor } = require('../../packages/protocol');
 
 // 共用的按鈕偵測關鍵字 (供 autoClick 快速點擊使用)
 const WORKSPACE_SAVE_KEYWORDS = ['儲存活動', '儲存', '建立', '建立活動', 'Save event', 'Save', 'Create'];
 
 class PageInteractor {
     /**
-     * @param {import('puppeteer').Page} page - Puppeteer 頁面實例
+     * @param {import('playwright').Page} page - Playwright 頁面實例
      * @param {import('../services/DOMDoctor')} doctor - DOM 修復服務
      */
     constructor(page, doctor) {
@@ -102,7 +102,8 @@ class PageInteractor {
 
             return {
                 text: ResponseExtractor.cleanResponse(finalResponse.text, startTag, endTag),
-                attachments: finalResponse.attachments || []
+                attachments: finalResponse.attachments || [],
+                status: finalResponse.status
             };
 
         } catch (e) {
@@ -213,6 +214,9 @@ class PageInteractor {
 
         // 1. 先使用 page.focus 確保焦點在輸入框上
         try {
+            if (typeof this.page.focus === 'function') {
+                await this.page.focus(targetSelector);
+            }
             await inputEl.scrollIntoViewIfNeeded(); // [Playwright 強化] 確保在可視區域
             await inputEl.click({ delay: 50 });    // [強化] 點擊一下以確保真實 Focus
             await inputEl.focus();

@@ -1,7 +1,7 @@
 // ============================================================
 // 🔍 ResponseExtractor - 回應信封擷取與清理
 // ============================================================
-const { TIMINGS, LIMITS } = require('./constants');
+const { TIMINGS, LIMITS } = require('../../src/core/constants');
 
 class ResponseExtractor {
     /**

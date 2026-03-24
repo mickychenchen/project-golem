@@ -1,7 +1,8 @@
 const fs = require('fs');
 const path = require('path');
-const KeyChain = require('../services/KeyChain');
-const { CONFIG, KNOWLEDGE_BASE_DIR } = require('../config');
+const KeyChain = require('../../src/services/KeyChain');
+const OllamaClient = require('../../src/services/OllamaClient');
+const { CONFIG, KNOWLEDGE_BASE_DIR } = require('../../src/config');
 
 // ✨ 快取 Jiti 實例，避免重複初始化開銷
 let cachedJiti = null;
@@ -19,9 +20,19 @@ class LanceDBProDriver {
         this.store = null;
         this.retriever = null;
         this.embedder = null;
+        this.ollamaClient = null;
     }
 
     async init() {
+        if (this._initPromise) return this._initPromise;
+        this._initPromise = this._doInit().catch(e => {
+            this._initPromise = null;
+            throw e;
+        });
+        return this._initPromise;
+    }
+
+    async _doInit() {
         if (!fs.existsSync(this.baseDir)) fs.mkdirSync(this.baseDir, { recursive: true });
 
         // Use jiti to load memory-lancedb-pro components from sub-modules
@@ -80,13 +91,15 @@ class LanceDBProDriver {
                 limit,
                 source: "manual"
             });
-            
-            return results.map(r => ({
+
+            const normalized = results.map(r => ({
                 text: r.entry.text,
                 score: r.score,
-                metadata: JSON.parse(r.entry.metadata || '{}'),
+                metadata: this._safeParseMetadata(r.entry.metadata),
                 timestamp: r.entry.timestamp
             }));
+
+            return await this._maybeRerank(query, normalized, limit);
         } catch (e) {
             console.warn("⚠️ [Memory:Pro] Recall error:", e.message);
             return [];
@@ -142,6 +155,65 @@ class LanceDBProDriver {
             return { success: true, count: list.length };
         } catch (e) {
             return { success: false, error: e.message };
+        }
+    }
+
+    _safeParseMetadata(raw) {
+        if (!raw) return {};
+        if (typeof raw === 'object') return raw;
+        try {
+            return JSON.parse(raw);
+        } catch (e) {
+            return {};
+        }
+    }
+
+    _getOllamaClient() {
+        if (!this.ollamaClient) {
+            this.ollamaClient = new OllamaClient({
+                baseUrl: CONFIG.OLLAMA_BASE_URL,
+                timeoutMs: CONFIG.OLLAMA_TIMEOUT_MS
+            });
+        }
+        return this.ollamaClient;
+    }
+
+    async _maybeRerank(query, results, limit) {
+        const rerankModel = String(CONFIG.OLLAMA_RERANK_MODEL || '').trim();
+        if (!rerankModel || results.length === 0) return results.slice(0, limit);
+
+        try {
+            const reranked = await this._getOllamaClient().rerank(query, results.map(item => item.text), {
+                model: rerankModel,
+                embeddingFallbackModel: CONFIG.OLLAMA_EMBEDDING_MODEL
+            });
+
+            if (!Array.isArray(reranked) || reranked.length === 0) {
+                return results.slice(0, limit);
+            }
+
+            const ordered = [];
+            const seen = new Set();
+
+            for (const item of reranked) {
+                if (!Number.isInteger(item.index)) continue;
+                if (item.index < 0 || item.index >= results.length) continue;
+                if (seen.has(item.index)) continue;
+                seen.add(item.index);
+                ordered.push({
+                    ...results[item.index],
+                    score: Number(item.score) || results[item.index].score
+                });
+            }
+
+            for (let i = 0; i < results.length; i += 1) {
+                if (!seen.has(i)) ordered.push(results[i]);
+            }
+
+            return ordered.slice(0, limit);
+        } catch (e) {
+            console.warn(`⚠️ [Memory:Pro] Ollama rerank failed, fallback to original ranking: ${e.message}`);
+            return results.slice(0, limit);
         }
     }
 }

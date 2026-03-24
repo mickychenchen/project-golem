@@ -1,4 +1,4 @@
-const ProtocolFormatter = require('../src/services/ProtocolFormatter');
+const { ProtocolFormatter } = require('../packages/protocol');
 const ConfigManager = require('../src/config');
 
 async function runTest() {

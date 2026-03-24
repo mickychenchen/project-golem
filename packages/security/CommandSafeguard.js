@@ -39,7 +39,7 @@ class CommandSafeguard {
 
         // 1. 檢查絕對禁止的破壞性操作 (可經由環境變數或核准跳過)
         const isStrict = process.env.GOLEM_STRICT_SAFEGUARD !== 'false';
-        
+
         if (!skipWhitelist && isStrict) {
             for (const op of this.dangerousOps) {
                 if (trimmedCmd.includes(op)) {
@@ -69,8 +69,15 @@ class CommandSafeguard {
             return { safe: true, sanitizedCmd: trimmedCmd };
         }
 
-        // 4. ✨ [v9.1] 整合自適應白名單 (與 SecurityManager 同步)
-        const userWhitelist = (process.env.COMMAND_WHITELIST || "")
+        // 4. ✨ [v9.1] 整合 L0-L3 分級與自適應白名單
+        const SecurityManager = require('./SecurityManager');
+        const sm = new SecurityManager();
+        const evaluatedLevel = sm.evaluateCommandLevel(trimmedCmd);
+        if (evaluatedLevel > SecurityManager.currentLevel) {
+            return { safe: false, reason: `指令風險等級 (L${evaluatedLevel}) 大於當前安全設定 (L${SecurityManager.currentLevel})` };
+        }
+
+        const userWhitelist = (process.env.COMMAND_WHITELIST || '')
             .split(',')
             .map(c => c.trim())
             .filter(c => c.length > 0);

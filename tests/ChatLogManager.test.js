@@ -1,220 +1,170 @@
 const fs = require('fs');
-const path = require('path');
-const ChatLogManager = require('../src/managers/ChatLogManager');
 
-jest.mock('fs');
-jest.mock('path', () => {
-    const actualPath = jest.requireActual('path');
-    return {
-        ...actualPath,
-        join: jest.fn((...args) => actualPath.join(...args)),
-        relative: jest.fn((from, to) => actualPath.relative(from, to))
+const mockDbInstances = [];
+const mockDatabase = jest.fn(() => {
+    const db = {
+        run: jest.fn((sql, params, cb) => {
+            if (typeof params === 'function') cb = params;
+            if (cb) cb(null);
+            return db;
+        }),
+        all: jest.fn((sql, params, cb) => {
+            if (typeof params === 'function') cb = params;
+            if (cb) cb(null, []);
+        }),
+        get: jest.fn((sql, params, cb) => {
+            if (typeof params === 'function') cb = params;
+            if (cb) cb(null, null);
+        }),
+        serialize: jest.fn((fn) => fn()),
     };
+    mockDbInstances.push(db);
+    return db;
 });
 
+jest.mock('sqlite3', () => ({
+    verbose: () => ({ Database: mockDatabase }),
+}));
+
+jest.mock('fs', () => ({
+    existsSync: jest.fn(),
+    mkdirSync: jest.fn(),
+    readdirSync: jest.fn(),
+    readFileSync: jest.fn(),
+    writeFileSync: jest.fn(),
+}));
+
+const ChatLogManager = require('../src/managers/ChatLogManager');
+
 describe('ChatLogManager', () => {
-    const testDir = '/tmp/test_logs';
     let manager;
 
     beforeEach(() => {
         jest.clearAllMocks();
-        manager = new ChatLogManager({ logDir: testDir });
-        fs.existsSync.mockReturnValue(true);
+        mockDbInstances.length = 0;
+
+        fs.existsSync.mockImplementation((target) => {
+            const p = String(target);
+            if (p.includes('.legacy_migrated')) return true;
+            return true;
+        });
         fs.readdirSync.mockReturnValue([]);
+
+        manager = new ChatLogManager({ logDir: '/tmp/test-logs', golemId: 'ut' });
     });
 
-    test('init creates directories if missing', async () => {
-        fs.existsSync.mockReturnValue(false);
+    test('init creates db directory when missing and initializes sqlite handles', async () => {
+        fs.existsSync.mockImplementation((target) => {
+            const p = String(target);
+            if (p.includes('.legacy_migrated')) return true;
+            if (p.includes('/db')) return false;
+            return true;
+        });
+
         await manager.init();
-        expect(fs.mkdirSync).toHaveBeenCalledTimes(5); // hourly, daily, monthly, yearly, era
+
+        expect(fs.mkdirSync).toHaveBeenCalledWith(expect.stringContaining('/db'), { recursive: true });
+        expect(mockDatabase).toHaveBeenCalled();
         expect(manager._isInitialized).toBe(true);
     });
 
-    test('init migrates existing daily summaries', async () => {
-        fs.readdirSync.mockReturnValue(['20240101.log', 'invalid.txt']); // 20240101.log is 12 chars
-        fs.existsSync.mockImplementation(p => p === testDir); // dest not exists
+    test('append writes a message record when initialized', async () => {
         await manager.init();
-        expect(fs.renameSync).toHaveBeenCalledTimes(1);
+        const db = mockDbInstances[0];
+
+        manager.append({ sender: 'User', content: 'hello', type: 'chat' });
+
+        expect(db.run).toHaveBeenCalledWith(
+            expect.stringContaining('INSERT INTO messages'),
+            expect.arrayContaining([expect.any(Number), expect.any(String), expect.any(String), 'User', 'hello', 'chat']),
+            expect.any(Function)
+        );
     });
 
-    test('init only runs once', async () => {
+    test('cleanup runs retention deletes after init', async () => {
         await manager.init();
-        await manager.init();
-        expect(fs.mkdirSync).not.toHaveBeenCalled(); // second time shouldn't run _ensureDirectories if true
+        manager.runAsync = jest.fn().mockResolvedValue();
+
+        await manager.cleanup();
+
+        expect(manager.runAsync).toHaveBeenCalledWith(expect.stringContaining('DELETE FROM messages'), expect.any(Array));
+        expect(manager.runAsync).toHaveBeenCalledWith(expect.stringContaining("tier = 'daily'"), expect.any(Array));
+        expect(manager.runAsync).toHaveBeenCalledWith(expect.stringContaining("tier = 'monthly'"), expect.any(Array));
     });
 
-    test('append writes new file if not exists', () => {
-        fs.existsSync.mockReturnValue(false);
-        manager.append({ message: 'test' });
-        expect(fs.writeFileSync).toHaveBeenCalled();
-        const callArgs = fs.writeFileSync.mock.calls[0];
-        expect(callArgs[0]).toContain('.log');
-        expect(callArgs[1]).toContain('"message": "test"');
-    });
-
-    test('append appends to existing file', () => {
-        fs.existsSync.mockReturnValue(true);
-        fs.readFileSync.mockReturnValue(JSON.stringify([{ message: 'old' }]));
-        manager.append({ message: 'new' });
-        expect(fs.writeFileSync).toHaveBeenCalled();
-        const callArgs = fs.writeFileSync.mock.calls[0];
-        const writtenData = JSON.parse(callArgs[1]);
-        expect(writtenData.length).toBe(2);
-        expect(writtenData[1].message).toBe('new');
-    });
-
-    test('append creates new array if existing file is corrupted', () => {
-        fs.existsSync.mockReturnValue(true);
-        fs.readFileSync.mockReturnValue('corrupted json');
-        manager.append({ message: 'new' });
-        expect(fs.writeFileSync).toHaveBeenCalled();
-        const callArgs = fs.writeFileSync.mock.calls[0];
-        const writtenData = JSON.parse(callArgs[1]);
-        expect(writtenData.length).toBe(1);
-        expect(writtenData[0].message).toBe('new');
-    });
-
-    test('cleanup removes old logs', () => {
-        const oldTime = Date.now() - (100 * 24 * 60 * 60 * 1000); // 100 days old
-        fs.existsSync.mockReturnValue(true);
-        fs.readdirSync.mockReturnValue(['old.log']);
-        fs.statSync.mockReturnValue({ mtimeMs: oldTime });
-        manager.cleanup();
-        expect(fs.unlinkSync).toHaveBeenCalled();
-    });
-
-    test('_getYesterdayDateString formatting', () => {
+    test('_getYesterdayDateString returns YYYYMMDD', () => {
         const str = manager._getYesterdayDateString();
         expect(str).toMatch(/^\d{8}$/);
     });
 
-    test('_getLastMonthString formatting', () => {
-        const str = manager._getLastMonthString();
-        expect(str).toMatch(/^\d{6}$/);
+    test('compressLogsForDate skips when message count is below threshold and force is false', async () => {
+        manager._isInitialized = true;
+        manager.db = {};
+        manager.allAsync = jest.fn().mockResolvedValue([
+            { timestamp: Date.now(), sender: 'A', content: '1' },
+            { timestamp: Date.now(), sender: 'B', content: '2' },
+        ]);
+        manager._compressAndSave = jest.fn();
+
+        await manager.compressLogsForDate('20240101', { sendMessage: jest.fn() }, false);
+
+        expect(manager._compressAndSave).not.toHaveBeenCalled();
     });
 
-    test('_getLastYearString formatting', () => {
-        const str = manager._getLastYearString();
-        expect(str).toMatch(/^\d{4}$/);
+    test('compressLogsForDate calls _compressAndSave when force is true', async () => {
+        manager._isInitialized = true;
+        manager.db = {};
+        manager.allAsync = jest.fn().mockResolvedValue([
+            { timestamp: Date.now(), sender: 'A', content: 'alpha' },
+            { timestamp: Date.now(), sender: 'B', content: 'beta' },
+        ]);
+        manager._compressAndSave = jest.fn().mockResolvedValue();
+
+        await manager.compressLogsForDate('20240101', { sendMessage: jest.fn() }, true);
+
+        expect(manager._compressAndSave).toHaveBeenCalledWith(
+            expect.stringContaining('alpha'),
+            '20240101',
+            'daily',
+            expect.any(Object),
+            expect.any(Number)
+        );
     });
 
-    test('_getCurrentDecadeString formatting', () => {
-        const str = manager._getCurrentDecadeString();
-        expect(str).toContain('decade_');
+    test('_compressAndSave stores parsed summary into summaries table', async () => {
+        manager.runAsync = jest.fn().mockResolvedValue();
+
+        await manager._compressAndSave('prompt', '20240101', 'daily', {
+            sendMessage: jest.fn().mockResolvedValue('[GOLEM_REPLY]summary text'),
+        }, 123);
+
+        expect(manager.runAsync).toHaveBeenCalledWith(
+            expect.stringContaining('INSERT INTO summaries'),
+            ['daily', '20240101', expect.any(Number), 'summary text', 123, 'summary text'.length]
+        );
     });
 
-    test('_getLastDecadeString formatting', () => {
-        const str = manager._getLastDecadeString();
-        expect(str).toContain('decade_');
-    });
+    test('readRecentHourlyAsync returns chronological text and readTierAsync returns summaries', async () => {
+        manager._isInitialized = true;
+        manager.db = {};
+        manager.allAsync = jest.fn()
+            .mockResolvedValueOnce([
+                { timestamp: new Date('2024-01-01T00:00:00Z').getTime(), sender: 'U', content: 'first' },
+                { timestamp: new Date('2024-01-01T00:01:00Z').getTime(), sender: 'A', content: 'second' },
+            ])
+            .mockResolvedValueOnce([
+                { date_string: '20240101', content: 'sum1', timestamp: 1 },
+                { date_string: '20240102', content: 'sum2', timestamp: 2 },
+            ]);
 
-    describe('Compression logic', () => {
-        let mockBrain;
-        const mockResponseParser = require('../src/utils/ResponseParser');
-        jest.mock('../src/utils/ResponseParser', () => ({
-            parse: jest.fn().mockImplementation(() => ({
-                reply: 'Mocked summary text'
-            }))
-        }));
+        const hourly = await manager.readRecentHourlyAsync(10, 10000);
+        const tier = await manager.readTierAsync('daily', 10, 10000);
 
-        beforeEach(() => {
-            mockBrain = {
-                sendMessage: jest.fn().mockResolvedValue('[GOLEM_REPLY]Mocked summary text')
-            };
-            fs.writeFileSync.mockClear();
-            fs.unlinkSync.mockClear();
-        });
-
-        test('compressLogsForDate skips if daily summary already exists', async () => {
-            fs.existsSync.mockImplementation(p => p.includes('daily'));
-            await manager.compressLogsForDate('20240101', mockBrain);
-            expect(mockBrain.sendMessage).not.toHaveBeenCalled();
-        });
-
-        test('compressLogsForDate skips if files length < 3 without force', async () => {
-            fs.existsSync.mockReturnValue(false);
-            fs.readdirSync.mockReturnValue(['2024010100.log', '2024010101.log']); // only 2
-            await manager.compressLogsForDate('20240101', mockBrain);
-            expect(mockBrain.sendMessage).not.toHaveBeenCalled();
-        });
-
-        test('compressLogsForDate compresses and deletes source files', async () => {
-            fs.existsSync.mockReturnValue(false);
-            fs.readdirSync.mockReturnValue(['2024010100.log', '2024010101.log', '2024010102.log']); // 3 files
-            fs.readFileSync.mockReturnValue(JSON.stringify([{ timestamp: 123, sender: 'User', content: 'test' }]));
-            
-            manager._compressAndSave = jest.fn();
-            await manager.compressLogsForDate('20240101', mockBrain, true);
-            
-            expect(manager._compressAndSave).toHaveBeenCalled();
-            expect(manager._compressAndSave.mock.calls[0][0]).toContain('test'); // Prompt contains logs
-        });
-
-        test('compressMonthly compresses and deletes source files', async () => {
-            fs.existsSync.mockReturnValue(false);
-            fs.readdirSync.mockReturnValue(['20240101.log', '20240102.log']);
-            fs.readFileSync.mockReturnValue(JSON.stringify([{ content: 'daily test' }]));
-            
-            manager._compressAndSave = jest.fn();
-            await manager.compressMonthly('202401', mockBrain);
-            
-            expect(manager._compressAndSave).toHaveBeenCalled();
-            expect(manager._compressAndSave.mock.calls[0][0]).toContain('daily test');
-        });
-
-        test('compressYearly compresses', async () => {
-            fs.existsSync.mockReturnValue(false);
-            fs.readdirSync.mockReturnValue(['202401.log', '202402.log']);
-            fs.readFileSync.mockReturnValue(JSON.stringify([{ content: 'monthly test' }]));
-            
-            manager._compressAndSave = jest.fn();
-            await manager.compressYearly('2024', mockBrain);
-            
-            expect(manager._compressAndSave).toHaveBeenCalled();
-            expect(manager._compressAndSave.mock.calls[0][0]).toContain('monthly test');
-        });
-
-        test('compressEra compresses', async () => {
-            fs.existsSync.mockReturnValue(false);
-            fs.readdirSync.mockReturnValue(['2020.log', '2021.log']);
-            fs.readFileSync.mockReturnValue(JSON.stringify([{ content: 'yearly test' }]));
-            
-            manager._compressAndSave = jest.fn();
-            await manager.compressEra('decade_2020', mockBrain);
-            
-            expect(manager._compressAndSave).toHaveBeenCalled();
-            expect(manager._compressAndSave.mock.calls[0][0]).toContain('yearly test');
-        });
-
-        test('_compressAndSave actually talks to brain and writes to file', async () => {
-            fs.existsSync.mockReturnValue(false);
-            
-            await manager._compressAndSave('prompt', '/tmp/out.log', 'label', 'type', ['1.log'], '/tmp', mockBrain, 100);
-
-            expect(mockBrain.sendMessage).toHaveBeenCalledWith('prompt', false);
-            expect(fs.writeFileSync).toHaveBeenCalled();
-            const writeArgs = JSON.parse(fs.writeFileSync.mock.calls[0][1]);
-            expect(writeArgs[0].content).toBe('Mocked summary text');
-            expect(fs.unlinkSync).toHaveBeenCalledWith('/tmp/1.log');
-        });
-
-        test('readRecentHourly gathers logs correctly', () => {
-            fs.existsSync.mockReturnValue(true);
-            fs.readdirSync.mockReturnValue(['2024010100.log', '2024010101.log']);
-            fs.readFileSync.mockReturnValue(JSON.stringify([{ timestamp: 0, sender: 'U', content: 'txt' }]));
-            
-            const txt = manager.readRecentHourly(1);
-            expect(txt).toContain('U: txt');
-        });
-
-        test('readTier gathers logs correctly', () => {
-            fs.existsSync.mockReturnValue(true);
-            fs.readdirSync.mockReturnValue(['20240101.log']);
-            fs.readFileSync.mockReturnValue(JSON.stringify([{ date: '20240101', content: 'sum' }]));
-            
-            const data = manager.readTier('daily');
-            expect(data).toHaveLength(1);
-            expect(data[0].content).toBe('sum');
-        });
+        expect(hourly).toContain('U: first');
+        expect(hourly).toContain('A: second');
+        expect(tier).toEqual([
+            { date: '20240102', content: 'sum2' },
+            { date: '20240101', content: 'sum1' },
+        ]);
     });
 });

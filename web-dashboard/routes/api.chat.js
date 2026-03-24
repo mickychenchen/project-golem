@@ -1,7 +1,15 @@
 const express = require('express');
+const fs = require('fs');
+const path = require('path');
 
 module.exports = function(server) {
     const router = express.Router();
+    const resolveConvoManager = (instance) => {
+        // Backward/forward compatibility:
+        // - newer core uses "convoManager"
+        // - legacy code might still expose "conversationManager"
+        return instance?.convoManager || instance?.conversationManager || null;
+    };
 
     router.post('/api/chat', async (req, res) => {
         try {
@@ -10,7 +18,14 @@ module.exports = function(server) {
                 return res.status(400).json({ error: 'Missing golemId, message or attachment' });
             }
 
-            if (typeof global.handleDashboardMessage !== 'function') {
+            const index = require('../../index.js');
+            const dashboardMessageHandler =
+                (typeof index.handleDashboardMessage === 'function' && index.handleDashboardMessage) ||
+                (typeof index.handleUnifiedMessage === 'function' && index.handleUnifiedMessage) ||
+                (typeof global.handleDashboardMessage === 'function' && global.handleDashboardMessage) ||
+                null;
+
+            if (!dashboardMessageHandler) {
                 return res.status(503).json({ error: 'Dashboard message handler not ready' });
             }
 
@@ -30,6 +45,17 @@ module.exports = function(server) {
                 url: attachmentData.url,
                 mimeType: finalMimeType || 'application/octet-stream'
             } : null;
+
+            if (attachment && attachment.path) {
+                const uploadRoot = path.resolve(process.cwd(), 'data', 'temp_uploads');
+                const resolvedPath = path.resolve(String(attachment.path));
+                const isInsideUploadDir = resolvedPath === uploadRoot || resolvedPath.startsWith(`${uploadRoot}${path.sep}`);
+
+                if (!isInsideUploadDir || !fs.existsSync(resolvedPath)) {
+                    return res.status(400).json({ error: 'Invalid attachment path' });
+                }
+                attachment.path = resolvedPath;
+            }
 
             const mockContext = {
                 platform: 'web',
@@ -79,7 +105,7 @@ module.exports = function(server) {
                 golemId
             });
 
-            global.handleDashboardMessage(mockContext, golemId).catch(exp => {
+            dashboardMessageHandler(mockContext, golemId).catch(exp => {
                 console.error('[WebServer] Direct chat error:', exp);
             });
 
@@ -98,10 +124,6 @@ module.exports = function(server) {
             }
 
             const index = require('../../index.js');
-
-            if (typeof global.handleDashboardMessage !== 'function') {
-                return res.status(503).json({ error: 'Dashboard message handler not ready' });
-            }
 
             const mockContext = {
                 platform: 'web',
@@ -181,10 +203,13 @@ module.exports = function(server) {
             });
 
             setTimeout(() => {
-                if (typeof index.handleUnifiedCallback === 'function') {
-                    index.handleUnifiedCallback(mockContext, callback_data, golemId).catch(console.error);
-                } else if (global.handleUnifiedCallback) {
-                    global.handleUnifiedCallback(mockContext, callback_data, golemId).catch(console.error);
+                const callbackHandler =
+                    (typeof index.handleUnifiedCallback === 'function' && index.handleUnifiedCallback) ||
+                    (typeof global.handleUnifiedCallback === 'function' && global.handleUnifiedCallback) ||
+                    null;
+
+                if (callbackHandler) {
+                    callbackHandler(mockContext, callback_data, golemId).catch(console.error);
                 } else {
                     console.error('[WebServer] handleUnifiedCallback not found in index.js exports or global');
                 }
@@ -206,6 +231,58 @@ module.exports = function(server) {
             return res.json({ success: true, history });
         } catch (e) {
             console.error('Failed to fetch chat history:', e);
+            return res.status(500).json({ error: e.message });
+        }
+    });
+
+    router.get('/api/commands', (req, res) => {
+        try {
+            const commands = require('../../src/config/commands.js');
+            return res.json({ success: true, commands });
+        } catch (e) {
+            console.error('Failed to fetch commands:', e);
+            return res.status(500).json({ error: e.message });
+        }
+    });
+
+    router.get('/api/metacognition/stats', async (req, res) => {
+        try {
+            const { golemId } = req.query;
+            if (!golemId) return res.status(400).json({ error: 'golemId required' });
+            
+            const index = require('../../index.js');
+            const instance = index.getOrCreateGolem ? index.getOrCreateGolem(golemId) : null;
+            const convoManager = resolveConvoManager(instance);
+            if (!convoManager || !convoManager.confidenceTracker) {
+                return res.status(404).json({ error: 'ConfidenceTracker not found for this golem instance' });
+            }
+
+            const stats = await convoManager.confidenceTracker.getStats();
+            return res.json({ success: true, stats });
+        } catch (e) {
+            console.error('Failed to fetch metacognition stats:', e);
+            return res.status(500).json({ error: e.message });
+        }
+    });
+
+    router.get('/api/metacognition/history', async (req, res) => {
+        try {
+            const { golemId, limit } = req.query;
+            if (!golemId) return res.status(400).json({ error: 'golemId required' });
+
+            const index = require('../../index.js');
+            const instance = index.getOrCreateGolem ? index.getOrCreateGolem(golemId) : null;
+            const convoManager = resolveConvoManager(instance);
+            if (!convoManager || !convoManager.confidenceTracker) {
+                return res.status(404).json({ error: 'ConfidenceTracker not found for this golem instance' });
+            }
+
+            const rawLimit = limit ? parseInt(limit, 10) : 20;
+            const parsedLimit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(rawLimit, 500)) : 20;
+            const history = await convoManager.confidenceTracker.getHistory(parsedLimit);
+            return res.json({ success: true, history });
+        } catch (e) {
+            console.error('Failed to fetch metacognition history:', e);
             return res.status(500).json({ error: e.message });
         }
     });

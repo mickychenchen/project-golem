@@ -1,4 +1,4 @@
-const safeguard = require('../src/utils/CommandSafeguard');
+const { CommandSafeguard: safeguard } = require('../packages/security');
 
 describe('CommandSafeguard', () => {
     beforeEach(() => {
@@ -50,11 +50,9 @@ describe('CommandSafeguard', () => {
     test('should allow dangerous operations if GOLEM_STRICT_SAFEGUARD is false', () => {
         process.env.GOLEM_STRICT_SAFEGUARD = 'false';
         const result = safeguard.validate('rm -rf /');
-        // It should still be false because it's not in the whitelist, 
-        // but the reason should NOT be "偵測到高度危險操作" 
-        // if we were able to check the reason (but the test currently only checks .safe)
         expect(result.safe).toBe(false);
-        expect(result.reason).toBe('指令未列於白名單中');
+        expect(result.reason).not.toContain('偵測到高度危險操作');
+        expect(result.reason).toMatch(/指令風險等級|指令未列於白名單中/);
 
         // But it still blocks sensitive symbols because whitelist check is still there
         const resultWithSymbol = safeguard.validate('ls ; rm -rf /');

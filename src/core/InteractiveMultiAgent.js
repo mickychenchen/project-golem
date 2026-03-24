@@ -311,8 +311,12 @@ ${userMessage}
                 this._removeInputListener(ctx.chatId);
                 resolve(null);
             }, timeout);
+
+            this.activeConversation.userInputTimeout = timeoutId; // ✨ [S-4]
+
             this._registerInputListener(ctx.chatId, (input) => {
                 clearTimeout(timeoutId);
+                this.activeConversation.userInputTimeout = null;
                 this._removeInputListener(ctx.chatId);
                 resolve(input);
             });
@@ -360,6 +364,11 @@ ${userMessage}
 
     _cleanup() {
         const conv = this.activeConversation;
+        if (conv && conv.userInputTimeout) {
+            clearTimeout(conv.userInputTimeout);
+            conv.userInputTimeout = null;
+        }
+
         if (conv.status === 'interrupted') {
             if (!InteractiveMultiAgent.pausedConversations) InteractiveMultiAgent.pausedConversations = new Map();
             InteractiveMultiAgent.pausedConversations.set(conv.chatId, conv);

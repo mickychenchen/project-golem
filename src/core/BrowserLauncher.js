@@ -1,14 +1,112 @@
 // ============================================================
 // 🚀 BrowserLauncher - Playwright (Chromium) 啟動 / 連線管理
 // ============================================================
-const { chromium } = require('playwright-extra');
-const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
 const http = require('http');
 const { BROWSER_ARGS, LOCK_FILES, LIMITS, TIMINGS } = require('./constants');
 
-chromium.use(StealthPlugin());
+const DEFAULT_VIEWPORTS = Object.freeze([
+    { width: 1366, height: 768 },
+    { width: 1440, height: 900 },
+    { width: 1536, height: 864 },
+    { width: 1600, height: 900 },
+]);
+
+function parseBoolean(value, fallback = false) {
+    if (value === undefined || value === null || value === '') return fallback;
+    const normalized = String(value).trim().toLowerCase();
+    if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
+    if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+    return fallback;
+}
+
+function parseInteger(value, fallback) {
+    const num = Number(value);
+    return Number.isFinite(num) && num > 0 ? Math.floor(num) : fallback;
+}
+
+function parseFloatNumber(value, fallback) {
+    const num = Number(value);
+    return Number.isFinite(num) && num > 0 ? num : fallback;
+}
+
+function pickRandom(items) {
+    if (!Array.isArray(items) || items.length === 0) return null;
+    return items[Math.floor(Math.random() * items.length)];
+}
+
+function getDefaultNavigatorPlatform() {
+    if (process.platform === 'darwin') return 'MacIntel';
+    if (process.platform === 'win32') return 'Win32';
+    return 'Linux x86_64';
+}
+
+function getDefaultUserAgent(navigatorPlatform) {
+    const chromeMajor = String(process.env.PLAYWRIGHT_STEALTH_CHROME_MAJOR || '141').trim() || '141';
+    if (navigatorPlatform === 'MacIntel') {
+        return `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeMajor}.0.0.0 Safari/537.36`;
+    }
+    if (navigatorPlatform === 'Win32') {
+        return `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeMajor}.0.0.0 Safari/537.36`;
+    }
+    return `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeMajor}.0.0.0 Safari/537.36`;
+}
+
+function buildStealthProfile() {
+    const languagesRaw = String(process.env.PLAYWRIGHT_STEALTH_LANGUAGES || 'zh-TW,zh,en-US,en');
+    const languages = languagesRaw
+        .split(',')
+        .map((x) => x.trim())
+        .filter((x) => x);
+
+    const localeRaw = String(process.env.PLAYWRIGHT_STEALTH_LOCALE || '').trim();
+    const locale = localeRaw || languages[0] || 'zh-TW';
+
+    const timezoneId = String(process.env.PLAYWRIGHT_STEALTH_TIMEZONE || process.env.TZ || 'Asia/Taipei').trim();
+    const navigatorPlatform = String(process.env.PLAYWRIGHT_STEALTH_PLATFORM || getDefaultNavigatorPlatform()).trim();
+    const userAgent = String(
+        process.env.PLAYWRIGHT_STEALTH_USER_AGENT || getDefaultUserAgent(navigatorPlatform)
+    ).trim();
+
+    return {
+        locale,
+        timezoneId,
+        userAgent,
+        languages,
+        navigatorPlatform,
+        hardwareConcurrency: parseInteger(process.env.PLAYWRIGHT_STEALTH_HARDWARE_CONCURRENCY, 8),
+        deviceMemory: parseFloatNumber(process.env.PLAYWRIGHT_STEALTH_DEVICE_MEMORY, 8),
+        webglVendor: String(process.env.PLAYWRIGHT_STEALTH_WEBGL_VENDOR || 'Intel Inc.').trim(),
+        webglRenderer: String(process.env.PLAYWRIGHT_STEALTH_WEBGL_RENDERER || 'Intel Iris OpenGL Engine').trim(),
+    };
+}
+
+function buildAcceptLanguageHeader(languages) {
+    if (!Array.isArray(languages) || languages.length === 0) {
+        return 'zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7';
+    }
+    return languages
+        .map((lang, index) => {
+            if (index === 0) return lang;
+            const quality = Math.max(0.4, 1 - (index * 0.1)).toFixed(1);
+            return `${lang};q=${quality}`;
+        })
+        .join(',');
+}
+
+function resolveViewport() {
+    const custom = String(process.env.PLAYWRIGHT_STEALTH_VIEWPORT || '').trim();
+    const customMatch = custom.match(/^(\d{3,5})[xX](\d{3,5})$/);
+    if (customMatch) {
+        return { width: Number(customMatch[1]), height: Number(customMatch[2]) };
+    }
+
+    const randomize = parseBoolean(process.env.PLAYWRIGHT_STEALTH_RANDOM_VIEWPORT, true);
+    if (!randomize) return { ...DEFAULT_VIEWPORTS[0] };
+    return { ...pickRandom(DEFAULT_VIEWPORTS) };
+}
 
 class BrowserLauncher {
     /**
@@ -78,13 +176,42 @@ class BrowserLauncher {
         BrowserLauncher.cleanLocks(userDataDir);
 
         try {
-            // Playwright 中，launchPersistentContext 直接回傳 Context，省去 browser.newPage() 的麻煩
-            const context = await chromium.launchPersistentContext(userDataDir, {
+            const stealthEnabled = parseBoolean(process.env.PLAYWRIGHT_STEALTH_ENABLED, true);
+            const stealthProfile = buildStealthProfile();
+            const viewport = resolveViewport();
+            const launchArgs = [...BROWSER_ARGS];
+            if (stealthEnabled && stealthProfile.locale) {
+                launchArgs.push(`--lang=${stealthProfile.locale}`);
+            }
+
+            const contextOptions = {
                 headless: headless === 'true' || headless === 'new',
-                viewport: { width: 1280, height: 800 },
-                args: [...BROWSER_ARGS],
-                ignoreDefaultArgs: ['--disable-extensions'], // 保留某些必要的擴充功能行為
-            });
+                viewport,
+                args: launchArgs,
+                ignoreDefaultArgs: ['--enable-automation', '--disable-extensions'],
+            };
+
+            const browserChannel = String(process.env.PLAYWRIGHT_BROWSER_CHANNEL || '').trim();
+            if (browserChannel) {
+                contextOptions.channel = browserChannel;
+            }
+
+            if (stealthEnabled) {
+                contextOptions.locale = stealthProfile.locale;
+                contextOptions.timezoneId = stealthProfile.timezoneId;
+                contextOptions.userAgent = stealthProfile.userAgent;
+                contextOptions.extraHTTPHeaders = {
+                    'Accept-Language': buildAcceptLanguageHeader(stealthProfile.languages),
+                };
+            }
+
+            // Playwright 中，launchPersistentContext 直接回傳 Context，省去 browser.newPage() 的麻煩
+            const context = await chromium.launchPersistentContext(userDataDir, contextOptions);
+
+            if (stealthEnabled) {
+                await BrowserLauncher.applyStealthHardening(context, stealthProfile);
+                console.log(`🕵️ [System] Playwright stealth hardening enabled (${stealthProfile.locale}, ${viewport.width}x${viewport.height})`);
+            }
 
             // 🛡️ [Network Interception] 資源攔截優化 (大幅節省 RAM)
             try {
@@ -117,6 +244,94 @@ class BrowserLauncher {
             }
             throw err;
         }
+    }
+
+    static async applyStealthHardening(context, stealthProfile) {
+        await context.addInitScript((profile) => {
+            const safeDefineGetter = (target, key, value) => {
+                if (!target) return;
+                try {
+                    Object.defineProperty(target, key, {
+                        get: () => value,
+                        configurable: true,
+                    });
+                } catch (e) {
+                    // Ignore define failures for locked properties
+                }
+            };
+
+            const languages = Array.isArray(profile.languages) && profile.languages.length
+                ? profile.languages
+                : ['zh-TW', 'zh', 'en-US', 'en'];
+            const primaryLanguage = languages[0] || 'zh-TW';
+            const patchedUserAgent = String(profile.userAgent || navigator.userAgent || '')
+                .replace(/HeadlessChrome\//g, 'Chrome/');
+
+            safeDefineGetter(navigator, 'webdriver', undefined);
+            safeDefineGetter(navigator, 'platform', profile.navigatorPlatform || navigator.platform);
+            safeDefineGetter(navigator, 'languages', languages);
+            safeDefineGetter(navigator, 'language', primaryLanguage);
+            safeDefineGetter(navigator, 'vendor', 'Google Inc.');
+            safeDefineGetter(navigator, 'hardwareConcurrency', Number(profile.hardwareConcurrency || 8));
+            safeDefineGetter(navigator, 'deviceMemory', Number(profile.deviceMemory || 8));
+            safeDefineGetter(navigator, 'userAgent', patchedUserAgent);
+
+            const fakePlugins = [
+                { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+                { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '' },
+                { name: 'Native Client', filename: 'internal-nacl-plugin', description: '' },
+            ];
+            const fakeMimeTypes = [
+                { type: 'application/pdf', suffixes: 'pdf', description: 'Portable Document Format' },
+            ];
+            safeDefineGetter(navigator, 'plugins', fakePlugins);
+            safeDefineGetter(navigator, 'mimeTypes', fakeMimeTypes);
+
+            if (!window.chrome) {
+                try {
+                    Object.defineProperty(window, 'chrome', {
+                        value: { runtime: {} },
+                        configurable: true,
+                    });
+                } catch (e) {
+                    // Ignore
+                }
+            }
+
+            if (navigator.permissions && typeof navigator.permissions.query === 'function') {
+                const originalQuery = navigator.permissions.query.bind(navigator.permissions);
+                navigator.permissions.query = (parameters) => {
+                    if (parameters && parameters.name === 'notifications') {
+                        return Promise.resolve({ state: Notification.permission });
+                    }
+                    return originalQuery(parameters);
+                };
+            }
+
+            const patchWebgl = (prototype) => {
+                if (!prototype || typeof prototype.getParameter !== 'function') return;
+                const originalGetParameter = prototype.getParameter;
+                prototype.getParameter = function patchedGetParameter(parameter) {
+                    if (parameter === 37445) return profile.webglVendor || 'Intel Inc.'; // UNMASKED_VENDOR_WEBGL
+                    if (parameter === 37446) return profile.webglRenderer || 'Intel Iris OpenGL Engine'; // UNMASKED_RENDERER_WEBGL
+                    return originalGetParameter.call(this, parameter);
+                };
+            };
+
+            if (typeof WebGLRenderingContext !== 'undefined') {
+                patchWebgl(WebGLRenderingContext.prototype);
+            }
+            if (typeof WebGL2RenderingContext !== 'undefined') {
+                patchWebgl(WebGL2RenderingContext.prototype);
+            }
+
+            if (typeof window.outerWidth === 'number' && window.outerWidth === 0) {
+                safeDefineGetter(window, 'outerWidth', window.innerWidth);
+            }
+            if (typeof window.outerHeight === 'number' && window.outerHeight === 0) {
+                safeDefineGetter(window, 'outerHeight', window.innerHeight + 72);
+            }
+        }, stealthProfile);
     }
 
     /**

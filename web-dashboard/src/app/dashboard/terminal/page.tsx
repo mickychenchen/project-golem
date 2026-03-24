@@ -1,17 +1,136 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
-import { Terminal as TerminalIcon, AlertTriangle, Cpu, HardDrive, Activity, RefreshCw, Trash2, Zap, LayoutDashboard, ShieldCheck, Play } from "lucide-react";
+import { useEffect, useState, type MouseEvent, type ReactNode } from "react";
+import { Terminal as TerminalIcon, Cpu, Activity, RefreshCw, Zap, LayoutDashboard, ShieldCheck, Play } from "lucide-react";
 import { LogStream } from "@/components/LogStream";
 import { socket } from "@/lib/socket";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { SystemActionDialogs } from "@/components/SystemActionDialogs";
 import { useGolem } from "@/components/GolemContext";
+import { useToast } from "@/components/ui/toast-provider";
+import { apiGet, apiPost } from "@/lib/api-client";
+
+type MetricsState = {
+    uptime: string;
+    queueCount: number;
+    lastSchedule: string;
+    memUsage: number;
+    cpuUsage: number;
+};
+
+type TimePoint = {
+    time: string;
+    value: number;
+};
+
+type HoveredPoint = TimePoint & {
+    x: number;
+    y: number;
+    type: "mem" | "cpu";
+};
+
+type SystemStatusData = {
+    runtime?: {
+        osName?: string;
+        uptime?: number;
+        platform?: string;
+    };
+    health?: {
+        env?: boolean;
+        deps?: boolean;
+        core?: boolean;
+    };
+    system?: {
+        diskAvail?: string;
+        freeMem?: string;
+    };
+};
+
+type MetricsUpdatePayload = Partial<Pick<MetricsState, "uptime" | "queueCount" | "lastSchedule" | "memUsage" | "cpuUsage">>;
+
+type HeartbeatPayload = {
+    uptime?: string;
+    memUsage?: number;
+    cpu?: number;
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null;
+}
+
+function parseNumber(value: unknown): number | null {
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (typeof value === "string") {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : null;
+    }
+    return null;
+}
+
+function parseMetricsUpdate(payload: unknown): MetricsUpdatePayload | null {
+    if (!isRecord(payload)) return null;
+    const patch: MetricsUpdatePayload = {};
+
+    if (typeof payload.uptime === "string") patch.uptime = payload.uptime;
+    if (typeof payload.lastSchedule === "string") patch.lastSchedule = payload.lastSchedule;
+    const queueCount = parseNumber(payload.queueCount);
+    if (queueCount !== null) patch.queueCount = queueCount;
+    const memUsage = parseNumber(payload.memUsage);
+    if (memUsage !== null) patch.memUsage = memUsage;
+    const cpuUsage = parseNumber(payload.cpuUsage);
+    if (cpuUsage !== null) patch.cpuUsage = cpuUsage;
+
+    return Object.keys(patch).length > 0 ? patch : null;
+}
+
+function parseHeartbeat(payload: unknown): HeartbeatPayload | null {
+    if (!isRecord(payload)) return null;
+    const memUsage = parseNumber(payload.memUsage);
+    if (memUsage === null) return null;
+
+    const heartbeat: HeartbeatPayload = { memUsage };
+    if (typeof payload.uptime === "string") heartbeat.uptime = payload.uptime;
+    const cpu = parseNumber(payload.cpu);
+    if (cpu !== null) heartbeat.cpu = cpu;
+    return heartbeat;
+}
+
+function parseSystemStatus(payload: unknown): SystemStatusData | null {
+    if (!isRecord(payload)) return null;
+    const status: SystemStatusData = {};
+
+    if (isRecord(payload.runtime)) {
+        const uptime = parseNumber(payload.runtime.uptime);
+        status.runtime = {
+            osName: typeof payload.runtime.osName === "string" ? payload.runtime.osName : undefined,
+            platform: typeof payload.runtime.platform === "string" ? payload.runtime.platform : undefined,
+            uptime: uptime ?? undefined,
+        };
+    }
+
+    if (isRecord(payload.health)) {
+        status.health = {
+            env: typeof payload.health.env === "boolean" ? payload.health.env : undefined,
+            deps: typeof payload.health.deps === "boolean" ? payload.health.deps : undefined,
+            core: typeof payload.health.core === "boolean" ? payload.health.core : undefined,
+        };
+    }
+
+    if (isRecord(payload.system)) {
+        status.system = {
+            diskAvail: typeof payload.system.diskAvail === "string" ? payload.system.diskAvail : undefined,
+            freeMem: typeof payload.system.freeMem === "string" ? payload.system.freeMem : undefined,
+        };
+    }
+
+    return status;
+}
 
 export default function TerminalPage() {
-    const { hasGolems, activeGolem, activeGolemStatus, startGolem } = useGolem();
-    const [metrics, setMetrics] = useState({
+    const toast = useToast();
+    const { activeGolem, activeGolemStatus, startGolem } = useGolem();
+    const [metrics, setMetrics] = useState<MetricsState>({
         uptime: "0h 0m",
         queueCount: 0,
         lastSchedule: "N/A",
@@ -19,11 +138,11 @@ export default function TerminalPage() {
         cpuUsage: 0,
     });
 
-    const [memHistory, setMemHistory] = useState<{ time: string; value: number }[]>([]);
-    const [cpuHistory, setCpuHistory] = useState<{ time: string; value: number }[]>([]);
-    const [hoveredPoint, setHoveredPoint] = useState<{ time: string; value: number; x: number; y: number; type: 'mem' | 'cpu' } | null>(null);
+    const [memHistory, setMemHistory] = useState<TimePoint[]>([]);
+    const [cpuHistory, setCpuHistory] = useState<TimePoint[]>([]);
+    const [hoveredPoint, setHoveredPoint] = useState<HoveredPoint | null>(null);
     const [isConnected, setIsConnected] = useState(false);
-    const [systemStatus, setSystemStatus] = useState<any>(null);
+    const [systemStatus, setSystemStatus] = useState<SystemStatusData | null>(null);
 
     const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'LOGS'>('OVERVIEW');
 
@@ -45,8 +164,7 @@ export default function TerminalPage() {
     const handleReload = async () => {
         setIsLoading(true);
         try {
-            const res = await fetch("/api/system/reload", { method: "POST" });
-            const data = await res.json();
+            const data = await apiPost<{ success?: boolean }>("/api/system/reload");
             if (data.success) {
                 setConfirmDialog(prev => ({ ...prev, open: false }));
                 setDoneDialog({ open: true, variant: "restarted" });
@@ -63,11 +181,7 @@ export default function TerminalPage() {
     const handleShutdown = async () => {
         setIsLoading(true);
         try {
-            const res = await fetch("/api/system/shutdown", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" }
-            });
-            const data = await res.json();
+            const data = await apiPost<{ success?: boolean }>("/api/system/shutdown");
             if (data.success) {
                 setConfirmDialog(prev => ({ ...prev, open: false }));
                 setDoneDialog({ open: true, variant: "shutdown" });
@@ -97,11 +211,11 @@ export default function TerminalPage() {
                 setConfirmDialog(prev => ({ ...prev, open: false }));
                 setDoneDialog({ open: true, variant: "started" });
             } else {
-                alert("啟動失敗：後端服務逾時或未就緒。請稍後再試。");
+                toast.error("啟動失敗", "後端服務逾時或未就緒。請稍後再試。");
             }
         } catch (e) {
             console.error("Start failed:", e);
-            alert("啟動過程發生錯誤，請查看控制台日誌。");
+            toast.error("啟動失敗", "啟動過程發生錯誤，請查看控制台日誌。");
         } finally {
             setIsLoading(false);
         }
@@ -113,53 +227,63 @@ export default function TerminalPage() {
         else handleStart();
     };
 
+    const handleClearLogs = () => {
+        (window as Window & { clearLogs?: () => void }).clearLogs?.();
+    };
+
     useEffect(() => {
         const handleConnect = () => setIsConnected(true);
         const handleDisconnect = () => setIsConnected(false);
+        const handleInit = (payload: unknown) => {
+            const patch = parseMetricsUpdate(payload);
+            if (!patch) return;
+            setMetrics((prev) => ({ ...prev, ...patch }));
+        };
+        const handleStateUpdate = (payload: unknown) => {
+            const patch = parseMetricsUpdate(payload);
+            if (!patch) return;
+            setMetrics((prev) => ({ ...prev, ...patch }));
+        };
+        const handleHeartbeat = (payload: unknown) => {
+            const heartbeat = parseHeartbeat(payload);
+            if (!heartbeat) return;
+
+            const timeStr = new Date().toLocaleTimeString("zh-TW", { hour12: false });
+            setMetrics((prev) => ({
+                ...prev,
+                uptime: heartbeat.uptime ?? prev.uptime,
+                memUsage: heartbeat.memUsage ?? prev.memUsage,
+                cpuUsage: heartbeat.cpu ?? prev.cpuUsage,
+            }));
+
+            setMemHistory((prev) => {
+                const newData = [...prev, { time: timeStr, value: Number(heartbeat.memUsage?.toFixed(1) ?? "0") }];
+                return newData.slice(-60);
+            });
+
+            if (heartbeat.cpu !== undefined) {
+                setCpuHistory((prev) => {
+                    const newData = [...prev, { time: timeStr, value: Number(heartbeat.cpu?.toFixed(1) ?? "0") }];
+                    return newData.slice(-60);
+                });
+            }
+        };
 
         socket.on("connect", handleConnect);
         socket.on("disconnect", handleDisconnect);
         setIsConnected(socket.connected);
 
-        socket.on("init", (data: any) => {
-            setMetrics((prev) => ({ ...prev, ...data }));
-        });
-
-        socket.on("state_update", (data: any) => {
-            setMetrics((prev) => ({ ...prev, ...data }));
-        });
-
-        socket.on("heartbeat", (data: any) => {
-            const timeStr = new Date().toLocaleTimeString('zh-TW', { hour12: false });
-            setMetrics((prev) => ({
-                ...prev,
-                uptime: data.uptime,
-                memUsage: data.memUsage,
-                cpuUsage: data.cpu !== undefined ? data.cpu : prev.cpuUsage,
-            }));
-
-            setMemHistory((prev) => {
-                const newData = [...prev, { time: timeStr, value: parseFloat(data.memUsage.toFixed(1)) }];
-                return newData.slice(-60);
-            });
-
-            if (data.cpu !== undefined) {
-                setCpuHistory((prev) => {
-                    const newData = [...prev, { time: timeStr, value: parseFloat(data.cpu.toFixed(1)) }];
-                    return newData.slice(-60);
-                });
-            }
-        });
+        socket.on("init", handleInit);
+        socket.on("state_update", handleStateUpdate);
+        socket.on("heartbeat", handleHeartbeat);
 
         // Fetch full system status
         const fetchFullStatus = async () => {
             try {
-                const res = await fetch('/api/system/status');
-                if (res.ok) {
-                    const data = await res.json().catch(() => null);
-                    if (data) setSystemStatus(data);
-                }
-            } catch (e) {
+                const data = await apiGet<unknown>("/api/system/status");
+                const parsed = parseSystemStatus(data);
+                if (parsed) setSystemStatus(parsed);
+            } catch {
                 // Silently handle connection errors
                 console.debug("Backend unavailable (fetchFullStatus)");
             }
@@ -171,14 +295,14 @@ export default function TerminalPage() {
         return () => {
             socket.off("connect", handleConnect);
             socket.off("disconnect", handleDisconnect);
-            socket.off("init");
-            socket.off("state_update");
-            socket.off("heartbeat");
+            socket.off("init", handleInit);
+            socket.off("state_update", handleStateUpdate);
+            socket.off("heartbeat", handleHeartbeat);
             clearInterval(interval);
         };
     }, []);
 
-    const handleChartHover = (e: React.MouseEvent<SVGSVGElement>, history: any[], type: 'mem' | 'cpu') => {
+    const handleChartHover = (e: MouseEvent<SVGSVGElement>, history: TimePoint[], type: "mem" | "cpu") => {
         if (history.length < 2) return;
         const svg = e.currentTarget;
         const rect = svg.getBoundingClientRect();
@@ -189,25 +313,15 @@ export default function TerminalPage() {
         const safeIndex = Math.max(0, Math.min(history.length - 1, index));
         const point = history[safeIndex];
 
-        const max = type === 'mem' ? Math.max(100, ...history.map(m => m.value)) * 1.2 : 100;
+        const max = type === "mem" ? Math.max(100, ...history.map((metric) => metric.value)) * 1.2 : 100;
         const y = 100 - (point.value / max) * 100;
 
         setHoveredPoint({
             ...point,
             x: (safeIndex / (history.length - 1)) * 1000,
             y,
-            type
+            type,
         });
-    };
-
-
-    const reInjectSkills = async () => {
-        try {
-            await fetch('/api/skills/inject', { method: 'POST' });
-            alert("技能書重新注入成功");
-        } catch (e) {
-            alert("注入失敗");
-        }
     };
 
     return (
@@ -255,7 +369,11 @@ export default function TerminalPage() {
                         "flex items-center space-x-2 text-[10px] uppercase tracking-widest font-bold bg-secondary/50 px-3 py-1.5 rounded-full border border-border text-foreground/80",
                     )}>
                         <Activity className="w-3 h-3 text-primary animate-pulse" />
-                        <span>{systemStatus?.runtime ? `${Math.floor(systemStatus.runtime.uptime / 3600)}h ${Math.floor((systemStatus.runtime.uptime % 3600) / 60)}m` : metrics.uptime}</span>
+                        <span>
+                            {typeof systemStatus?.runtime?.uptime === "number"
+                                ? `${Math.floor(systemStatus.runtime.uptime / 3600)}h ${Math.floor((systemStatus.runtime.uptime % 3600) / 60)}m`
+                                : metrics.uptime}
+                        </span>
                     </div>
                     <div className={cn(
                         "flex items-center space-x-2 text-[10px] uppercase tracking-widest font-bold bg-secondary/50 px-3 py-1.5 rounded-full border border-border",
@@ -285,8 +403,8 @@ export default function TerminalPage() {
                             value={metrics.memUsage.toFixed(1)}
                             unit="MB"
                             history={memHistory}
-                            hoveredPoint={hoveredPoint?.type === 'mem' ? hoveredPoint : null}
-                            onHover={(e: React.MouseEvent<SVGSVGElement>) => handleChartHover(e, memHistory, 'mem')}
+                            hoveredPoint={hoveredPoint?.type === "mem" ? hoveredPoint : null}
+                            onHover={(e: MouseEvent<SVGSVGElement>) => handleChartHover(e, memHistory, "mem")}
                             onLeave={() => setHoveredPoint(null)}
                             gradientId="memGradient"
                             color="primary"
@@ -297,8 +415,8 @@ export default function TerminalPage() {
                             value={metrics.cpuUsage.toFixed(1)}
                             unit="%"
                             history={cpuHistory}
-                            hoveredPoint={hoveredPoint?.type === 'cpu' ? hoveredPoint : null}
-                            onHover={(e: React.MouseEvent<SVGSVGElement>) => handleChartHover(e, cpuHistory, 'cpu')}
+                            hoveredPoint={hoveredPoint?.type === "cpu" ? hoveredPoint : null}
+                            onHover={(e: MouseEvent<SVGSVGElement>) => handleChartHover(e, cpuHistory, "cpu")}
                             onLeave={() => setHoveredPoint(null)}
                             gradientId="cpuGradient"
                             color="cyan"
@@ -315,7 +433,6 @@ export default function TerminalPage() {
                                 <div className="p-6 text-sm font-mono bg-background/50">
                                     <ul className="space-y-4">
                                         <StatusItem label="核心模擬" value={systemStatus?.runtime?.platform?.toUpperCase() || "N/A"} icon={<Cpu className="w-3 h-3" />} />
-                                        <StatusItem label="API 金鑰" value={systemStatus?.health?.keys ? "有效" : "遺失"} color={systemStatus?.health?.keys ? "primary" : "destructive"} />
                                         <StatusItem label="環境配置" value={systemStatus?.health?.env ? "已載入" : "錯誤"} color={systemStatus?.health?.env ? "primary" : "destructive"} />
                                         <StatusItem label="依賴項目" value={systemStatus?.health?.deps ? "正常" : "檢查"} color={systemStatus?.health?.deps ? "primary" : "destructive"} />
                                         <StatusItem label="核心服務" value={systemStatus?.health?.core ? "在線" : "離線"} color={systemStatus?.health?.core ? "primary" : "destructive"} />
@@ -330,29 +447,29 @@ export default function TerminalPage() {
                             <div className="bg-card border border-border rounded-2xl flex flex-col overflow-hidden shadow-sm">
                                 <PanelHeader icon={<LayoutDashboard className="w-3 h-3" />} title="快捷操作" />
                                 <div className="p-6 grid grid-cols-1 gap-4 bg-background/50">
-                                    <ActionButton 
-                                        icon={<Play className="w-5 h-5" />} 
-                                        label="啟動 Golem" 
+                                    <ActionButton
+                                        icon={<Play className="w-5 h-5" />}
+                                        label="啟動 Golem"
                                         description="初始化核心實體"
-                                        onClick={() => openConfirm("start")} 
+                                        onClick={() => openConfirm("start")}
                                         disabled={activeGolemStatus === "running" || isLoading}
-                                        color="primary" 
+                                        color="primary"
                                     />
-                                    <ActionButton 
-                                        icon={<RefreshCw className="w-5 h-5" />} 
-                                        label="重新啟動" 
+                                    <ActionButton
+                                        icon={<RefreshCw className="w-5 h-5" />}
+                                        label="重新啟動"
                                         description="Hot-reload · 自動重連"
-                                        onClick={() => openConfirm("restart")} 
+                                        onClick={() => openConfirm("restart")}
                                         disabled={!isConnected || isLoading}
-                                        color="primary" 
+                                        color="primary"
                                     />
-                                    <ActionButton 
-                                        icon={<Zap className="w-5 h-5" />} 
-                                        label="關閉 Golem" 
+                                    <ActionButton
+                                        icon={<Zap className="w-5 h-5" />}
+                                        label="關閉 Golem"
                                         description="完全停止 · 需手動重啟"
-                                        onClick={() => openConfirm("shutdown")} 
+                                        onClick={() => openConfirm("shutdown")}
                                         disabled={!isConnected || isLoading}
-                                        color="destructive" 
+                                        color="destructive"
                                     />
                                 </div>
                             </div>
@@ -362,7 +479,7 @@ export default function TerminalPage() {
                         <div className="md:col-span-8 bg-card border border-border rounded-2xl flex flex-col overflow-hidden shadow-sm min-h-[500px]">
                             <PanelHeader icon={<span className="text-[10px]">📡</span>} title="信號總覽 (最新日誌)" />
                             <div className="flex-1 bg-black/20">
-                                <LogStream className="border-0 rounded-none p-6 text-[12px] font-mono leading-relaxed h-[500px]" types={['general', 'error']} />
+                                <LogStream className="border-0 rounded-none p-6 text-[12px] font-mono leading-relaxed h-[500px]" types={["general", "error"]} />
                             </div>
                         </div>
                     </div>
@@ -380,10 +497,10 @@ export default function TerminalPage() {
                                 <span className="text-foreground">📝</span>
                                 <span className="text-[10px] font-black uppercase tracking-[0.3em] text-foreground">核心日誌串流 (Neuro-Link)</span>
                             </div>
-                            <Button variant="ghost" size="sm" className="h-6 text-[9px] font-bold uppercase" onClick={() => (window as any).clearLogs?.()}>清除緩衝區</Button>
+                            <Button variant="ghost" size="sm" className="h-6 text-[9px] font-bold uppercase" onClick={handleClearLogs}>清除緩衝區</Button>
                         </div>
                         <div className="flex-1 relative bg-black/20">
-                            <LogStream className="absolute inset-0 border-0 rounded-none p-6 text-[13px] font-mono leading-relaxed" types={['general', 'error']} />
+                            <LogStream className="absolute inset-0 border-0 rounded-none p-6 text-[13px] font-mono leading-relaxed" types={["general", "error"]} />
                         </div>
                     </div>
 
@@ -391,20 +508,20 @@ export default function TerminalPage() {
                         <div className="bg-card border border-border rounded-2xl flex flex-col overflow-hidden shadow-sm h-[400px]">
                             <PanelHeader icon={<span className="text-[10px]">⏰</span>} title="時間軸事件 (Chronos)" />
                             <div className="flex-1 relative bg-black/20">
-                                <LogStream className="absolute inset-0 border-0 rounded-none p-4 text-[11px] font-mono" types={['chronos']} />
+                                <LogStream className="absolute inset-0 border-0 rounded-none p-4 text-[11px] font-mono" types={["chronos"]} />
                             </div>
                         </div>
                         <div className="bg-card border border-border rounded-2xl flex flex-col overflow-hidden shadow-sm h-[400px]">
                             <PanelHeader icon={<span className="text-[10px]">🚦</span>} title="流量監控" />
                             <div className="flex-1 relative bg-black/20">
-                                <LogStream className="absolute inset-0 border-0 rounded-none p-4 text-[11px] font-mono" types={['queue', 'agent']} autoScroll={false} />
+                                <LogStream className="absolute inset-0 border-0 rounded-none p-4 text-[11px] font-mono" types={["queue", "agent"]} autoScroll={false} />
                             </div>
                         </div>
                     </div>
                 </div>
 
             </div>
-            
+
             <SystemActionDialogs
                 confirmDialogOpen={confirmDialog.open}
                 setConfirmDialogOpen={(open) => !isLoading && setConfirmDialog(prev => ({ ...prev, open }))}
@@ -420,9 +537,22 @@ export default function TerminalPage() {
 }
 
 // Helper Components
-function MetricChart({ title, value, unit, history, hoveredPoint, onHover, onLeave, gradientId, color, icon }: any) {
-    const chartColor = color === 'primary' ? 'var(--primary)' : 'var(--color-cyan, #22d3ee)';
-    const max = unit === 'MB' ? Math.max(100, ...history.map((m: any) => m.value)) * 1.2 : 100;
+type MetricChartProps = {
+    title: string;
+    value: string;
+    unit: "MB" | "%";
+    history: TimePoint[];
+    hoveredPoint: HoveredPoint | null;
+    onHover: (event: MouseEvent<SVGSVGElement>) => void;
+    onLeave: () => void;
+    gradientId: string;
+    color: "primary" | "cyan";
+    icon: ReactNode;
+};
+
+function MetricChart({ title, value, unit, history, hoveredPoint, onHover, onLeave, gradientId, color, icon }: MetricChartProps) {
+    const chartColor = color === "primary" ? "var(--primary)" : "var(--color-cyan, #22d3ee)";
+    const max = unit === "MB" ? Math.max(100, ...history.map((metric) => metric.value)) * 1.2 : 100;
 
     return (
         <div className="bg-card border border-border rounded-2xl flex flex-col overflow-hidden relative p-6 shadow-sm group hover:border-primary/30 transition-all duration-500">
@@ -434,11 +564,11 @@ function MetricChart({ title, value, unit, history, hoveredPoint, onHover, onLea
                         <span className="text-sm font-bold text-muted-foreground uppercase opacity-60">{unit}</span>
                     </div>
                 </div>
-                <div className={cn("p-2 rounded-xl border", color === 'primary' ? "text-primary bg-primary/5 border-primary/10" : "text-cyan-500 bg-cyan-400/5 border-cyan-400/10")}>
+                <div className={cn("p-2 rounded-xl border", color === "primary" ? "text-primary bg-primary/5 border-primary/10" : "text-cyan-500 bg-cyan-400/5 border-cyan-400/10")}>
                     {icon}
                 </div>
             </div>
-            
+
             <div className="flex-1 relative mt-1 h-[120px] group/chart">
                 {/* SVG Chart Layer */}
                 <svg className="w-full h-full overflow-visible" viewBox="0 0 1000 100" preserveAspectRatio="none" onMouseMove={onHover} onMouseLeave={onLeave}>
@@ -454,8 +584,8 @@ function MetricChart({ title, value, unit, history, hoveredPoint, onHover, onLea
                             const y = 100 - (pt.value / max) * 100;
                             return `${x},${y}`;
                         });
-                        const pathData = `M 0,100 ` + points.map((p: string) => `L ${p}`).join(' ') + ` L 1000,100 Z`;
-                        const lineData = `M ` + points.map((p: string) => `L ${p}`).join(' ').substring(2);
+                        const pathData = `M 0,100 ${points.map((point) => `L ${point}`).join(" ")} L 1000,100 Z`;
+                        const lineData = `M ${points.map((point) => `L ${point}`).join(" ").substring(2)}`;
                         return (
                             <g>
                                 <path d={pathData} fill={`url(#${gradientId})`} className="transition-all duration-300" />
@@ -473,13 +603,13 @@ function MetricChart({ title, value, unit, history, hoveredPoint, onHover, onLea
 
                 {/* HTML Overlay Tooltip (Optimized Scale) */}
                 {hoveredPoint && (
-                    <div 
+                    <div
                         className="absolute pointer-events-none transition-all duration-75 z-50 flex flex-col items-center"
                         style={{
                             left: `${hoveredPoint.x / 10}%`,
                             top: `${hoveredPoint.y}%`,
-                            transform: `translate(${hoveredPoint.x > 750 ? '-100%' : '0%'}, -110%)`,
-                            marginLeft: hoveredPoint.x > 750 ? '-15px' : '15px'
+                            transform: `translate(${hoveredPoint.x > 750 ? "-100%" : "0%"}, -110%)`,
+                            marginLeft: hoveredPoint.x > 750 ? "-15px" : "15px",
                         }}
                     >
                         <div className="bg-popover/90 backdrop-blur-xl border border-primary/30 rounded-2xl p-4 shadow-[0_15px_40px_rgba(0,0,0,0.6)] text-center ring-1 ring-white/10 min-w-[140px]">
@@ -498,7 +628,7 @@ function MetricChart({ title, value, unit, history, hoveredPoint, onHover, onLea
     );
 }
 
-function PanelHeader({ icon, title }: { icon: any, title: string }) {
+function PanelHeader({ icon, title }: { icon: ReactNode; title: string }) {
     return (
         <div className="bg-muted/30 px-4 py-2 border-b border-border flex items-center space-x-2">
             <span className="text-muted-foreground">{icon}</span>
@@ -507,7 +637,7 @@ function PanelHeader({ icon, title }: { icon: any, title: string }) {
     );
 }
 
-function StatusItem({ label, value, color, icon }: { label: string, value: string, color?: string, icon?: any }) {
+function StatusItem({ label, value, color, icon }: { label: string; value: string; color?: "primary" | "destructive"; icon?: ReactNode }) {
     return (
         <li className="flex justify-between items-center group">
             <div className="flex items-center space-x-2">
@@ -515,16 +645,30 @@ function StatusItem({ label, value, color, icon }: { label: string, value: strin
                 <span className="text-muted-foreground/80 group-hover:text-muted-foreground transition-colors">{label}:</span>
             </div>
             <span className={cn(
-                "font-bold tracking-tight px-2 py-0.5 rounded text-[10px]", 
-                color === 'primary' ? "text-primary bg-primary/5" : 
-                color === 'destructive' ? "text-destructive bg-destructive/5" : 
-                "text-foreground bg-muted/30"
+                "font-bold tracking-tight px-2 py-0.5 rounded text-[10px]",
+                color === 'primary' ? "text-primary bg-primary/5" :
+                    color === 'destructive' ? "text-destructive bg-destructive/5" :
+                        "text-foreground bg-muted/30"
             )}>{value}</span>
         </li>
     );
 }
 
-function ActionButton({ icon, label, description, onClick, color, disabled }: { icon: any, label: string, description: string, onClick: () => void, color?: 'primary' | 'destructive', disabled?: boolean }) {
+function ActionButton({
+    icon,
+    label,
+    description,
+    onClick,
+    color,
+    disabled,
+}: {
+    icon: ReactNode;
+    label: string;
+    description: string;
+    onClick: () => void;
+    color?: "primary" | "destructive";
+    disabled?: boolean;
+}) {
     return (
         <button
             className={cn(
@@ -538,8 +682,8 @@ function ActionButton({ icon, label, description, onClick, color, disabled }: { 
         >
             <div className={cn(
                 "w-12 h-12 rounded-[14px] flex items-center justify-center transition-all duration-300",
-                color === 'destructive' 
-                    ? "bg-destructive/10 text-destructive border border-destructive/20 group-hover:bg-destructive group-hover:text-white" 
+                color === 'destructive'
+                    ? "bg-destructive/10 text-destructive border border-destructive/20 group-hover:bg-destructive group-hover:text-white"
                     : "bg-white/[0.05] text-muted-foreground border border-white/[0.05] group-hover:bg-white/[0.1] group-hover:text-foreground"
             )}>
                 {icon}

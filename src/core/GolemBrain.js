@@ -1,14 +1,14 @@
 // ============================================================
-// 🧠 Golem Brain (Web Gemini) - Clean Architecture Facade
+// 🧠 Golem Brain (Multi-Backend) - Clean Architecture Facade
 // ============================================================
 const path = require('path');
 const ConfigManager = require('../config');
 const DOMDoctor = require('../services/DOMDoctor');
-const LanceDBProDriver = require('../memory/LanceDBProDriver');
-const SystemNativeDriver = require('../memory/SystemNativeDriver');
+const OllamaClient = require('../services/OllamaClient');
+const { LanceDBProDriver, SystemNativeDriver } = require('../../packages/memory');
 
 const BrowserLauncher = require('./BrowserLauncher');
-const ProtocolFormatter = require('../services/ProtocolFormatter');
+const { ProtocolFormatter } = require('../../packages/protocol');
 const PageInteractor = require('./PageInteractor');
 const ChatLogManager = require('../managers/ChatLogManager');
 const SkillIndexManager = require('../managers/SkillIndexManager');
@@ -16,7 +16,7 @@ const NodeRouter = require('./NodeRouter');
 const { URLS } = require('./constants');
 
 // ============================================================
-// 🧠 Golem Brain (Web Gemini) - Dual-Engine + Titan Protocol
+// 🧠 Golem Brain (Gemini Web + Ollama) - Dual-Engine + Titan Protocol
 // ============================================================
 class GolemBrain {
     constructor(options = {}) {
@@ -53,6 +53,9 @@ class GolemBrain {
 
         // ── Backend Selection ──
         this.backend = ConfigManager.CONFIG.GOLEM_BACKEND || 'gemini';
+        this.ollamaClient = this.backend === 'ollama' ? new OllamaClient() : null;
+        this.isInitialized = false;
+        this._ollamaBootInjected = false;
         
         // ── 實體生命週期追蹤 ──
         this.browserStartTime = null;
@@ -66,7 +69,45 @@ class GolemBrain {
      */
     async init(forceReload = false) {
         console.log(`🎬 [Brain] 啟動初始化程序 (forceReload: ${forceReload})...`);
-        if (this.context && !forceReload) {
+        this.backend = ConfigManager.CONFIG.GOLEM_BACKEND || this.backend || 'gemini';
+
+        // Ollama backend: 無需啟動瀏覽器
+        if (this.backend === 'ollama') {
+            if (this.isInitialized && !forceReload) {
+                console.log("✅ [Brain] Ollama 實體已就緒，跳過重複初始化。");
+                return;
+            }
+            if (!this.ollamaClient) this.ollamaClient = new OllamaClient();
+
+            // 初始化日誌與技能索引
+            await this.chatLogManager.init();
+            try {
+                const personaManager = require('../skills/core/persona');
+                if (personaManager.exists(this.userDataDir)) {
+                    const personaData = personaManager.get(this.userDataDir);
+                    const personaSkills = personaData.skills || [];
+                    const { resolveEnabledSkills } = require('../skills/skillsConfig');
+                    const enabledSet = resolveEnabledSkills(process.env.OPTIONAL_SKILLS || '', personaSkills);
+                    await this.skillIndex.sync(Array.from(enabledSet));
+                } else {
+                    console.log(`⏸️ [Brain][${this.golemId}] 尚未完成設定 (Missing persona.json)，跳過技能索引同步。`);
+                }
+            } catch (e) {
+                console.warn('⚠️ [Brain] 技能索引同步失敗:', e.message);
+            }
+
+            await this._initMemoryDriver();
+            this._linkDashboard();
+            this.isInitialized = true;
+
+            if (forceReload || !this._ollamaBootInjected) {
+                this._ollamaBootInjected = true;
+                await this._injectSystemPrompt(forceReload);
+            }
+            return;
+        }
+
+        if (this.context && !forceReload && this.isInitialized) {
             console.log("✅ [Brain] 瀏覽器實體已存在且無須強制重新載入，跳過啟動。");
             return;
         }
@@ -128,6 +169,7 @@ class GolemBrain {
         if (forceReload || isNewSession) {
             await this._injectSystemPrompt(forceReload);
         }
+        this.isInitialized = true;
     }
 
     /**
@@ -147,6 +189,9 @@ class GolemBrain {
 
     // ✨ [新增] 動態視覺腳本：針對新版 UI 切換模型 (支援中英文介面與防呆)
     async switchModel(targetMode) {
+        if (this.backend === 'ollama') {
+            return '⚠️ 目前使用 Ollama 後端，/model 視覺切換僅適用於 Gemini Web。';
+        }
         if (!this.page) throw new Error("大腦尚未啟動。");
         try {
             const result = await this.page.evaluate(async (mode) => {
@@ -256,12 +301,7 @@ class GolemBrain {
      * @returns {Promise<{text: string, attachments: any[]}>} 清理後的 AI 回應與附件
      */
     async sendMessage(text, isSystem = false, options = {}) {
-        await this._ensureBrowserHealth();
-        if (!this.context) await this.init();
-        try { await this.page.bringToFront(); } catch (e) { }
-        await this.setupCDP();
-
-        const attachment = options.attachment || null;
+        this.backend = ConfigManager.CONFIG.GOLEM_BACKEND || this.backend || 'gemini';
 
         // ── [v9.1] Slash Command Interception ──
         if (text.startsWith('/') || text.startsWith('GOLEM_SKILL::')) {
@@ -271,6 +311,18 @@ class GolemBrain {
                 return { text: commandResult, attachments: [] };
             }
         }
+
+        if (this.backend === 'ollama') {
+            if (!this.isInitialized) await this.init();
+            return this._sendMessageViaOllama(text, isSystem, options);
+        }
+
+        await this._ensureBrowserHealth();
+        if (!this.context || !this.isInitialized) await this.init();
+        try { await this.page.bringToFront(); } catch (e) { }
+        await this.setupCDP();
+
+        const attachment = options.attachment || null;
 
         const reqId = ProtocolFormatter.generateReqId();
         const startTag = ProtocolFormatter.buildStartTag(reqId);
@@ -341,6 +393,28 @@ class GolemBrain {
         return result;
     }
 
+    async _sendMessageViaOllama(text, isSystem = false, options = {}) {
+        if (!this.ollamaClient) this.ollamaClient = new OllamaClient();
+        const attachment = options.attachment || null;
+        if (attachment) {
+            console.warn('⚠️ [Brain] Ollama backend currently ignores browser attachments.');
+        }
+
+        const reqId = ProtocolFormatter.generateReqId();
+        const payload = ProtocolFormatter.buildEnvelope(text, reqId, options);
+        console.log(`📡 [Brain][Ollama] 發送訊號: ${reqId}`);
+
+        const responseText = await this.ollamaClient.chat(payload, {
+            model: ConfigManager.CONFIG.OLLAMA_BRAIN_MODEL,
+            system: isSystem ? '你正在接收系統層訊息，請嚴格遵守。' : undefined
+        });
+
+        return {
+            text: responseText,
+            attachments: []
+        };
+    }
+
     /**
      * 從記憶中回憶相關內容
      * @param {string} queryText - 查詢文字
@@ -367,12 +441,19 @@ class GolemBrain {
      * @param {Object} entry - 日誌紀錄
      */
     _appendChatLog(entry) {
+        if (!this.chatLogManager) return;
+        
         // 確保在寫入前已初始化 (防呆)
-        this.chatLogManager.init().then(() => {
+        if (this.chatLogManager._isInitialized) {
             this.chatLogManager.append(entry);
-        }).catch(err => {
-            console.error(`❌ [Brain][${this.golemId}] appendedChatLog error:`, err);
-        });
+        } else {
+            console.warn(`⚠️ [Brain][${this.golemId}] chatLogManager 未準備就緒，嘗試自動初始化後寫入...`);
+            this.chatLogManager.init().then(() => {
+                this.chatLogManager.append(entry);
+            }).catch(err => {
+                console.error(`❌ [Brain][${this.golemId}] appendedChatLog error:`, err);
+            });
+        }
     }
 
     // ─── Private Methods ─────────────────────────────────────
@@ -382,8 +463,8 @@ class GolemBrain {
         try {
             await this.memoryDriver.init();
         } catch (e) {
-            console.warn("🔄 [System] 記憶引擎降級為 Browser/Native...");
-            this.memoryDriver = new BrowserMemoryDriver(this);
+            console.warn("🔄 [System] 記憶引擎降級為 SystemNativeDriver...");
+            this.memoryDriver = new SystemNativeDriver();
             await this.memoryDriver.init();
         }
     }
@@ -413,6 +494,10 @@ class GolemBrain {
         // 1. 設定熱重載：從 .env 重新讀取配置 (包含 API Key, 模式, 選用技能等)
         console.log(`🔄 [Brain][${this.golemId}] 正在執行設定熱重載 (Config Reload)...`);
         ConfigManager.reloadConfig();
+        this.backend = ConfigManager.CONFIG.GOLEM_BACKEND || this.backend || 'gemini';
+        if (this.backend === 'ollama' && !this.ollamaClient) {
+            this.ollamaClient = new OllamaClient();
+        }
 
         // 2. 技能同步：依據最新設定同步 SQLite 索引
         console.log(`📡 [Brain][${this.golemId}] 正在同步技能索引 (Skill Sync)...`);
@@ -432,6 +517,12 @@ class GolemBrain {
         // 3. 清除 ProtocolFormatter 快取，讓下次 build 時重新掃描
         ProtocolFormatter._lastScanTime = 0;
         console.log(`🔄 [Brain][${this.golemId}] 協議快取已清除，開始重新開啟對話視窗並注入...`);
+
+        if (this.backend === 'ollama') {
+            await this._injectSystemPrompt(true);
+            console.log(`✅ [Brain][${this.golemId}] Ollama 技能注入流程完成。`);
+            return;
+        }
 
         // 4. 若瀏覽器還沒準備好，直接返回（表示本次注入會在下次 init 時生效）
         if (!this.page) {
@@ -474,7 +565,7 @@ class GolemBrain {
                 let historicalMemory = "";
 
                 // 🏛️ Tier 4: 紀元里程碑 (最近 1 個)
-                const eraSummaries = this.chatLogManager.readTier('era', 1);
+                const eraSummaries = await this.chatLogManager.readTierAsync('era', 1);
                 if (eraSummaries.length > 0) {
                     eraSummaries.forEach(s => {
                         historicalMemory += `\n=== [紀元回憶: ${s.date}] ===\n${s.content}\n`;
@@ -482,7 +573,7 @@ class GolemBrain {
                 }
 
                 // 🏛️ Tier 3: 年度回顧 (最近 1 個)
-                const yearlySummaries = this.chatLogManager.readTier('yearly', 1);
+                const yearlySummaries = await this.chatLogManager.readTierAsync('yearly', 1);
                 if (yearlySummaries.length > 0) {
                     yearlySummaries.forEach(s => {
                         historicalMemory += `\n=== [年度回顧: ${s.date}] ===\n${s.content}\n`;
@@ -490,7 +581,7 @@ class GolemBrain {
                 }
 
                 // 🏛️ Tier 2: 月度精華 (最近 3 個)
-                const monthlySummaries = this.chatLogManager.readTier('monthly', 3);
+                const monthlySummaries = await this.chatLogManager.readTierAsync('monthly', 3);
                 if (monthlySummaries.length > 0) {
                     monthlySummaries.forEach(s => {
                         historicalMemory += `\n--- [月度精華: ${s.date}] ---\n${s.content}\n`;
@@ -498,7 +589,7 @@ class GolemBrain {
                 }
 
                 // 🏛️ Tier 1: 每日摘要 (最近 7 天)
-                const dailySummaries = this.chatLogManager.readTier('daily', 7);
+                const dailySummaries = await this.chatLogManager.readTierAsync('daily', 7);
                 if (dailySummaries.length > 0) {
                     dailySummaries.forEach(s => {
                         historicalMemory += `\n--- [${s.date} 摘要] ---\n${s.content}\n`;
@@ -530,7 +621,7 @@ class GolemBrain {
                     console.log(`🧠 [Brain] 階段二：已注入多層記憶 (${tierCounts.join(', ')})。`);
                 } else {
                     // 🕐 Tier 0 Fallback：無任何壓縮摘要時，直接載入全部 hourly 原始對話
-                    const rawMemory = this.chatLogManager.readRecentHourly();
+                    const rawMemory = await this.chatLogManager.readRecentHourlyAsync();
                     if (rawMemory) {
                         const MAX_RAW_CHARS = 200000;
                         const safeRaw = rawMemory.length > MAX_RAW_CHARS
@@ -595,6 +686,7 @@ class GolemBrain {
      * 🛡️ 瀏覽器健康檢查與自癒機制
      */
     async _ensureBrowserHealth(forceRestart = false) {
+        if (this.backend === 'ollama') return;
         let isHealthy = !forceRestart;
         if (!forceRestart) {
             try {
@@ -640,6 +732,7 @@ class GolemBrain {
             this.page = null;
             this.memoryPage = null;
             this.cdpSession = null;
+            this.isInitialized = false;
 
             console.log("🌱 [Brain] 準備執行全新初始化 (init)...");
             // 重新初始化 (forceReload = true)

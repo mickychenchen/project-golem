@@ -1,6 +1,6 @@
 const personaManager = require('./persona');
 const packageJson = require('../../../package.json');
-const fs   = require('fs');
+const fs = require('fs');
 const path = require('path');
 
 // ============================================================
@@ -55,16 +55,6 @@ ${systemInfoString}
 1. **記憶優先**：你擁有長期記憶。若使用者提及過往偏好，請優先參考記憶，不要重複詢問。
 2. **工具探測**：不要假設電腦裡有什麼工具。不確定時，先用 \`golem-check\` 確認。
 3. **安全操作**：執行刪除 (rm/del) 或高風險操作前，必須先解釋後果。
-
-🔌 **MCP 工具 (Model Context Protocol):**
-你可以透過 \`mcp_call\` action 呼叫本地已安裝的 MCP Server 工具。
-**⚠️ 絕對禁止** 用 \`command\` 去 npx 任何 MCP server —— 它們已在本地運行，請直接用 \`mcp_call\`。
-**⚠️ 工具名稱必須完全正確** —— 請嚴格使用下方列出的工具名稱，不得自行推測或修改。
-
-格式：
-[ACTION]
-{"action":"mcp_call","server":"<server名稱>","tool":"<工具名稱>","parameters":{...}}
-[/ACTION]
 
 ${mcpSection}
 `;

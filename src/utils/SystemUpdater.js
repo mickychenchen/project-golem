@@ -120,7 +120,7 @@ class SystemUpdater {
     static async update(options, io) {
         const env = await this.checkEnvironment();
         if (env.installMode === 'git') {
-            await this.updateViaGit(options, io);
+            await this.updateViaGit(options, io, env.gitInfo);
         } else {
             await this.updateViaZip(options, io);
         }
@@ -140,14 +140,15 @@ class SystemUpdater {
     static async execAsync(command, options = {}) {
         const util = require('util');
         const exec = util.promisify(require('child_process').exec);
+        const finalOptions = { maxBuffer: 1024 * 1024 * 50, timeout: 300000, ...options };
         try {
-            await exec(command, options);
+            await exec(command, finalOptions);
         } catch (e) {
             throw e;
         }
     }
 
-    static async updateViaGit(options, io) {
+    static async updateViaGit(options, io, gitInfo) {
         // Wait briefly so the frontend socket has time to connect
         await this.sleep(1000);
         this.broadcast(io, 'running', '開始執行 Git 更新流程...', 0);
@@ -157,39 +158,45 @@ class SystemUpdater {
             this.broadcast(io, 'running', '儲存本地暫存變更 (git stash)...', 10);
             try { await this.execAsync('git stash', { cwd: rootDir }); } catch (e) { }
 
-            this.broadcast(io, 'running', '執行 git fetch --all 同步所有遠端資訊...', 20);
-            await this.execAsync('git fetch --all', { cwd: rootDir });
-
             let currentBranch = 'main';
             let targetRemote = 'origin';
-            try {
-                const util = require('util');
-                const exec = util.promisify(require('child_process').exec);
 
-                const { stdout: branchOut } = await exec('git rev-parse --abbrev-ref HEAD', { cwd: rootDir });
-                currentBranch = branchOut.trim();
+            if (gitInfo && gitInfo.targetRemote) {
+                currentBranch = gitInfo.currentBranch;
+                targetRemote = gitInfo.targetRemote;
+            } else {
+                this.broadcast(io, 'running', '執行 git fetch --all 同步所有遠端資訊...', 20);
+                await this.execAsync('git fetch --all', { cwd: rootDir });
 
-                const { stdout: rbOut } = await exec('git branch -r', { cwd: rootDir });
-                const remoteBranches = rbOut.trim().split('\n').map(b => b.trim());
+                try {
+                    const util = require('util');
+                    const exec = util.promisify(require('child_process').exec);
 
-                const { stdout: rOut } = await exec('git remote', { cwd: rootDir });
-                const remotes = rOut.trim().split('\n');
+                    const { stdout: branchOut } = await exec('git rev-parse --abbrev-ref HEAD', { cwd: rootDir });
+                    currentBranch = branchOut.trim();
 
-                const priorityRemotes = ['upstream', 'origin', ...remotes.filter(r => r !== 'upstream' && r !== 'origin')];
-                let foundMatch = false;
-                for (const r of priorityRemotes) {
-                    if (remoteBranches.includes(`${r}/${currentBranch}`)) {
-                        targetRemote = r;
-                        foundMatch = true;
-                        break;
+                    const { stdout: rbOut } = await exec('git branch -r', { cwd: rootDir });
+                    const remoteBranches = rbOut.trim().split('\n').map(b => b.trim());
+
+                    const { stdout: rOut } = await exec('git remote', { cwd: rootDir });
+                    const remotes = rOut.trim().split('\n');
+
+                    const priorityRemotes = ['upstream', 'origin', ...remotes.filter(r => r !== 'upstream' && r !== 'origin')];
+                    let foundMatch = false;
+                    for (const r of priorityRemotes) {
+                        if (remoteBranches.includes(`${r}/${currentBranch}`)) {
+                            targetRemote = r;
+                            foundMatch = true;
+                            break;
+                        }
                     }
-                }
 
-                if (!foundMatch) {
-                    console.warn(`[SystemUpdater] No remote branch matches ${currentBranch}, fallback to ${targetRemote}`);
+                    if (!foundMatch) {
+                        console.warn(`[SystemUpdater] No remote branch matches ${currentBranch}, fallback to ${targetRemote}`);
+                    }
+                } catch (e) {
+                    console.warn("[SystemUpdater] Git detection failed, using defaults");
                 }
-            } catch (e) {
-                console.warn("[SystemUpdater] Git detection failed, using defaults");
             }
 
             this.broadcast(io, 'running', `從遠端拉取代碼 (git pull ${targetRemote} ${currentBranch})...`, 30);
@@ -221,11 +228,13 @@ class SystemUpdater {
         const { keepOldData, keepMemory } = options;
         const AdmZip = require('adm-zip');
         const rootDir = process.cwd();
+        let backupDir = null;
+        let tempDir = null;
 
         try {
             // 1. Download
             this.broadcast(io, 'running', '從 GitHub 下載最新版本...', 10);
-            const repoUrl = 'https://github.com/sz9751210/project-golem/archive/refs/heads/main.zip';
+            const repoUrl = 'https://github.com/Arvincreator/project-golem/archive/refs/heads/main.zip';
             const response = await fetch(repoUrl);
             if (!response.ok) throw new Error(`下載 ZIP 失敗: HTTP ${response.status}`);
 
@@ -234,7 +243,7 @@ class SystemUpdater {
 
             // 2. Extract to temp
             this.broadcast(io, 'running', '解壓縮更新檔...', 40);
-            const tempDir = path.join(rootDir, 'temp_update_' + Date.now());
+            tempDir = path.join(rootDir, 'temp_update_' + Date.now());
             const zip = new AdmZip(buffer);
             zip.extractAllTo(tempDir, true);
 
@@ -243,13 +252,11 @@ class SystemUpdater {
             if (extractedFolders.length === 0) throw new Error('ZIP 包內沒有檔案');
             const sourceDir = path.join(tempDir, extractedFolders[0]);
 
-            // 3. Backup old files
+            // 3. Backup old files (always backup for rollback safety)
             this.broadcast(io, 'running', '備份現有資料並清理...', 60);
             await this.sleep(100); // let UI update
-            const backupDir = path.join(rootDir, 'backup_' + new Date().toISOString().replace(/[:.]/g, '-'));
-            if (keepOldData) {
-                fs.mkdirSync(backupDir, { recursive: true });
-            }
+            backupDir = path.join(rootDir, 'backup_' + new Date().toISOString().replace(/[:.]/g, '-'));
+            fs.mkdirSync(backupDir, { recursive: true });
 
             const currentFiles = fs.readdirSync(rootDir);
             for (const file of currentFiles) {
@@ -269,14 +276,9 @@ class SystemUpdater {
                 }
 
                 const srcPath = path.join(rootDir, file);
-
-                if (keepOldData) {
-                    const destPath = path.join(backupDir, file);
-                    try { fs.renameSync(srcPath, destPath); } catch (e) {
-                        try { fs.rmSync(srcPath, { recursive: true, force: true }); } catch (ignore) { }
-                    }
-                } else {
-                    try { fs.rmSync(srcPath, { recursive: true, force: true }); } catch (e) { }
+                const destPath = path.join(backupDir, file);
+                try { fs.renameSync(srcPath, destPath); } catch (e) {
+                    try { fs.rmSync(srcPath, { recursive: true, force: true }); } catch (ignore) { }
                 }
             }
 
@@ -302,11 +304,15 @@ class SystemUpdater {
                     fs.renameSync(srcPath, destPath);
                 } catch (e) {
                     console.error(`Failed to move ${file}: ${e.message}`);
+                    throw new Error(`套用新檔案失敗: ${file}`);
                 }
             }
 
-            // Cleanup temp
+            // Cleanup temp and backup if not keeping old data
             try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch (e) { }
+            if (!keepOldData && backupDir) {
+                try { fs.rmSync(backupDir, { recursive: true, force: true }); } catch (e) { }
+            }
 
             // 5. Npm install
             this.broadcast(io, 'running', '安裝依賴套件 (npm install)...', 85);
@@ -315,11 +321,35 @@ class SystemUpdater {
             if (fs.existsSync(path.join(rootDir, 'web-dashboard', 'package.json'))) {
                 this.broadcast(io, 'running', '更新 Dashboard 相依套件...', 90);
                 await this.execAsync('npm install', { cwd: path.join(rootDir, 'web-dashboard') });
+                try { await this.execAsync('npm run build', { cwd: path.join(rootDir, 'web-dashboard') }); } catch (e) { }
             }
 
             this.broadcast(io, 'requires_restart', '✨ 更新完成！舊檔案已備份。請點擊重啟按鈕。', 100);
         } catch (error) {
             console.error('[SystemUpdater] ZIP update failed:', error);
+            
+            if (backupDir && fs.existsSync(backupDir)) {
+                this.broadcast(io, 'running', '更新失敗，執行安全回滾...', 95);
+                try {
+                    const backupFiles = fs.readdirSync(backupDir);
+                    for (const file of backupFiles) {
+                        const bPath = path.join(backupDir, file);
+                        const rPath = path.join(rootDir, file);
+                        if (fs.existsSync(rPath)) fs.rmSync(rPath, { recursive: true, force: true });
+                        fs.renameSync(bPath, rPath);
+                    }
+                    console.log('[SystemUpdater] 回滾成功');
+                } catch (rbError) {
+                    console.error('[SystemUpdater] 回滾失敗:', rbError);
+                }
+                if (!keepOldData) {
+                    try { fs.rmSync(backupDir, { recursive: true, force: true }); } catch (e) {}
+                }
+            }
+            if (tempDir && fs.existsSync(tempDir)) {
+                try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch (e) { }
+            }
+
             this.broadcast(io, 'error', `更新失敗: ${error.message}`);
         }
     }

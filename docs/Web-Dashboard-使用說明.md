@@ -1,6 +1,6 @@
 # 🖥️ Project Golem Web Dashboard 使用說明
 
-> 最後更新：2026-03-04  
+> 最後更新：2026-03-23  
 > Dashboard 技術棧：Next.js (Static Export) + Tailwind CSS + Socket.IO
 
 ## 一、啟動方式
@@ -50,6 +50,9 @@ node server.js     # 預設：http://localhost:3000
 |------|------|
 | 列出所有技能 | 顯示 CORE / USER 技能及描述 |
 | 開關技能 | 啟用/停用特定技能 |
+| 匯出技能書 | 一鍵下載整本技能書（Markdown） |
+| 匯出單一技能 | 在詳情面板下載目前技能 `.md` |
+| 匯入技能書 | 上傳 `.md/.json` 還原技能庫（含匯入前預覽與衝突策略） |
 | 注入技能書 | 重新將技能書注入 Gemini（相當於 `/reload`） |
 | 匯出/匯入膠囊 | 透過 `GOLEM_SKILL::` 字串分享技能 |
 
@@ -115,33 +118,47 @@ node server.js     # 預設：http://localhost:3000
 
 ---
 
-## 四、Setup 流程 (`/dashboard/setup`)
+## 四、Setup 流程 (`/dashboard/system-setup`)
 
-首次使用或 Golem 未初始化時，會自動導向 Setup 頁面：
+首次使用或系統尚未初始化時，會導向 System Setup 頁面：
 
-1. 輸入 Telegram Bot Token
-2. 輸入管理員 ID
-3. 確認 → 寫入 `.env` → 重啟 Bot
+1. 設定資料目錄 (`USER_DATA_DIR`)
+2. 設定記憶模式 (`GOLEM_MEMORY_MODE`，預設 `lancedb-pro`)
+3. 設定遠端存取與密碼（`ALLOW_REMOTE_ACCESS` / `REMOTE_ACCESS_PASSWORD`）
+4. 儲存後寫入 `.env`，並由後端重新載入配置
 
-> 若 `activeGolemStatus === 'pending_setup'`，系統會自動重導向至 `/dashboard/setup`。
+> 建議：若開啟遠端存取，務必設定 `REMOTE_ACCESS_PASSWORD`，並搭配 `SYSTEM_OP_TOKEN` 保護高風險操作。
 
 ---
 
-## 五、後端 API (server.js)
+## 五、後端 API (`web-dashboard/server.js`)
 
-Dashboard 後端由 `web-dashboard/server.js` 提供，主要功能：
+Dashboard 後端主要 API 與即時通訊能力如下：
 
 | 路由 | 說明 |
 |------|------|
+| `GET /api/system/status` | 取得系統與執行狀態 |
+| `GET /api/system/config` | 讀取系統設定（含記憶模式） |
+| `POST /api/system/config` | 更新系統設定（受保護） |
+| `POST /api/system/login` / `POST /api/system/logout` | 遠端登入/登出 |
+| `GET /api/system/security/events` | 讀取安全事件紀錄 |
 | `GET /api/golems` | 取得 Golem 列表 |
-| `GET /api/status/:id` | 取得指定 Golem 狀態 |
-| `POST /api/message` | 向 Golem 傳送訊息 |
-| `GET /api/memory/:id` | 讀取記憶清單 |
-| `POST /api/skills/reload` | 重新注入技能書 |
+| `POST /api/chat` | 發送 Web 端對話訊息 |
+| `GET /api/skills/export` | 匯出技能書（整本或指定技能） |
+| `POST /api/skills/import` | 匯入技能書（支援 JSON/Markdown） |
+| `GET /api/memory` | 查詢向量記憶條目 |
+| `POST /api/upload` | 上傳檔案（受大小限制） |
 | `GET /api/mcp/servers` | 取得 MCP Server 列表 |
-| `POST /api/mcp/test/:name` | 測試指定 MCP 連線 |
+| `POST /api/mcp/servers/:name/test` | 測試指定 MCP 連線 |
 | `GET /api/mcp/logs` | 讀取 MCP 調用日誌 |
 | `Socket.IO` | 即時推送 Golem 回應、系統事件、MCP 日誌 |
+
+### 安全更新重點
+
+- API 層已啟用速率限制與遠端 Session 驗證。
+- 敏感操作（例如 system restart/shutdown、MCP 寫入、技能/記憶異動）需通過 operation guard。
+- 若設定 `SYSTEM_OP_TOKEN`，敏感操作需額外提供 `x-system-op-token`。
+- 上傳與附件路徑已做大小與目錄邊界檢查（防止濫用與越界路徑）。
 
 ---
 

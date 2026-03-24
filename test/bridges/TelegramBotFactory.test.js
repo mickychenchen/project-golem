@@ -1,40 +1,51 @@
-// test/bridges/TelegramBotFactory.test.js
-const assert = require('assert');
-const path = require('path');
-const ConfigManager = require('../../src/config');
-const { createTelegramBot, detectEngine } = require('../../src/bridges/TelegramBotFactory');
+describe('TelegramBotFactory', () => {
+    afterEach(() => {
+        jest.resetModules();
+        jest.clearAllMocks();
+    });
 
-async function runTests() {
-  console.log('--- Testing TelegramBotFactory ---');
-  
-  // Test 1: Default (grammY if installed)
-  console.log('[Test 1] detectEngine() without TG_ENGINE override');
-  ConfigManager.CONFIG.TG_ENGINE = '';
-  let engine = detectEngine();
-  // We installed grammy, so it should be grammy.
-  // Wait, detectEngine caches _engine. We can't easily reset it in the module without modifying it.
-  // We'll just check what it detected.
-  console.log('Detected Engine:', engine);
-  assert(engine === 'grammy' || engine === 'legacy');
+    test('uses legacy engine when TG_ENGINE override is set', () => {
+        jest.isolateModules(() => {
+            const LegacyBot = jest.fn(function (token, opts) {
+                this.token = token;
+                this.opts = opts;
+            });
 
-  // Test 2: Instantiating bot
-  console.log('[Test 2] createTelegramBot()');
-  const bot = createTelegramBot('dummy:token', { polling: false });
-  assert(typeof bot.sendMessage === 'function', 'bot must have sendMessage method');
-  assert(typeof bot.stopPolling === 'function', 'bot must have stopPolling method');
-  assert(typeof bot.startPolling === 'function', 'bot must have startPolling method');
-  assert(typeof bot.isPolling === 'function', 'bot must have isPolling method');
-  
-  if (engine === 'grammy') {
-    assert(bot.constructor.name === 'GrammyBridge', 'bot should be GrammyBridge instance');
-  } else {
-    assert(bot.constructor.name === 'TelegramBot', 'bot should be node-telegram-bot-api instance');
-  }
+            jest.doMock('../../src/config', () => ({
+                CONFIG: { TG_ENGINE: 'legacy' },
+            }));
+            jest.doMock('node-telegram-bot-api', () => LegacyBot, { virtual: true });
 
-  console.log('✅ TelegramBotFactory tests passed.');
-}
+            const { detectEngine, createTelegramBot } = require('../../src/bridges/TelegramBotFactory');
 
-runTests().catch(err => {
-  console.error('❌ Test failed:', err);
-  process.exit(1);
+            expect(detectEngine()).toBe('legacy');
+            const bot = createTelegramBot('dummy:token', { polling: false });
+
+            expect(LegacyBot).toHaveBeenCalledWith('dummy:token', { polling: false });
+            expect(bot).toBeInstanceOf(LegacyBot);
+        });
+    });
+
+    test('uses grammy engine by default when grammy is available', () => {
+        jest.isolateModules(() => {
+            const GrammyBridge = jest.fn(function (token, opts) {
+                this.token = token;
+                this.opts = opts;
+            });
+
+            jest.doMock('../../src/config', () => ({
+                CONFIG: { TG_ENGINE: '' },
+            }));
+            jest.doMock('grammy', () => ({ Bot: jest.fn() }));
+            jest.doMock('../../src/bridges/GrammyBridge', () => GrammyBridge);
+
+            const { detectEngine, createTelegramBot } = require('../../src/bridges/TelegramBotFactory');
+
+            expect(detectEngine()).toBe('grammy');
+            const bot = createTelegramBot('dummy:token', { polling: false });
+
+            expect(GrammyBridge).toHaveBeenCalledWith('dummy:token', { polling: false });
+            expect(bot).toBeInstanceOf(GrammyBridge);
+        });
+    });
 });

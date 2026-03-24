@@ -1,11 +1,14 @@
 "use client";
 
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { socket } from "@/lib/socket";
 import { apiUrl } from "@/lib/api";
+import { useToast } from "@/components/ui/toast-provider";
+import { apiDeleteWrite, apiGet, apiPost, apiPostWrite, apiWrite } from "@/lib/api-client";
+import { useQuery } from "@/hooks/useQuery";
 import {
-    Plug, Plus, Trash2, RefreshCw, Zap, ChevronRight,
-    CheckCircle, XCircle, AlertCircle, Clock, ToggleLeft,
+    Plug, Plus, Trash2, RefreshCw, Zap,
+    CheckCircle, XCircle, AlertCircle, ToggleLeft,
     ToggleRight, Edit2, X, Terminal, List, Play, Cpu
 } from "lucide-react";
 
@@ -35,6 +38,16 @@ interface MCPLogEntry {
     result:     unknown;
     error:      string | null;
     durationMs: number;
+}
+
+type MCPLogSocketPayload = {
+    type?: string;
+    mcpEntry?: MCPLogEntry;
+};
+
+function getErrorMessage(error: unknown, fallback = "未知錯誤"): string {
+    if (error instanceof Error && error.message) return error.message;
+    return fallback;
 }
 
 // useApiBase 已移除，改用 @/lib/api 的 apiUrl()
@@ -120,19 +133,30 @@ function ServerCard({
 
 // ─── Tool Inspector ───────────────────────────────────────────────────────────
 function ToolInspector({ server }: { server: MCPServer | null }) {
-    const [tools,   setTools]   = useState<MCPTool[]>([]);
-    const [loading, setLoading] = useState(false);
-    const [error,   setError]   = useState<string | null>(null);
     const [selected, setSelected] = useState<MCPTool | null>(null);
+    const serverName = server?.name || "";
+    const isServerConnected = Boolean(server?.connected);
+    const { data, error, isLoading } = useQuery<{ tools?: MCPTool[] }>(
+        () => apiGet<{ tools?: MCPTool[] }>(apiUrl(`/api/mcp/servers/${encodeURIComponent(serverName)}/tools`)),
+        [serverName, isServerConnected],
+        { enabled: isServerConnected }
+    );
+    const tools = useMemo(() => data?.tools || [], [data?.tools]);
 
     useEffect(() => {
-        if (!server || !server.connected) { setTools([]); return; }
-        setLoading(true); setError(null);
-        fetch(apiUrl(`/api/mcp/servers/${encodeURIComponent(server.name)}/tools`))
-            .then(r => r.json())
-            .then(d => { setTools(d.tools || []); setLoading(false); })
-            .catch(e => { setError(e.message); setLoading(false); });
-    }, [server]);
+        if (!isServerConnected) {
+            if (selected !== null) {
+                const rafId = requestAnimationFrame(() => setSelected(null));
+                return () => cancelAnimationFrame(rafId);
+            }
+            return;
+        }
+
+        if (selected && !tools.some((tool) => tool.name === selected.name)) {
+            const rafId = requestAnimationFrame(() => setSelected(null));
+            return () => cancelAnimationFrame(rafId);
+        }
+    }, [isServerConnected, selected, tools]);
 
     if (!server) {
         return (
@@ -150,16 +174,16 @@ function ToolInspector({ server }: { server: MCPServer | null }) {
                     <h3 className="font-semibold text-foreground">{server.name}</h3>
                     <p className="text-xs text-muted-foreground font-mono">{server.command} {server.args?.join(' ')}</p>
                 </div>
-                {loading && <RefreshCw className="w-4 h-4 animate-spin text-muted-foreground" />}
+                {isLoading && <RefreshCw className="w-4 h-4 animate-spin text-muted-foreground" />}
             </div>
 
             {error && (
                 <div className="m-4 p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-sm flex items-center gap-2">
-                    <XCircle className="w-4 h-4 flex-shrink-0" /> {error}
+                    <XCircle className="w-4 h-4 flex-shrink-0" /> {error.message}
                 </div>
             )}
 
-            {!server.connected && !loading && (
+            {!server.connected && !isLoading && (
                 <div className="m-4 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400 text-sm flex items-center gap-2">
                     <AlertCircle className="w-4 h-4 flex-shrink-0" /> Server 未連線，請先啟用
                 </div>
@@ -185,7 +209,7 @@ function ToolInspector({ server }: { server: MCPServer | null }) {
                             <span className="truncate font-mono text-xs">{t.name}</span>
                         </button>
                     ))}
-                    {tools.length === 0 && !loading && server.connected && (
+                    {tools.length === 0 && !isLoading && server.connected && (
                         <p className="text-xs text-muted-foreground px-2">無可用工具</p>
                     )}
                 </div>
@@ -202,17 +226,25 @@ function ToolInspector({ server }: { server: MCPServer | null }) {
                                 <div>
                                     <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">參數</p>
                                     <div className="space-y-2">
-                                        {Object.entries(selected.inputSchema.properties).map(([key, schema]: [string, any]) => (
-                                            <div key={key} className="flex items-start gap-3 bg-background/50 rounded-lg p-2">
-                                                <span className="font-mono text-xs text-blue-300 flex-shrink-0">{key}</span>
-                                                <div>
-                                                    {selected.inputSchema.required?.includes(key) && (
-                                                        <span className="text-xs text-red-400 mr-2">必填</span>
-                                                    )}
-                                                    <span className="text-xs text-muted-foreground">{schema?.description || schema?.type}</span>
+                                        {Object.entries(selected.inputSchema.properties).map(([key, schema]) => {
+                                            const schemaObj = (typeof schema === "object" && schema !== null)
+                                                ? schema as Record<string, unknown>
+                                                : {};
+                                            const schemaDescription = typeof schemaObj.description === "string"
+                                                ? schemaObj.description
+                                                : (typeof schemaObj.type === "string" ? schemaObj.type : "");
+                                            return (
+                                                <div key={key} className="flex items-start gap-3 bg-background/50 rounded-lg p-2">
+                                                    <span className="font-mono text-xs text-blue-300 flex-shrink-0">{key}</span>
+                                                    <div>
+                                                        {selected.inputSchema.required?.includes(key) && (
+                                                            <span className="text-xs text-red-400 mr-2">必填</span>
+                                                        )}
+                                                        <span className="text-xs text-muted-foreground">{schemaDescription}</span>
+                                                    </div>
                                                 </div>
-                                            </div>
-                                        ))}
+                                            );
+                                        })}
                                     </div>
                                 </div>
                             )}
@@ -273,7 +305,21 @@ function ServerDialog({
     onSave:  (data: Partial<MCPServer>) => void;
     onClose: () => void;
 }) {
-    const [form, setForm] = useState({
+    type ServerForm = {
+        name: string;
+        command: string;
+        argsStr: string;
+        envStr: string;
+        description: string;
+        enabled: boolean;
+    };
+    const isEdit = !!initial?.name;
+    const editableFields = [
+        { label: '名稱 *', key: 'name', placeholder: 'codex', mono: false, disabled: isEdit },
+        { label: '執行指令 *', key: 'command', placeholder: 'npx', mono: true, disabled: false },
+        { label: '參數 (空格分隔)', key: 'argsStr', placeholder: '-y @modelcontextprotocol/server-codex', mono: true, disabled: false },
+    ] as const;
+    const [form, setForm] = useState<ServerForm>({
         name:        initial?.name        || '',
         command:     initial?.command     || '',
         argsStr:     (initial?.args || []).join(' '),
@@ -292,8 +338,6 @@ function ServerDialog({
         onSave({ name: form.name, command: form.command, args, env, description: form.description, enabled: form.enabled });
     };
 
-    const isEdit = !!initial?.name;
-
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
             <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden">
@@ -302,19 +346,15 @@ function ServerDialog({
                     <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="w-5 h-5" /></button>
                 </div>
                 <div className="px-6 py-5 space-y-4">
-                    {[
-                        { label: '名稱 *', key: 'name', placeholder: 'codex', mono: false, disabled: isEdit },
-                        { label: '執行指令 *', key: 'command', placeholder: 'npx', mono: true },
-                        { label: '參數 (空格分隔)', key: 'argsStr', placeholder: '-y @modelcontextprotocol/server-codex', mono: true },
-                    ].map(({ label, key, placeholder, mono, disabled }) => (
+                    {editableFields.map(({ label, key, placeholder, mono, disabled }) => (
                         <div key={key}>
                             <label className="text-sm text-muted-foreground mb-1 block">{label}</label>
                             <input
                                 className={`w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 ${mono ? 'font-mono' : ''} ${disabled ? 'opacity-50' : ''}`}
-                                value={(form as any)[key]}
+                                value={form[key]}
                                 placeholder={placeholder}
                                 disabled={disabled}
-                                onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))}
+                                onChange={e => setForm((f: ServerForm) => ({ ...f, [key]: e.target.value }))}
                             />
                         </div>
                     ))}
@@ -363,27 +403,29 @@ function ServerDialog({
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function MCPPage() {
+    const toast = useToast();
     const [servers,     setServers]     = useState<MCPServer[]>([]);
     const [selected,    setSelected]    = useState<MCPServer | null>(null);
     const [logs,        setLogs]        = useState<MCPLogEntry[]>([]);
     const [loading,     setLoading]     = useState(true);
     const [dialog,      setDialog]      = useState<{ mode: 'add' | 'edit'; initial: Partial<MCPServer> | null } | null>(null);
-    const [toast,       setToast]       = useState<{ msg: string; ok: boolean } | null>(null);
     const [testResult,  setTestResult]  = useState<{ server: string; ok: boolean; msg: string } | null>(null);
     const [injecting,   setInjecting]   = useState(false);
     const [showReminder, setShowReminder] = useState(false);
 
     const showToast = (msg: string, ok = true) => {
-        setToast({ msg, ok });
-        setTimeout(() => setToast(null), 3000);
+        if (ok) {
+            toast.success(msg);
+        } else {
+            toast.error(msg);
+        }
     };
 
     // ── Fetch servers ─────────────────────────────────────────────
     const fetchServers = useCallback(async () => {
         setLoading(true);
         try {
-            const r = await fetch(apiUrl('/api/mcp/servers'));
-            const d = await r.json();
+            const d = await apiGet<{ servers?: MCPServer[] }>(apiUrl("/api/mcp/servers"));
             setServers(d.servers || []);
         } finally {
             setLoading(false);
@@ -393,8 +435,7 @@ export default function MCPPage() {
     // ── Fetch initial logs ────────────────────────────────────────
     const fetchLogs = useCallback(async () => {
         try {
-            const r = await fetch(apiUrl('/api/mcp/logs?limit=100'));
-            const d = await r.json();
+            const d = await apiGet<{ logs?: MCPLogEntry[] }>(apiUrl("/api/mcp/logs?limit=100"));
             setLogs(d.logs || []);
         } catch { /* ignore */ }
     }, []);
@@ -403,10 +444,12 @@ export default function MCPPage() {
 
     // ── Socket — real-time MCP logs ───────────────────────────────
     useEffect(() => {
-        const handler = (data: any) => {
-            if (data.type === 'mcp' && data.mcpEntry) {
-                setLogs(prev => [...prev.slice(-199), data.mcpEntry]);
-            }
+        const handler = (payload: unknown) => {
+            if (!payload || typeof payload !== "object") return;
+            const data = payload as MCPLogSocketPayload;
+            const entry = data.mcpEntry;
+            if (data.type !== "mcp" || !entry) return;
+            setLogs((prev) => [...prev.slice(-199), entry]);
         };
         socket.on('log', handler);
         return () => { socket.off('log', handler); };
@@ -416,16 +459,16 @@ export default function MCPPage() {
     useEffect(() => {
         if (selected) {
             const fresh = servers.find(s => s.name === selected.name);
-            if (fresh) setSelected(fresh);
+            if (fresh && fresh !== selected) setSelected(fresh);
         }
-    }, [servers]);
+    }, [selected, servers]);
 
     // ── Actions ───────────────────────────────────────────────────
     const handleToggle = async (name: string, enabled: boolean) => {
-        await fetch(apiUrl(`/api/mcp/servers/${encodeURIComponent(name)}/toggle`), {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ enabled })
-        });
+        await apiPostWrite(
+            apiUrl(`/api/mcp/servers/${encodeURIComponent(name)}/toggle`),
+            { enabled }
+        );
         showToast(enabled ? `${name} 已啟用` : `${name} 已停用`);
         if (enabled) setShowReminder(true);
         await fetchServers();
@@ -435,15 +478,14 @@ export default function MCPPage() {
         setInjecting(true);
         setShowReminder(false);
         try {
-            const r = await fetch(apiUrl('/api/skills/inject'), { method: 'POST' });
-            const d = await r.json();
+            const d = await apiPost<{ success?: boolean; error?: string }>(apiUrl("/api/skills/inject"));
             if (d.success) {
                 showToast('已觸發注入！Golem 正在重新載入技能...', true);
             } else {
                 throw new Error(d.error || '調用失敗');
             }
-        } catch (e: any) {
-            showToast(`注入失敗: ${e.message}`, false);
+        } catch (e: unknown) {
+            showToast(`注入失敗: ${getErrorMessage(e, "調用失敗")}`, false);
         } finally {
             setInjecting(false);
         }
@@ -451,7 +493,7 @@ export default function MCPPage() {
 
     const handleDelete = async (name: string) => {
         if (!confirm(`確定要刪除 "${name}"？`)) return;
-        await fetch(apiUrl(`/api/mcp/servers/${encodeURIComponent(name)}`), { method: 'DELETE' });
+        await apiDeleteWrite(apiUrl(`/api/mcp/servers/${encodeURIComponent(name)}`));
         showToast(`${name} 已刪除`);
         if (selected?.name === name) setSelected(null);
         await fetchServers();
@@ -460,12 +502,18 @@ export default function MCPPage() {
     const handleTest = async (name: string) => {
         setTestResult(null);
         try {
-            const r = await fetch(apiUrl(`/api/mcp/servers/${encodeURIComponent(name)}/test`), { method: 'POST' });
-            const d = await r.json();
-            setTestResult({ server: name, ok: d.success, msg: d.success ? `發現 ${d.toolCount} 個工具` : d.error });
+            const d = await apiPostWrite<{ success?: boolean; toolCount?: number; error?: string }>(
+                apiUrl(`/api/mcp/servers/${encodeURIComponent(name)}/test`),
+                undefined
+            );
+            setTestResult({
+                server: name,
+                ok: Boolean(d.success),
+                msg: d.success ? `發現 ${d.toolCount} 個工具` : (d.error || "測試失敗"),
+            });
             setTimeout(() => setTestResult(null), 4000);
-        } catch (e: any) {
-            setTestResult({ server: name, ok: false, msg: e.message });
+        } catch (e: unknown) {
+            setTestResult({ server: name, ok: false, msg: getErrorMessage(e) });
             setTimeout(() => setTestResult(null), 4000);
         }
     };
@@ -478,17 +526,15 @@ export default function MCPPage() {
         const method = isEdit ? 'PUT' : 'POST';
 
         try {
-            const r = await fetch(url, {
-                method, headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(data)
-            });
-            const d = await r.json();
+            const d = method === "PUT"
+                ? await apiWrite<{ error?: string }>(url, { method: "PUT", body: data })
+                : await apiPost<{ error?: string }>(url, data);
             if (d.error) throw new Error(d.error);
             showToast(isEdit ? '更新成功' : '新增成功');
             setDialog(null);
             await fetchServers();
-        } catch (e: any) {
-            showToast(e.message, false);
+        } catch (e: unknown) {
+            showToast(getErrorMessage(e), false);
         }
     };
 
@@ -638,17 +684,6 @@ export default function MCPPage() {
                 />
             )}
 
-            {/* Toast */}
-            {toast && (
-                <div className={`fixed bottom-6 right-6 z-50 px-4 py-3 rounded-xl shadow-2xl text-sm font-medium flex items-center gap-2 transition-all ${
-                    toast.ok
-                        ? 'bg-emerald-600 text-white'
-                        : 'bg-red-600 text-white'
-                }`}>
-                    {toast.ok ? <CheckCircle className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
-                    {toast.msg}
-                </div>
-            )}
         </div>
     );
 }

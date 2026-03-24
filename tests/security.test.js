@@ -1,4 +1,4 @@
-const SecurityManager = require('../src/managers/SecurityManager');
+const { SecurityManager } = require('../packages/security');
 
 describe('SecurityManager', () => {
     let sm;

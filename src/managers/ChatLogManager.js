@@ -1,13 +1,23 @@
 const fs = require('fs');
 const path = require('path');
+const util = require('util');
 const { LOG_RETENTION_MS, MEMORY_TIERS } = require('../core/constants');
 const ResponseParser = require('../utils/ResponseParser');
 
+let sqlite3Instance = null;
+
+function getSqlite3() {
+    if (sqlite3Instance) return sqlite3Instance;
+    try {
+        sqlite3Instance = require('sqlite3').verbose();
+        return sqlite3Instance;
+    } catch (error) {
+        throw new Error(`sqlite3 無法載入，請確認已安裝對應 Node 版本的 native bindings: ${error.message}`);
+    }
+}
+
 /**
- * 📝 ChatLogManager - 金字塔式分層記憶壓縮引擎
- * 
- * 架構：Hourly → Daily → Monthly → Yearly → Era
- * 每一層有獨立的保留期與摘要字數上限
+ * 📝 ChatLogManager - 基於 SQLite (WAL) 的記憶壓縮引擎
  */
 class ChatLogManager {
     constructor(options = {}) {
@@ -15,151 +25,198 @@ class ChatLogManager {
         this.golemId = options.golemId || 'default';
         this.logDir = baseLogDir;
         this.retentionMs = options.retentionMs || LOG_RETENTION_MS;
+        this.dbDir = path.join(this.logDir, 'db');
+        this.dbPath = path.join(this.dbDir, `chat_logs_${this.golemId}.sqlite`);
 
-        // 🏛️ 分層子目錄
+        // Legacy dirs for migration purposes
         this.dirs = {
-            hourly: this.logDir,                              // Tier 0: 原始日誌 (根目錄)
-            daily: path.join(this.logDir, 'daily'),           // Tier 1: 每日摘要
-            monthly: path.join(this.logDir, 'monthly'),       // Tier 2: 每月精華
-            yearly: path.join(this.logDir, 'yearly'),         // Tier 3: 年度回顧
-            era: path.join(this.logDir, 'era'),               // Tier 4: 紀元里程碑
+            hourly: this.logDir,
+            daily: path.join(this.logDir, 'daily'),
+            monthly: path.join(this.logDir, 'monthly'),
+            yearly: path.join(this.logDir, 'yearly'),
+            era: path.join(this.logDir, 'era'),
         };
 
         this._isInitialized = false;
+        this.db = null;
+        this.runAsync = null;
+        this.allAsync = null;
+        this.getAsync = null;
     }
 
-    /**
-     * 🚀 延遲初始化：確保目錄存在並處理遷移
-     */
     async init() {
         if (this._isInitialized) return;
-        this._ensureDirectories();
-        this._migrateExistingDailySummaries();
-        this.cleanup();
-        this._isInitialized = true;
-    }
+        
+        if (!fs.existsSync(this.dbDir)) {
+            fs.mkdirSync(this.dbDir, { recursive: true });
+        }
 
-    // ============================================================
-    // 🗂️ 目錄管理
-    // ============================================================
+        const sqlite3 = getSqlite3();
+        this.db = new sqlite3.Database(this.dbPath);
+        this.runAsync = util.promisify(this.db.run.bind(this.db));
+        this.allAsync = util.promisify(this.db.all.bind(this.db));
+        this.getAsync = util.promisify(this.db.get.bind(this.db));
 
-    _ensureDirectories() {
-        Object.values(this.dirs).forEach(dir => {
-            if (!fs.existsSync(dir)) {
-                fs.mkdirSync(dir, { recursive: true });
-            }
-        });
-    }
-
-    /**
-     * 遷移舊版每日摘要 (根目錄的 YYYYMMDD.log) 到 daily/ 子目錄
-     * 只在首次升級時執行
-     */
-    _migrateExistingDailySummaries() {
-        try {
-            const files = fs.readdirSync(this.dirs.hourly)
-                .filter(f => f.length === 12 && f.endsWith('.log'));
-
-            files.forEach(file => {
-                const src = path.join(this.dirs.hourly, file);
-                const dest = path.join(this.dirs.daily, file);
-                if (!fs.existsSync(dest)) {
-                    fs.renameSync(src, dest);
-                    console.log(`📦 [LogManager] 遷移舊版摘要至 daily/: ${file}`);
-                }
+        await new Promise((resolve, reject) => {
+            this.db.serialize(() => {
+                this.db.run('PRAGMA journal_mode = WAL;');
+                this.db.run('PRAGMA synchronous = NORMAL;');
+                
+                this.db.run(`
+                    CREATE TABLE IF NOT EXISTS messages (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        timestamp INTEGER,
+                        date_string TEXT,
+                        hour_string TEXT,
+                        sender TEXT,
+                        content TEXT,
+                        type TEXT,
+                        role TEXT,
+                        is_system INTEGER
+                    );
+                `);
+                
+                this.db.run(`
+                    CREATE TABLE IF NOT EXISTS summaries (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        tier TEXT,
+                        date_string TEXT,
+                        timestamp INTEGER,
+                        content TEXT,
+                        original_size INTEGER,
+                        summary_size INTEGER
+                    );
+                `, (err) => {
+                    if (err) reject(err);
+                    else resolve();
+                });
             });
-        } catch (e) {
-            // 靜默忽略：首次啟動時可能無舊檔案
+        });
+
+        // 進行舊版資料庫移轉 (僅執行一次)
+        await this._migrateLegacyJSON();
+        
+        this._isInitialized = true;
+        await this.cleanup();
+    }
+
+    // ============================================================
+    // 🗂️ 遷移舊版 JSON 日誌
+    // ============================================================
+    async _migrateLegacyJSON() {
+        const flagFile = path.join(this.dbDir, '.legacy_migrated');
+        if (fs.existsSync(flagFile)) return;
+
+        console.log(`📦 [LogManager][${this.golemId}] 開始遷移舊版 JSON 日誌至 SQLite...`);
+        try {
+            await this.runAsync("BEGIN TRANSACTION");
+
+            // Migrate Hourly
+            if (fs.existsSync(this.dirs.hourly)) {
+                const files = fs.readdirSync(this.dirs.hourly).filter(f => f.length === 14 && f.endsWith('.log'));
+                for (const file of files) {
+                    try {
+                        const logs = JSON.parse(fs.readFileSync(path.join(this.dirs.hourly, file), 'utf8'));
+                        for (const l of logs) {
+                            const dateString = file.substring(0, 8);
+                            const hourString = file.substring(0, 10);
+                            await this.runAsync(
+                                `INSERT INTO messages (timestamp, date_string, hour_string, sender, content, type, role, is_system) 
+                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                                [l.timestamp || Date.now(), dateString, hourString, l.sender, l.content, l.type || 'unknown', l.role || l.sender, l.isSystem ? 1 : 0]
+                            );
+                        }
+                    } catch (e) { }
+                }
+            }
+
+            // Migrate Summaries
+            const migrateTier = async (dir, tierName) => {
+                if (!fs.existsSync(dir)) return;
+                const files = fs.readdirSync(dir).filter(f => f.endsWith('.log'));
+                for (const file of files) {
+                    try {
+                        const logs = JSON.parse(fs.readFileSync(path.join(dir, file), 'utf8'));
+                        for (const l of logs) {
+                            await this.runAsync(
+                                `INSERT INTO summaries (tier, date_string, timestamp, content, original_size, summary_size) 
+                                 VALUES (?, ?, ?, ?, ?, ?)`,
+                                [tierName, l.date || file.replace('.log', ''), l.timestamp || Date.now(), l.content, 0, (l.content || '').length]
+                            );
+                        }
+                    } catch (e) { }
+                }
+            };
+
+            await migrateTier(this.dirs.daily, 'daily');
+            await migrateTier(this.dirs.monthly, 'monthly');
+            await migrateTier(this.dirs.yearly, 'yearly');
+            await migrateTier(this.dirs.era, 'era');
+
+            await this.runAsync("COMMIT");
+            fs.writeFileSync(flagFile, 'migrated');
+            console.log(`✅ [LogManager] 遷移完成！`);
+        } catch (error) {
+            await this.runAsync("ROLLBACK");
+            console.error(`❌ [LogManager] 遷移失敗:`, error);
         }
     }
 
     // ============================================================
     // 📝 日誌寫入
     // ============================================================
-
-    _getLogPath() {
-        const now = new Date();
-        const yyyy = now.getFullYear();
-        const mm = String(now.getMonth() + 1).padStart(2, '0');
-        const dd = String(now.getDate()).padStart(2, '0');
-        const hh = String(now.getHours()).padStart(2, '0');
-        return path.join(this.dirs.hourly, `${yyyy}${mm}${dd}${hh}.log`);
-    }
-
     append(entry) {
-        try {
-            const logFilePath = this._getLogPath();
-            const logEntry = { timestamp: Date.now(), ...entry };
-
-            let logs = [];
-            if (fs.existsSync(logFilePath)) {
-                try {
-                    logs = JSON.parse(fs.readFileSync(logFilePath, 'utf8'));
-                } catch (e) {
-                    console.warn(`⚠️ [LogManager] 無法解析舊日誌，將建立新陣列: ${logFilePath}`);
-                }
-            }
-
-            logs.push(logEntry);
-            fs.writeFileSync(logFilePath, JSON.stringify(logs, null, 2));
-        } catch (e) {
-            console.error("❌ [LogManager] 日誌寫入失敗:", e.message);
+        if (!this._isInitialized || !this.db) {
+            console.warn(`⚠️ [LogManager] 尚未初始化，無法寫入紀錄`);
+            return;
         }
+        
+        const now = new Date();
+        const dateString = this._formatDate(now);
+        const hourString = dateString + String(now.getHours()).padStart(2, '0');
+        
+        this.db.run(
+            `INSERT INTO messages (timestamp, date_string, hour_string, sender, content, type, role, is_system) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+                Date.now(), 
+                dateString, 
+                hourString, 
+                entry.sender || 'System', 
+                entry.content || '', 
+                entry.type || 'unknown', 
+                entry.role || entry.sender, 
+                entry.isSystem ? 1 : 0
+            ],
+            (err) => {
+                if (err) console.error("❌ [LogManager] SQLite 寫入失敗:", err.message);
+            }
+        );
     }
 
     // ============================================================
-    // 🧹 分層清理 (修復致命 Bug：各層獨立清理)
+    // 🧹 分層清理
     // ============================================================
-
-    cleanup() {
+    async cleanup() {
+        if (!this._isInitialized || !this.db) return;
         const now = Date.now();
 
-        // Tier 0: hourly 原始日誌 → 72 小時
-        this._cleanDir(this.dirs.hourly, now, MEMORY_TIERS.HOURLY_RETENTION_MS, 14);
-
-        // Tier 1: daily 摘要 → 90 天
-        this._cleanDir(this.dirs.daily, now, MEMORY_TIERS.DAILY_RETENTION_MS);
-
-        // Tier 2: monthly 精華 → 5 年
-        this._cleanDir(this.dirs.monthly, now, MEMORY_TIERS.MONTHLY_RETENTION_MS);
-
-        // Tier 3 & 4: yearly / era → 永不刪除
-    }
-
-    /**
-     * 清理指定目錄中的過期日誌
-     * @param {string} dir - 目標目錄
-     * @param {number} now - 當前時間
-     * @param {number} retentionMs - 保留期
-     * @param {number} [filenameLength] - 若指定，僅清理檔名長度匹配的檔案
-     */
-    _cleanDir(dir, now, retentionMs, filenameLength = null) {
-        if (!fs.existsSync(dir)) return;
         try {
-            fs.readdirSync(dir).forEach(file => {
-                if (!file.endsWith('.log')) return;
-                if (filenameLength && file.length !== filenameLength) return;
-
-                const filePath = path.join(dir, file);
-                const stats = fs.statSync(filePath);
-                if ((now - stats.mtimeMs) > retentionMs) {
-                    fs.unlinkSync(filePath);
-                    console.log(`🧹 [LogManager] 清理過期檔案: ${path.relative(this.logDir, filePath)}`);
-                }
-            });
+            await this.runAsync('BEGIN TRANSACTION');
+            // Tier 0: 原則保留 72 小時
+            await this.runAsync(`DELETE FROM messages WHERE timestamp < ?`, [now - MEMORY_TIERS.HOURLY_RETENTION_MS]);
+            // Tier 1: daily 摘要 → 90 天
+            await this.runAsync(`DELETE FROM summaries WHERE tier = 'daily' AND timestamp < ?`, [now - MEMORY_TIERS.DAILY_RETENTION_MS]);
+            // Tier 2: monthly 精華 → 5 年
+            await this.runAsync(`DELETE FROM summaries WHERE tier = 'monthly' AND timestamp < ?`, [now - MEMORY_TIERS.MONTHLY_RETENTION_MS]);
+            await this.runAsync('COMMIT');
+            
+            // VACUUM 釋放空間 (可選，防止檔案無限增長)
+            // this.db.run('VACUUM;'); 
         } catch (e) {
-            console.error(`❌ [LogManager] 清理失敗 (${dir}):`, e.message);
+            await this.runAsync('ROLLBACK');
+            console.error(`❌ [LogManager] 清理失敗:`, e.message);
         }
-    }
-
-    // ============================================================
-    // 🔧 工具函式
-    // ============================================================
-
-    _getYesterdayDateString() {
-        const d = new Date();
-        d.setDate(d.getDate() - 1);
-        return this._formatDate(d);
     }
 
     _formatDate(d) {
@@ -167,6 +224,12 @@ class ChatLogManager {
         const mm = String(d.getMonth() + 1).padStart(2, '0');
         const dd = String(d.getDate()).padStart(2, '0');
         return `${yyyy}${mm}${dd}`;
+    }
+
+    _getYesterdayDateString() {
+        const d = new Date();
+        d.setDate(d.getDate() - 1);
+        return this._formatDate(d);
     }
 
     _getLastMonthString() {
@@ -184,363 +247,195 @@ class ChatLogManager {
 
     _getCurrentDecadeString() {
         const year = new Date().getFullYear();
-        const decadeStart = Math.floor(year / 10) * 10;
-        return `decade_${decadeStart}`;
+        return 'decade_' + (Math.floor(year / 10) * 10);
     }
 
     _getLastDecadeString() {
         const year = new Date().getFullYear();
-        const lastDecadeStart = Math.floor(year / 10) * 10 - 10;
-        return `decade_${lastDecadeStart}`;
+        return 'decade_' + (Math.floor(year / 10) * 10 - 10);
     }
 
     // ============================================================
     // 🏛️ Tier 0 → Tier 1: Hourly → Daily 壓縮
     // ============================================================
-
     async compressLogsForDate(dateString, brain, force = false) {
-        console.log(`📦 [LogManager][${this.golemId}] 檢查 ${dateString} 的日誌狀態... (Force: ${force})`);
-
-        // 檢查是否已有摘要
-        const summaryPath = path.join(this.dirs.daily, `${dateString}.log`);
-        // ✨ [H-1 Fix] 即使已有摘要，只要還有源檔案，就不應 return，而是進入壓縮並「追加」到摘要陣列中
-        // 這樣確保如果在中午觸發了一次「本日壓縮」，跨日時還能把下午與晚上的日誌補齊。
-
-        const files = fs.readdirSync(this.dirs.hourly)
-            .filter(f => f.startsWith(dateString) && f.length === 14 && f.endsWith('.log'))
-            .sort();
-
-        if (!force && files.length < 3) {
-            console.log(`ℹ️ [LogManager] ${dateString} 僅有 ${files.length} 個 hourly 日誌，未達壓縮門檻 (需 >= 3)。`);
+        if (!this._isInitialized || !this.db) {
+            console.warn(`⚠️ [LogManager] 尚未初始化，無法執行 Date 壓縮 (${dateString})`);
             return;
         }
-
-        if (files.length === 0) return;
+        console.log(`📦 [LogManager][${this.golemId}] 檢查 ${dateString} 的日誌狀態...`);
+        const messages = await this.allAsync(`SELECT * FROM messages WHERE date_string = ? ORDER BY timestamp ASC`, [dateString]);
+        
+        if (!force && messages.length < 5) {
+            console.log(`ℹ️ [LogManager] ${dateString} 對話過少 (${messages.length} 條)，未達壓縮門檻。`);
+            return;
+        }
+        if (messages.length === 0) return;
 
         let combinedContent = "";
-        files.forEach(file => {
-            try {
-                const logs = JSON.parse(fs.readFileSync(path.join(this.dirs.hourly, file), 'utf8'));
-                logs.forEach(l => {
-                    const time = new Date(l.timestamp).toLocaleTimeString('zh-TW', { hour12: false });
-                    combinedContent += `[${time}] ${l.sender}: ${l.content}\n`;
-                });
-            } catch (e) { }
+        messages.forEach(l => {
+            const time = new Date(l.timestamp).toLocaleTimeString('zh-TW', { hour12: false });
+            combinedContent += `[${time}] ${l.sender}: ${l.content}\n`;
         });
 
-        if (!combinedContent) return;
-
         const totalChars = combinedContent.length;
-        const totalLines = combinedContent.split('\n').length - 1;
-
-        console.log(`🤖 [LogManager] 檔案數(${files.length}) 達標，待壓縮對話計 ${totalLines} 條，總字數計 ${totalChars}。請求 Gemini 進行每日摘要壓縮...`);
-        const prompt = `【系統指令：對話回顧與壓縮】\n以下是 ${dateString} 多個時段內的對話記錄。請將這些內容整理成約 ${MEMORY_TIERS.DAILY_SUMMARY_CHARS} 字的精煉摘要，保留所有重要的決策、任務進度、技術細節與核心重點，並以條列式優雅地呈現。\n\n對話內容：\n${combinedContent}`;
-
-        await this._compressAndSave(prompt, summaryPath, dateString, 'daily_summary', files, this.dirs.hourly, brain, totalChars);
+        console.log(`🤖 [LogManager] 待壓縮對話計 ${messages.length} 條，總字數 ${totalChars}。請求 Gemini...`);
+        
+        const prompt = `【系統指令：對話回顧與壓縮】\n以下是 ${dateString} 的對話記錄。請整理成約 ${MEMORY_TIERS.DAILY_SUMMARY_CHARS} 字的精煉摘要，保留重要決策、進度與細節：\n\n${combinedContent}`;
+        await this._compressAndSave(prompt, dateString, 'daily', brain, totalChars);
     }
 
     // ============================================================
     // 🏛️ Tier 1 → Tier 2: Daily → Monthly 壓縮
     // ============================================================
-
     async compressMonthly(monthString, brain) {
+        if (!this._isInitialized || !this.db) {
+            console.warn(`⚠️ [LogManager] 尚未初始化，無法執行 Monthly 壓縮 (${monthString})`);
+            return;
+        }
         console.log(`📅 [LogManager][${this.golemId}] 開始 ${monthString} 月度壓縮...`);
-
-        const outputPath = path.join(this.dirs.monthly, `${monthString}.log`);
-        if (fs.existsSync(outputPath)) {
-            console.log(`ℹ️ [LogManager] ${monthString} 已有月度摘要，跳過。`);
+        
+        const existing = await this.getAsync(`SELECT id FROM summaries WHERE tier = 'monthly' AND date_string = ?`, [monthString]);
+        if (existing) {
+            console.log(`ℹ️ [LogManager] ${monthString} 已有多月度摘要，跳過。`);
             return;
         }
 
-        const files = fs.readdirSync(this.dirs.daily)
-            .filter(f => f.startsWith(monthString) && f.endsWith('.log'))
-            .sort();
-
-        if (files.length === 0) {
-            console.log(`ℹ️ [LogManager] ${monthString} 無每日摘要可壓縮。`);
-            return;
-        }
+        const summaries = await this.allAsync(`SELECT * FROM summaries WHERE tier = 'daily' AND date_string LIKE ? ORDER BY date_string ASC`, [monthString + '%']);
+        if (summaries.length === 0) return;
 
         let combinedContent = "";
-        files.forEach(file => {
-            try {
-                const logs = JSON.parse(fs.readFileSync(path.join(this.dirs.daily, file), 'utf8'));
-                const dateStr = file.replace('.log', '');
-                logs.forEach(entry => {
-                    if (entry.content && entry.content.trim()) {
-                        combinedContent += `\n--- [${dateStr}] ---\n${entry.content}\n`;
-                    }
-                });
-            } catch (e) { }
+        summaries.forEach(s => {
+            combinedContent += `\n--- [${s.date_string}] ---\n${s.content}\n`;
         });
 
-        if (!combinedContent) return;
-
         const totalChars = combinedContent.length;
-        const totalLines = combinedContent.split('\n').filter(l => l.includes('--- [')).length;
-
-        console.log(`🤖 [LogManager] 每日摘要數(${files.length}) 達標，待壓縮內容計 ${totalChars} 字。請求 Gemini 進行月度精華壓縮...`);
-        const prompt = `【系統指令：月度記憶壓縮】\n以下是 ${monthString} 一整個月的每日對話摘要，共 ${files.length} 天。請將這些內容整合為約 ${MEMORY_TIERS.MONTHLY_SUMMARY_CHARS} 字的月度精華報告。\n\n重點保留：\n- 該月的主要里程碑與重大決策\n- 技術進展與架構變更\n- 使用者偏好與行為模式的變化\n- 尚未完成的待辦事項\n\n每日摘要：\n${combinedContent}`;
-
-        await this._compressAndSave(prompt, outputPath, monthString, 'monthly_summary', files, this.dirs.daily, brain, totalChars);
+        const prompt = `【系統指令：月度記憶壓縮】\n以下是 ${monthString} 的每日摘要。請整合為約 ${MEMORY_TIERS.MONTHLY_SUMMARY_CHARS} 字的月度精華：\n\n${combinedContent}`;
+        
+        await this._compressAndSave(prompt, monthString, 'monthly', brain, totalChars);
     }
 
     // ============================================================
     // 🏛️ Tier 2 → Tier 3: Monthly → Yearly 壓縮
     // ============================================================
-
     async compressYearly(yearString, brain) {
+        if (!this._isInitialized || !this.db) {
+            console.warn(`⚠️ [LogManager] 尚未初始化，無法執行 Yearly 壓縮 (${yearString})`);
+            return;
+        }
         console.log(`📆 [LogManager][${this.golemId}] 開始 ${yearString} 年度壓縮...`);
+        
+        const existing = await this.getAsync(`SELECT id FROM summaries WHERE tier = 'yearly' AND date_string = ?`, [yearString]);
+        if (existing) return;
 
-        const outputPath = path.join(this.dirs.yearly, `${yearString}.log`);
-        if (fs.existsSync(outputPath)) {
-            console.log(`ℹ️ [LogManager] ${yearString} 已有年度摘要，跳過。`);
-            return;
-        }
-
-        const files = fs.readdirSync(this.dirs.monthly)
-            .filter(f => f.startsWith(yearString) && f.endsWith('.log'))
-            .sort();
-
-        if (files.length === 0) {
-            console.log(`ℹ️ [LogManager] ${yearString} 無月度摘要可壓縮。`);
-            return;
-        }
+        const summaries = await this.allAsync(`SELECT * FROM summaries WHERE tier = 'monthly' AND date_string LIKE ? ORDER BY date_string ASC`, [yearString + '%']);
+        if (summaries.length === 0) return;
 
         let combinedContent = "";
-        files.forEach(file => {
-            try {
-                const logs = JSON.parse(fs.readFileSync(path.join(this.dirs.monthly, file), 'utf8'));
-                const monthStr = file.replace('.log', '');
-                logs.forEach(entry => {
-                    if (entry.content && entry.content.trim()) {
-                        combinedContent += `\n--- [${monthStr}] ---\n${entry.content}\n`;
-                    }
-                });
-            } catch (e) { }
+        summaries.forEach(s => {
+            combinedContent += `\n--- [${s.date_string}] ---\n${s.content}\n`;
         });
 
-        if (!combinedContent) return;
-
-        const prompt = `【系統指令：年度記憶壓縮】\n以下是 ${yearString} 年一整年的月度精華摘要，共 ${files.length} 個月。請將這些內容整合為約 ${MEMORY_TIERS.YEARLY_SUMMARY_CHARS} 字的年度回顧報告。\n\n重點保留：\n- 年度重大事件與里程碑\n- 長期目標的演進與成果\n- 核心人際關係與偏好變化\n- 重大技術決策與架構演進\n\n月度摘要：\n${combinedContent}`;
-
-        // 年度摘要不刪除源檔案 (月度摘要有自己的過期機制)
-        await this._compressAndSave(prompt, outputPath, yearString, 'yearly_summary', null, null, brain);
+        const prompt = `【系統指令：年度記憶壓縮】\n以下是 ${yearString} 的月度摘要。請整合為約 ${MEMORY_TIERS.YEARLY_SUMMARY_CHARS} 字的年度回顧：\n\n${combinedContent}`;
+        await this._compressAndSave(prompt, yearString, 'yearly', brain, combinedContent.length);
     }
 
     // ============================================================
     // 🏛️ Tier 3 → Tier 4: Yearly → Era 壓縮
     // ============================================================
-
     async compressEra(decadeString, brain) {
-        console.log(`🏛️ [LogManager][${this.golemId}] 開始 ${decadeString} 紀元壓縮...`);
-
-        const outputPath = path.join(this.dirs.era, `${decadeString}.log`);
-        if (fs.existsSync(outputPath)) {
-            console.log(`ℹ️ [LogManager] ${decadeString} 已有紀元摘要，跳過。`);
+        if (!this._isInitialized || !this.db) {
+            console.warn(`⚠️ [LogManager] 尚未初始化，無法執行 Era 壓縮 (${decadeString})`);
             return;
         }
-
-        // 解析十年範圍 (e.g., "decade_2020" → 2020~2029)
+        console.log(`🏛️ [LogManager][${this.golemId}] 開始 ${decadeString} 紀元壓縮...`);
         const startYear = parseInt(decadeString.replace('decade_', ''));
         const endYear = startYear + 9;
 
-        const files = fs.readdirSync(this.dirs.yearly)
-            .filter(f => {
-                const year = parseInt(f.replace('.log', ''));
-                return year >= startYear && year <= endYear && f.endsWith('.log');
-            })
-            .sort();
+        const existing = await this.getAsync(`SELECT id FROM summaries WHERE tier = 'era' AND date_string = ?`, [decadeString]);
+        if (existing) return;
 
-        if (files.length === 0) {
-            console.log(`ℹ️ [LogManager] ${decadeString} 無年度摘要可壓縮。`);
-            return;
-        }
+        const summaries = await this.allAsync(`SELECT * FROM summaries WHERE tier = 'yearly' AND CAST(date_string AS INTEGER) BETWEEN ? AND ? ORDER BY date_string ASC`, [startYear, endYear]);
+        if (summaries.length === 0) return;
 
         let combinedContent = "";
-        files.forEach(file => {
-            try {
-                const logs = JSON.parse(fs.readFileSync(path.join(this.dirs.yearly, file), 'utf8'));
-                const yearStr = file.replace('.log', '');
-                logs.forEach(entry => {
-                    if (entry.content && entry.content.trim()) {
-                        combinedContent += `\n--- [${yearStr} 年] ---\n${entry.content}\n`;
-                    }
-                });
-            } catch (e) { }
+        summaries.forEach(s => {
+            combinedContent += `\n--- [${s.date_string} 年] ---\n${s.content}\n`;
         });
 
-        if (!combinedContent) return;
-
-        const prompt = `【系統指令：紀元記憶壓縮】\n以下是 ${startYear}~${endYear} 十年間的年度回顧摘要，共 ${files.length} 年。請將這些內容整合為約 ${MEMORY_TIERS.ERA_SUMMARY_CHARS} 字的紀元里程碑。\n\n重點保留：\n- 這十年中最重大的人生事件\n- 核心價值觀與世界觀的演變\n- 最重要的人際關係和技術成就\n- 人格特質與興趣愛好的長期變化\n\n年度摘要：\n${combinedContent}`;
-
-        // 紀元摘要不刪除年度源檔案 (永久保留)
-        await this._compressAndSave(prompt, outputPath, decadeString, 'era_summary', null, null, brain);
+        const prompt = `【系統指令：紀元記憶壓縮】\n以下是 ${startYear}~${endYear} 的年度摘要。請整合為約 ${MEMORY_TIERS.ERA_SUMMARY_CHARS} 字的紀元里程碑：\n\n${combinedContent}`;
+        await this._compressAndSave(prompt, decadeString, 'era', brain, combinedContent.length);
     }
 
-    // ============================================================
-    // 🔧 通用壓縮核心
-    // ============================================================
-
-    /**
-     * 通用壓縮並儲存邏輯
-     * @param {string} prompt - 給 Gemini 的壓縮指令
-     * @param {string} outputPath - 摘要輸出路徑
-     * @param {string} label - 日誌標籤
-     * @param {string} type - 摘要類型
-     * @param {Array|null} sourceFiles - 壓縮成功後要刪除的源檔案
-     * @param {string|null} sourceDir - 源檔案所在目錄
-     * @param {Object} brain - GolemBrain 實例
-     * @param {number} originalSize - 原始內容字數 (用於計算壓縮率)
-     */
-    async _compressAndSave(prompt, outputPath, label, type, sourceFiles, sourceDir, brain, originalSize = 0) {
+    async _compressAndSave(prompt, dateString, tier, brain, originalSize = 0) {
         const startTime = Date.now();
         try {
             const rawResponse = await brain.sendMessage(prompt, false);
             const duration = ((Date.now() - startTime) / 1000).toFixed(1);
             const parsed = ResponseParser.parse(rawResponse);
             const summaryText = parsed.reply || "";
-            const summarySize = summaryText.length;
-            const ratio = originalSize > 0 ? ((1 - (summarySize / originalSize)) * 100).toFixed(1) : 0;
 
-            if (!summaryText || summaryText.trim().length === 0) {
-                console.error(`⚠️ [LogManager] ${label} Gemini 回傳摘要為空，取消歸檔以保護原始數據。`);
-                return;
-            }
+            if (!summaryText || summaryText.trim().length === 0) return;
 
-            const summaryEntry = {
-                date: label,
-                timestamp: Date.now(),
-                type: type,
-                content: summaryText
-            };
+            // Optional: for daily, we could delete the raw messages afterwards. 
+            // the legacy json logic did it. We'll rely on cleanup() to delete old messages.
 
-            // 追加模式
-            let summaries = [];
-            if (fs.existsSync(outputPath)) {
-                try {
-                    summaries = JSON.parse(fs.readFileSync(outputPath, 'utf8'));
-                } catch (e) {
-                    console.warn(`⚠️ [LogManager] 摘要檔解析失敗，將重啟對應陣列。`);
-                }
-            }
+            await this.runAsync(
+                `INSERT INTO summaries (tier, date_string, timestamp, content, original_size, summary_size) 
+                 VALUES (?, ?, ?, ?, ?, ?)`,
+                [tier, dateString, Date.now(), summaryText, originalSize, summaryText.length]
+            );
 
-            summaries.push(summaryEntry);
-            fs.writeFileSync(outputPath, JSON.stringify(summaries, null, 2));
-            console.log(`✅ [LogManager] ${label} ${type} 產出成功！(耗時: ${duration}s, 原始: ${originalSize}字 -> 摘要: ${summarySize}字, 壓縮率: ${ratio}%)`);
-            console.log(`📂 相對路徑: ${path.relative(this.logDir, outputPath)}`);
-
-            // 壓縮成功後，刪除源檔案 (若提供)
-            if (sourceFiles && sourceDir) {
-                sourceFiles.forEach(file => {
-                    try { fs.unlinkSync(path.join(sourceDir, file)); } catch (e) { }
-                });
-                console.log(`🗑️ [LogManager] 歸檔完成，已從 Tier 0 清理 ${sourceFiles.length} 個源檔案。`);
-            }
-
+            console.log(`✅ [LogManager] ${dateString} ${tier} 產出成功！(耗時: ${duration}s, 摘要: ${summaryText.length}字)`);
         } catch (e) {
-            console.error(`❌ [LogManager] ${type} 生成失敗 (${label}): ${e.message}`);
+            console.error(`❌ [LogManager] ${tier} 生成失敗 (${dateString}):`, e.message);
         }
     }
 
     // ============================================================
-    // 📖 多層讀取 (供 GolemBrain 注入使用)
+    // 📖 多層讀取
     // ============================================================
-
-    /**
-     * 讀取指定層級的摘要檔案
-     * @param {'daily'|'monthly'|'yearly'|'era'} tier
-     * @param {number} [limit] - 最多讀取幾個檔案 (從最新開始)
-     * @returns {Array<{date: string, content: string}>}
-     */
-    /**
-     * 讀取最近的原始 hourly 日誌 (Tier 0)，供無壓縮時 fallback 使用
-     * @param {number} [limit] - 最多讀取幾個 hourly 檔案
-     * @param {number} [maxChars=200000] - 最大字元限制，達到後停止讀取更多檔案
-     * @returns {string} 格式化後的對話文字
-     */
-    readRecentHourly(limit = null, maxChars = 200000) {
-        const dir = this.dirs.hourly;
-        if (!dir || !fs.existsSync(dir)) return '';
-
+    async readRecentHourlyAsync(limit = 1000, maxChars = 200000) {
+        if (!this._isInitialized || !this.db) return '';
         try {
-            let files = fs.readdirSync(dir)
-                .filter(f => f.length === 14 && f.endsWith('.log')) // YYYYMMDDHH.log
-                .sort();
-
-            // 從最新的檔案開始讀取 (Reverse sort)
-            files = files.reverse();
-            if (limit) files = files.slice(0, limit);
-
+            // Get most recent messages
+            const messages = await this.allAsync(`SELECT * FROM messages ORDER BY timestamp DESC LIMIT ?`, [limit]);
             let result = '';
-            for (const file of files) {
-                if (result.length >= maxChars) break;
-                try {
-                    const logs = JSON.parse(fs.readFileSync(path.join(dir, file), 'utf8'));
-                    // 也從該檔案內最新的對話開始讀取
-                    for (const l of logs.reverse()) {
-                        const time = new Date(l.timestamp).toLocaleString('zh-TW', { hour12: false });
-                        const entry = `[${time}] ${l.sender}: ${l.content}\n`;
-                        if (result.length + entry.length > maxChars) break;
-                        result = entry + result; // 保持時間正序
-                    }
-                } catch (e) {
-                    console.warn(`⚠️ [LogManager] readRecentHourly 解析失敗，略過: ${file} — ${e.message}`);
-                }
+            for (const l of messages) {
+                const time = new Date(l.timestamp).toLocaleString('zh-TW', { hour12: false });
+                const entry = `[${time}] ${l.sender}: ${l.content}\n`;
+                if (result.length + entry.length > maxChars) break;
+                result = entry + result; // prepend to keep chronological order
             }
-
             return result.trim();
         } catch (e) {
+            console.error("❌ [LogManager] 讀取原始日誌失敗:", e);
             return '';
         }
     }
 
-    /**
-     * 讀取指定層級的摘要檔案
-     * @param {'daily'|'monthly'|'yearly'|'era'} tier
-     * @param {number} [limit] - 最多讀取幾個檔案
-     * @param {number} [maxChars=200000] - 最大字元限制
-     * @returns {Array<{date: string, content: string}>}
-     */
-    readTier(tier, limit = null, maxChars = 200000) {
-        const dir = this.dirs[tier];
-        if (!dir || !fs.existsSync(dir)) return [];
 
+
+    async readTierAsync(tier, limit = 50, maxChars = 200000) {
+        if (!this._isInitialized || !this.db) return [];
         try {
-            let files = fs.readdirSync(dir)
-                .filter(f => f.endsWith('.log'))
-                .sort();
-
-            // 從最新的檔案開始讀取 (Reverse sort)
-            files = files.reverse();
-            if (limit) files = files.slice(0, limit);
-
+            const summaries = await this.allAsync(`SELECT * FROM summaries WHERE tier = ? ORDER BY timestamp DESC LIMIT ?`, [tier, limit]);
             const results = [];
             let currentChars = 0;
 
-            for (const file of files) {
-                if (currentChars >= maxChars) break;
-                try {
-                    const logs = JSON.parse(fs.readFileSync(path.join(dir, file), 'utf8'));
-                    const dateStr = file.replace('.log', '');
-                    // 摘要通常也是由新到舊排列
-                    for (const entry of logs.reverse()) {
-                        if (entry.content && entry.content.trim()) {
-                            if (currentChars + entry.content.length > maxChars) break;
-                            results.unshift({ date: dateStr, content: entry.content });
-                            currentChars += entry.content.length;
-                        }
-                    }
-                } catch (e) {
-                    console.warn(`⚠️ [LogManager] readTier(${tier}) 解析失敗，略過: ${file} — ${e.message}`);
-                }
+            for (const s of summaries) {
+                if (currentChars + s.content.length > maxChars) break;
+                results.unshift({ date: s.date_string, content: s.content });
+                currentChars += s.content.length;
             }
-
             return results;
         } catch (e) {
+            console.error(`❌ [LogManager] 讀取 ${tier} 失敗:`, e);
             return [];
         }
     }
+
+
 }
 
 module.exports = ChatLogManager;

@@ -6,8 +6,11 @@
 
 ## 🏗️ Core Architecture Pattern: "Browser-in-the-Loop"
 
-- **Entry Point**: `src/index.js` or `src/main.js`.
-- **LLM Control**: DO NOT rewrite `GolemBrain` to use official REST APIs unless explicitly requested. The core value of Golem is its ability to pilot a browser via Puppeteer to access Web Gemini.
+- **Entry Points**:
+  - Compatibility shims: `index.js`, `dashboard.js`
+  - Real app entrypoints: `apps/runtime/index.js`, `apps/dashboard/plugin.js`
+- **Architecture Guardrail**: Run `npm run arch:check` before PRs to prevent cross-layer dependency regressions.
+- **LLM Control**: DO NOT rewrite `GolemBrain` to use official REST APIs unless explicitly requested. The core value of Golem is its ability to pilot a browser via **Playwright** to access Web Gemini.
 - **State Management**: Most state is held in `ConversationManager`. Cross-platform logic is abstracted in `UniversalContext`.
 
 ## 🧠 Memory Protocol: "Pyramid Memory"
@@ -35,4 +38,4 @@
 - **System Access**: The AI can execute local scripts; ensure any new local-execution skill has proper safety guards.
 
 ---
-*Last Updated: 2026-03-16*
+*Last Updated: 2026-03-23*

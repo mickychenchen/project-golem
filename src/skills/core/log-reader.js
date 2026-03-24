@@ -1,13 +1,9 @@
 // src/skills/core/log-reader.js
 // 負責讀取與檢索每日日誌摘要
 
-const fs = require('fs');
-const path = require('path');
-
 async function run(ctx) {
     const args = ctx.args || {};
 
-    // ✅ [H-2 Fix] 優先複用 brain.chatLogManager，否則傳入正確路徑建構
     let logManager;
     if (ctx.brain && ctx.brain.chatLogManager) {
         logManager = ctx.brain.chatLogManager;
@@ -18,48 +14,44 @@ async function run(ctx) {
             logDir: ConfigManager.LOG_BASE_DIR,
             isSingleMode: true
         });
+        await logManager.init();
     }
-    // 每日摘要存放於 daily/ 子目錄（金字塔記憶架構 Tier 1）
-    const dailyDir = logManager.dirs.daily;
 
     try {
         const task = args.task || 'list';
 
         if (task === 'list') {
             console.log(`📂 [LogReader] 正在檢索已存在的摘要列表...`);
-            const files = fs.readdirSync(dailyDir)
-                .filter(f => f.length === 12 && f.endsWith('.log')) // YYYYMMDD.log (8+4=12 chars)
-                .sort()
-                .reverse(); // 最新優先
+            if (!logManager.allAsync) return "ℹ️ 日誌系統尚未準備就緒。";
+            
+            const summaries = await logManager.allAsync("SELECT DISTINCT date_string FROM summaries WHERE tier = 'daily' ORDER BY date_string DESC");
 
-            if (files.length === 0) {
+            if (!summaries || summaries.length === 0) {
                 return "ℹ️ 目前系統中尚無產生的每日摘要。";
             }
 
-            const list = files.map(f => f.replace('.log', '')).join(', ');
+            const list = summaries.map(s => s.date_string).join(', ');
             return `📅 現有摘要日期列表：\n${list}\n\n你可以使用 {"action": "log_read", "task": "get", "date": "日期"} 來讀取內容。`;
         }
 
         if (task === 'get') {
             if (!args.date) return "❌ 缺少 date 參數。";
 
-            const summaryPath = path.join(dailyDir, `${args.date}.log`);
-            if (!fs.existsSync(summaryPath)) {
+            console.log(`📄 [LogReader] 正在讀取 ${args.date} 的摘要內容...`);
+            if (!logManager.allAsync) return "❌ 日誌系統尚未準備就緒。";
+
+            const summaries = await logManager.allAsync("SELECT content, timestamp FROM summaries WHERE tier = 'daily' AND date_string = ? ORDER BY id ASC", [args.date]);
+            
+            if (!summaries || summaries.length === 0) {
                 return `❌ 找不到 ${args.date} 的摘要。`;
             }
 
-            console.log(`📄 [LogReader] 正在讀取 ${args.date} 的摘要內容...`);
-            const content = fs.readFileSync(summaryPath, 'utf8');
-            try {
-                const data = JSON.parse(content);
-                let output = `📜 [${args.date} 每日摘要]\n`;
-                data.forEach((entry, index) => {
-                    output += `\n--- 摘要 #${index + 1} (${new Date(entry.timestamp).toLocaleTimeString()}) ---\n${entry.content}\n`;
-                });
-                return output;
-            } catch (e) {
-                return `⚠️ 檔案內容解析失敗，原始內容如下：\n${content}`;
-            }
+            let output = `📜 [${args.date} 每日摘要]\n`;
+            summaries.forEach((entry, index) => {
+                const ts = new Date(entry.timestamp).toLocaleTimeString();
+                output += `\n--- 摘要 #${index + 1} (${ts}) ---\n${entry.content}\n`;
+            });
+            return output;
         }
 
         return "❌ 未知的任務類型 (list/get)。";

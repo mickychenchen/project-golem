@@ -54,10 +54,10 @@ check_api_keys() {
 
 run_the_reaper() {
     echo -e "${RED}💀 正在啟動「靈魂收割者」程序 (The Reaper)...${NC}"
-    log "Running The Reaper - Puppeteer Cleanup"
+    log "Running The Reaper - Browser Cleanup"
     
-    # 找出所有與 chromium 或 puppeteer 相關的行程
-    local pids=$(pgrep -f "chrom[e|ium]|puppeteer" 2>/dev/null)
+    # 找出所有與 chromium / chrome / playwright 相關的行程
+    local pids=$(pgrep -f "chromium|chrome|playwright" 2>/dev/null)
     
     if [ -z "$pids" ]; then
         echo -e "   ${GREEN}✔ 掃描完成：目前系統中沒有遺留的殭屍瀏覽器程序。${NC}"

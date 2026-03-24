@@ -1,4 +1,4 @@
-const LanceDBProDriver = require('../src/memory/LanceDBProDriver');
+const { LanceDBProDriver } = require('../packages/memory');
 const ConfigManager = require('../src/config/index');
 const path = require('path');
 const fs = require('fs');

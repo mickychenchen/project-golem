@@ -51,7 +51,7 @@ class DOMDoctor {
             safeHtml = `${head}\n\n\n\n${tail}`;
         }
 
-        const prompt = `你是 Puppeteer 自動化專家。目前的 CSS Selector 失效。
+        const prompt = `你是 Playwright 自動化專家。目前的 CSS Selector 失效。
 請分析 HTML，找出目標: "${targetType}" (${targetDescription}) 的最佳 CSS Selector。
 
 HTML 片段:

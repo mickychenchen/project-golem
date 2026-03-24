@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { KNOWLEDGE_BASE_DIR } = require('../config');
+const { KNOWLEDGE_BASE_DIR } = require('../../src/config');
 
 class SystemNativeDriver {
     constructor() {

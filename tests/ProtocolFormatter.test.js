@@ -29,7 +29,7 @@ jest.mock('../src/config', () => ({
     MEMORY_BASE_DIR: '/tmp/test'
 }));
 
-const ProtocolFormatter = require('../src/services/ProtocolFormatter');
+const { ProtocolFormatter } = require('../packages/protocol');
 
 describe('ProtocolFormatter', () => {
     test('generateReqId returns a 4-char string', () => {
@@ -106,7 +106,7 @@ describe('ProtocolFormatter', () => {
 
     test('buildSystemPrompt loads markdown skills, handles optionally active/deactivated skills', async () => {
         const fs = require('fs');
-        const ProtocolFormatter = require('../src/services/ProtocolFormatter');
+        const { ProtocolFormatter } = require('../packages/protocol');
         const skillIndexManager = require('../src/managers/SkillIndexManager');
         const personaManager = require('../src/skills/core/persona');
         const { resolveEnabledSkills, OPTIONAL_SKILLS } = require('../src/skills/skillsConfig');

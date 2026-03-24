@@ -52,8 +52,11 @@ class NodeRouter {
         }
 
         // ✨ [v9.1 Feature] 學習新技能 (Web Gemini Mode)
-        if (text.startsWith('/learn ')) {
-            const intent = text.replace('/learn ', '').trim();
+        if (text === '/learn' || text.startsWith('/learn ')) {
+            const intent = text.replace(/^\/learn\s*/i, '').trim();
+            if (!intent) {
+                return await reply("🧠 用法：`/learn <你要學習的技能描述>`\n例如：`/learn 建立一個股票查詢技能`");
+            }
             if (!isWeb) {
                 await ctx.reply(`🏗️ **Web 技能架構師啟動...**\n正在使用網頁算力為您設計：\`${intent}\``);
                 await ctx.sendTyping();
@@ -61,8 +64,61 @@ class NodeRouter {
 
             try {
                 const result = await architect.designSkill(brain, intent, skillManager.listSkills());
+
+                if (result.success) {
+                    // 1) 熱重載 SkillManager，讓動態 JS 技能可立即執行
+                    try {
+                        skillManager.refresh();
+                    } catch (refreshError) {
+                        console.warn(`⚠️ [NodeRouter] SkillManager refresh failed after /learn: ${refreshError.message}`);
+                    }
+
+                    // 2) 直接寫入 SQLite 索引，讓 Dashboard 立即可見
+                    try {
+                        const SkillIndexManager = require('../managers/SkillIndexManager');
+                        const runtimeSkillId = String(
+                            result.id || require('path').basename(result.path || '', '.js')
+                        ).toLowerCase();
+
+                        if (runtimeSkillId) {
+                            const runtimeTitle = result.name || runtimeSkillId;
+                            const runtimeDescription = result.preview || "由 /learn 動態生成的使用者技能";
+                            const runtimeContent = [
+                                `# ${runtimeTitle}`,
+                                runtimeDescription,
+                                "## Runtime Action",
+                                `- action: \`${runtimeTitle}\``,
+                                "## Source",
+                                "```js",
+                                result.code || "// source unavailable",
+                                "```"
+                            ].join('\n\n');
+
+                            const index = brain && brain.skillIndex
+                                ? brain.skillIndex
+                                : new SkillIndexManager(brain.userDataDir);
+
+                            await index.upsertSkillRecord({
+                                id: runtimeSkillId,
+                                name: runtimeTitle,
+                                description: runtimeDescription,
+                                content: runtimeContent,
+                                path: result.path || '',
+                                category: 'user_dynamic',
+                                last_modified: Date.now()
+                            });
+
+                            if (!brain || !brain.skillIndex) {
+                                await index.close();
+                            }
+                        }
+                    } catch (indexError) {
+                        console.warn(`⚠️ [NodeRouter] /learn skill index sync failed: ${indexError.message}`);
+                    }
+                }
+
                 const response = result.success
-                    ? `✅ **新技能編寫完成！**\n📜 **名稱**: \`${result.name}\`\n📝 **描述**: ${result.preview}\n📂 **檔案**: \`${require('path').basename(result.path)}\`\n_現在可以直接命令我使用此功能。_`
+                    ? `✅ **新技能編寫完成！**\n📜 **名稱**: \`${result.name}\`\n📝 **描述**: ${result.preview}\n📂 **檔案**: \`${require('path').basename(result.path)}\`\n_現在可以直接命令我使用此功能，且已同步到 SQLite，可在 Dashboard 看見。_`
                     : `❌ **學習失敗**: ${result.error}`;
 
                 return await reply(response);
@@ -84,6 +140,44 @@ class NodeRouter {
 
         if (text.startsWith('GOLEM_SKILL::')) {
             const res = skillManager.importSkill(text.trim());
+            if (res.success) {
+                try {
+                    const SkillIndexManager = require('../managers/SkillIndexManager');
+                    const importedId = String(require('path').basename(res.path || '', '.js')).toLowerCase();
+                    const sourceCode = require('fs').readFileSync(res.path, 'utf8');
+                    const title = res.name || importedId;
+                    const content = [
+                        `# ${title}`,
+                        "由 GOLEM_SKILL 膠囊匯入的使用者技能",
+                        "## Runtime Action",
+                        `- action: \`${title}\``,
+                        "## Source",
+                        "```js",
+                        sourceCode,
+                        "```"
+                    ].join('\n\n');
+
+                    const index = brain && brain.skillIndex
+                        ? brain.skillIndex
+                        : new SkillIndexManager(brain.userDataDir);
+
+                    await index.upsertSkillRecord({
+                        id: importedId,
+                        name: title,
+                        description: "由 GOLEM_SKILL 匯入",
+                        content,
+                        path: res.path || '',
+                        category: 'user_dynamic',
+                        last_modified: Date.now()
+                    });
+
+                    if (!brain || !brain.skillIndex) {
+                        await index.close();
+                    }
+                } catch (e) {
+                    console.warn(`⚠️ [NodeRouter] GOLEM_SKILL index sync failed: ${e.message}`);
+                }
+            }
             return await reply(res.success ? `✅ 安裝成功: ${res.name}` : `⚠️ ${res.error}`);
         }
 

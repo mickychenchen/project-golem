@@ -8,7 +8,7 @@ interface MetricCardProps {
     title: string;
     value: string | number;
     icon: LucideIcon;
-    data?: any[];
+    data?: Record<string, number | string>[];
     dataKey?: string;
     color?: string;
 }
@@ -37,8 +37,8 @@ export function MetricCard({ title, value, icon: Icon, data, dataKey, color = "#
                                 <Area
                                     type="monotone"
                                     dataKey={dataKey || "value"}
-                                    stroke="var(--color-primary)"
-                                    fill="var(--color-primary)"
+                                    stroke={color}
+                                    fill={color}
                                     fillOpacity={0.2}
                                 />
                             </AreaChart>

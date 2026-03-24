@@ -1,4 +1,4 @@
-const puppeteer = require('puppeteer');
+const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
 
@@ -11,15 +11,13 @@ const routes = [
 ];
 
 async function takeScreenshots() {
-  const browser = await puppeteer.launch({ headless: 'new' });
-  const page = await browser.newPage();
+  const browser = await chromium.launch({ headless: true });
+  const context = await browser.newContext({
+    viewport: { width: 1280, height: 800 },
+    colorScheme: 'dark',
+  });
+  const page = await context.newPage();
   
-  // Set to dark mode
-  await page.emulateMediaFeatures([
-    { name: 'prefers-color-scheme', value: 'dark' },
-  ]);
-  await page.setViewport({ width: 1280, height: 800 });
-
   const assetsDir = path.join(__dirname, 'assets', 'screenshots');
   if (!fs.existsSync(assetsDir)) {
     fs.mkdirSync(assetsDir, { recursive: true });
@@ -28,7 +26,7 @@ async function takeScreenshots() {
   for (const route of routes) {
     try {
       console.log(`Navigating to ${route.url}`);
-      await page.goto(route.url, { waitUntil: 'networkidle0' });
+      await page.goto(route.url, { waitUntil: 'networkidle' });
       if (route.wait) await new Promise(r => setTimeout(r, route.wait));
       
       const filePath = path.join(assetsDir, `${route.name}.png`);
@@ -39,6 +37,7 @@ async function takeScreenshots() {
     }
   }
 
+  await context.close();
   await browser.close();
 }
 

@@ -9,8 +9,10 @@ class CommandHandler {
         let convoManager = null;
 
         try {
-            const { getOrCreateGolem } = require('../../../index');
-            const instance = getOrCreateGolem(controller.golemId);
+            const getOrCreate =
+                (typeof global.getOrCreateGolem === 'function' && global.getOrCreateGolem) ||
+                require('../../../index').getOrCreateGolem;
+            const instance = getOrCreate(controller.golemId);
             actionQueue = instance.actionQueue;
             convoManager = instance.convoManager;
         } catch (e) {

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import {
     Dialog,
@@ -28,10 +28,12 @@ import {
     AlertCircle,
     Pencil,
     Check,
-    RotateCcw,
     Trash2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useToast } from "@/components/ui/toast-provider";
+import { apiGet, apiPost } from "@/lib/api-client";
+import { useQuery } from "@/hooks/useQuery";
 
 interface Preset {
     id: string;
@@ -58,6 +60,21 @@ interface PersonaData {
     tone: string;
     skills: string[];
     isNew?: boolean;
+}
+
+type PersonaTemplatesResponse = {
+    templates?: Preset[];
+};
+
+type PersonaMarketResponse = {
+    personas?: Preset[];
+    total?: number;
+    error?: string;
+};
+
+function getErrorMessage(error: unknown, fallback = "請求發送失敗"): string {
+    if (error instanceof Error && error.message) return error.message;
+    return fallback;
 }
 
 const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
@@ -229,15 +246,22 @@ function CreatePersonaDialog({
         if (!id.trim() || !name.trim()) { setError("請填寫 ID 與名稱"); return; }
         setIsLoading(true); setError(null);
         try {
-            const res = await fetch("/api/persona/create", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ id: id.trim(), name: name.trim(), description, icon, aiName, userName, role, tone, tags }),
+            const data = await apiPost<{ success?: boolean; error?: string }>("/api/persona/create", {
+                id: id.trim(),
+                name: name.trim(),
+                description,
+                icon,
+                aiName,
+                userName,
+                role,
+                tone,
+                tags
             });
-            const data = await res.json();
-            if (res.ok && data.success) { reset(); onOpenChange(false); onCreated(); }
+            if (data.success) { reset(); onOpenChange(false); onCreated(); }
             else setError(data.error || "建立失敗");
-        } catch { setError("請求發送失敗"); }
+        } catch (error: unknown) {
+            setError(getErrorMessage(error));
+        }
         finally { setIsLoading(false); }
     };
 
@@ -354,13 +378,13 @@ function EditField({
 
 // ── Main Page ────────────────────────────────────────────────────────────────
 export default function PersonaPage() {
+    const toast = useToast();
     const [saved, setSaved] = useState<PersonaData | null>(null);  // last-saved state
     const [aiName, setAiName] = useState("Golem");
     const [userName, setUserName] = useState("Traveler");
     const [role, setRole] = useState("");
     const [tone, setTone] = useState("");
 
-    const [isEditing, setIsEditing] = useState(false);
     const [isDirty, setIsDirty] = useState(false);
     const [isInjecting, setIsInjecting] = useState(false);
     const [showConfirm, setShowConfirm] = useState(false);
@@ -397,42 +421,48 @@ export default function PersonaPage() {
         setTone(data.tone || "");
     };
 
-    // Load current persona
+    const {
+        data: personaData,
+    } = useQuery<PersonaData>(() => apiGet<PersonaData>("/api/persona"), []);
+
+    const {
+        data: templatesData,
+        refetch: refetchTemplates,
+    } = useQuery<PersonaTemplatesResponse>(() => apiGet<PersonaTemplatesResponse>("/api/golems/templates"), []);
+
     useEffect(() => {
-        fetch("/api/persona")
-            .then(r => r.json())
-            .then(data => {
-                if (data && !data.error) {
-                    setSaved(data);
-                    applyToForm(data);
-                }
-            })
-            .catch(() => { });
-    }, []);
+        if (!personaData) return;
+        setSaved(personaData);
+        applyToForm(personaData);
+    }, [personaData]);
 
-    const loadTemplates = useCallback(() => {
-        fetch("/api/golems/templates")
-            .then(r => r.json())
-            .then(d => { if (d.templates) setTemplates(d.templates); })
-            .catch(() => { });
-    }, []);
-
-    useEffect(() => { loadTemplates(); }, [loadTemplates]);
+    useEffect(() => {
+        if (templatesData?.templates) {
+            setTemplates(templatesData.templates);
+        }
+    }, [templatesData]);
 
     useEffect(() => {
         if (activeTab === "market") {
             setIsMarketLoading(true);
             const delayDebounceFn = setTimeout(() => {
-                fetch(`/api/persona/market?search=${encodeURIComponent(searchMarketTerm)}&category=${encodeURIComponent(marketCategory)}&page=${marketPage}&limit=20`)
-                    .then(r => r.json())
-                    .then(data => {
-                        if (data && !data.error) {
+                const loadMarket = async () => {
+                    try {
+                        const data = await apiGet<PersonaMarketResponse>(
+                            `/api/persona/market?search=${encodeURIComponent(searchMarketTerm)}&category=${encodeURIComponent(marketCategory)}&page=${marketPage}&limit=20`
+                        );
+                        if (!data.error) {
                             setMarketPersonas(data.personas || []);
                             setMarketTotal(data.total || 0);
                         }
-                    })
-                    .catch(e => console.error("Error fetching market personas", e))
-                    .finally(() => setIsMarketLoading(false));
+                    } catch (error) {
+                        console.error("Error fetching market personas", error);
+                    } finally {
+                        setIsMarketLoading(false);
+                    }
+                };
+
+                void loadMarket();
             }, 300); // debounce search
             return () => clearTimeout(delayDebounceFn);
         }
@@ -448,7 +478,6 @@ export default function PersonaPage() {
 
     const handleDiscard = () => {
         if (saved) applyToForm(saved);
-        setIsEditing(false);
         setIsDirty(false);
         setSelectedPersona(null);
         setIsDrawerOpen(false);
@@ -459,15 +488,14 @@ export default function PersonaPage() {
         setIsInjecting(true);
         setStatusMsg(null);
         try {
-            const res = await fetch("/api/persona/inject", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ aiName, userName, currentRole: role, tone }),
+            const data = await apiPost<{ success?: boolean; message?: string; error?: string }>("/api/persona/inject", {
+                aiName,
+                userName,
+                currentRole: role,
+                tone,
             });
-            const data = await res.json();
-            if (res.ok && data.success) {
+            if (data.success) {
                 setShowConfirm(false);
-                setIsEditing(false);
                 setIsDirty(false);
                 setShowDone(true);
                 // 不再呼叫 /api/system/reload，因為這會殺掉整個 node process
@@ -495,7 +523,6 @@ export default function PersonaPage() {
         setTone(isZh && (preset.tone === "Professional" || !preset.tone) ? "專業" : (preset.tone || "Professional"));
         
         setIsDrawerOpen(true);
-        setIsEditing(true);
         setStatusMsg(null);
     };
 
@@ -503,25 +530,22 @@ export default function PersonaPage() {
         if (!personaToDelete) return;
         setIsDeletingPersona(true);
         try {
-            const res = await fetch("/api/persona/delete", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ id: personaToDelete.id }),
+            const data = await apiPost<{ success?: boolean; error?: string }>("/api/persona/delete", {
+                id: personaToDelete.id,
             });
-            const data = await res.json();
             if (data.success) {
                 setPersonaToDelete(null);
-                loadTemplates(); // 重新整理列表
+                await refetchTemplates(); // 重新整理列表
                 if (selectedPersona?.id === personaToDelete.id) {
                     setSelectedPersona(null);
                     setIsDrawerOpen(false);
                 }
             } else {
-                alert(data.error || "刪除失敗");
+                toast.error("刪除失敗", data.error || "刪除失敗");
             }
         } catch (err) {
             console.error(err);
-            alert("請求發送失敗");
+            toast.error("請求失敗", "請求發送失敗");
         } finally {
             setIsDeletingPersona(false);
         }
@@ -534,8 +558,6 @@ export default function PersonaPage() {
         const tg = !selectedTag || (t.tags && t.tags.includes(selectedTag));
         return s && tg;
     });
-
-    const inputCls = "w-full bg-secondary/30 border border-border rounded-xl px-4 py-3 text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all placeholder:text-muted-foreground";
 
     return (
         <div className="flex h-full overflow-hidden bg-background">
@@ -1026,7 +1048,7 @@ export default function PersonaPage() {
             <CreatePersonaDialog
                 open={showCreate}
                 onOpenChange={setShowCreate}
-                onCreated={loadTemplates}
+                onCreated={() => { void refetchTemplates(); }}
             />
             <PersonaDeleteConfirmDialog
                 open={!!personaToDelete}

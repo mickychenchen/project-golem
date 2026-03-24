@@ -23,7 +23,7 @@ Be respectful, constructive, and collaborative. We welcome contributors of all e
 
 ### Prerequisites
 
-- **Node.js** 18+ (LTS recommended)
+- **Node.js** 20+ (LTS recommended)
 - **Docker** (optional, for containerized deployment)
 - **Google Gemini API Key** (free tier available at [aistudio.google.com](https://aistudio.google.com))
 
@@ -39,10 +39,7 @@ npm install
 
 # Copy environment template
 cp .env.example .env
-# Edit .env and add your GEMINI_API_KEY
-
-# Run in API mode (no browser required)
-node index.js --api-brain
+# Edit .env and add your GEMINI_API_KEYS (comma-separated if multiple keys)
 
 # Run with browser (requires Chromium)
 node index.js
@@ -52,7 +49,7 @@ node index.js
 
 ```bash
 docker build -t project-golem .
-docker run -e GEMINI_API_KEY=your-key project-golem
+docker run -e GEMINI_API_KEYS=key1,key2 project-golem
 ```
 
 ## Development Setup
@@ -65,7 +62,10 @@ npm install
 npx jest --verbose
 
 # Run specific test file
-npx jest test/EventBus.test.js --verbose
+npx jest tests/EventBus.test.js --verbose
+
+# Check architecture boundaries
+npm run arch:check
 
 # Run with doctor mode (diagnostics)
 node index.js --doctor
@@ -75,38 +75,40 @@ node index.js --doctor
 
 ```
 project-golem/
-├── index.js                    # Entry point
+├── apps/
+│   ├── runtime/
+│   │   └── index.js            # Real runtime entrypoint
+│   └── dashboard/
+│       └── plugin.js           # Dashboard plugin layer
+├── index.js                    # Compatibility shim -> apps/runtime/index.js
+├── dashboard.js                # Compatibility shim -> apps/dashboard/plugin.js
 ├── src/
+│   ├── domain/                 # Domain models and business rules (new skeleton)
+│   ├── application/            # Use-case orchestration layer (new skeleton)
+│   ├── infrastructure/         # Adapters/integrations layer (new skeleton)
 │   ├── core/                   # Brain, Page Interaction, Multi-Agent
-│   │   ├── GolemBrain.js       # Gemini AI brain (Puppeteer-based)
-│   │   ├── ApiBrain.js         # API-only brain (no Chromium)
+│   │   ├── GolemBrain.js       # Gemini AI brain (Playwright-based)
 │   │   ├── PageInteractor.js   # DOM interaction engine
 │   │   ├── InteractiveMultiAgent.js  # Multi-agent orchestration
 │   │   └── action_handlers/    # Action routing (Android, etc.)
 │   ├── managers/               # Subsystem managers
 │   │   ├── SkillManager.js     # Skill loading & hot-reload
-│   │   ├── SecurityManager.js  # Input validation & security
 │   │   └── DashboardManager.js # Dashboard data provider
-│   ├── memory/                 # Memory drivers
-│   │   ├── BrowserMemoryDriver.js  # IndexedDB via Puppeteer
-│   │   ├── SystemNativeDriver.js   # File-based (.md)
-│   │   └── SystemQmdDriver.js      # QMD format
 │   ├── services/               # Utility services
-│   │   ├── ProtocolFormatter.js    # Titan Protocol formatting
 │   │   └── Introspection.js        # Self-analysis
 │   ├── utils/                  # Shared utilities
 │   │   ├── EventBus.js         # Pub/sub event system
-│   │   ├── CircuitBreaker.js   # Circuit breaker pattern
-│   │   ├── RetryHelper.js      # Exponential backoff retry
 │   │   ├── RateLimiter.js      # Token bucket rate limiting
-│   │   ├── TaskQueue.js        # Priority async task queue
-│   │   └── ProcessManager.js   # Crash recovery & auto-restart
+│   │   ├── ProcessManager.js   # Process health and lifecycle
+│   │   └── SystemLogger.js     # Runtime log persistence/broadcast
 │   └── skills/                 # Skill definitions (.md + .js)
 ├── web-dashboard/              # Next.js dashboard
 │   └── src/
 │       ├── app/                # Pages (dashboard, office, agents)
 │       └── components/         # React components
-├── test/                       # Jest test files
+├── tests/                      # Jest test files
+├── packages/                   # Shared packages (security/memory/protocol)
+├── infra/                      # Reserved for deploy/ops assets
 ├── docker-compose.yml          # Docker Compose config
 ├── render.yaml                 # Render.com Blueprint
 └── fly.toml                    # Fly.io config
@@ -114,13 +116,13 @@ project-golem/
 
 ### Key Concepts
 
-1. **GolemBrain** — The AI core that connects to Google Gemini via Puppeteer (browser mode) or API (api-brain mode).
+1. **GolemBrain** — The AI core that connects to Google Gemini via **Playwright** in browser mode.
 
 2. **Titan Protocol** — The structured response format Golem uses internally. Responses contain blocks like `[GOLEM_ACTION]`, `[GOLEM_MEMORY]`, `[GOLEM_REPLY]`.
 
 3. **Skills** — Modular capabilities defined as markdown files in `src/skills/`. Skills can be loaded, reloaded, and shared.
 
-4. **Memory Drivers** — Pluggable storage backends for Golem's memory. Currently supports browser IndexedDB, native files, and QMD format.
+4. **Memory Drivers** — Pluggable storage backends for Golem's memory. Current production default is `LanceDBProDriver` (`GOLEM_MEMORY_MODE=lancedb-pro`) with `SystemNativeDriver` as fallback.
 
 5. **EventBus** — Decoupled pub/sub system for inter-component communication.
 
@@ -160,17 +162,20 @@ npx jest --verbose
 npx jest --coverage
 
 # Run specific test
-npx jest test/EventBus.test.js
+npx jest tests/EventBus.test.js
 
 # Watch mode (re-run on changes)
 npx jest --watch
+
+# Check architecture boundaries
+npm run arch:check
 ```
 
 ### Test File Naming
 
-- Test files go in `test/` directory
+- Test files go in `tests/` directory
 - Name them `{ModuleName}.test.js`
-- Example: `src/utils/EventBus.js` → `test/EventBus.test.js`
+- Example: `src/utils/EventBus.js` -> `tests/EventBus.test.js`
 
 ### Writing Tests
 

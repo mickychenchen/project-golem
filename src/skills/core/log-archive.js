@@ -29,6 +29,7 @@ async function run(ctx) {
     });
 
     try {
+        await logManager.init();
         let targetDate = args.date || logManager._getYesterdayDateString();
         console.log(`🗄️ [LogArchiver] 正在為 ${targetDate} 執行手動存檔程序...`);
         await logManager.compressLogsForDate(targetDate, actualBrain, true);

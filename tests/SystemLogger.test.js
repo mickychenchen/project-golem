@@ -34,6 +34,8 @@ describe('SystemLogger', () => {
         SystemLogger.initialized = false;
         SystemLogger.logFile = null;
         SystemLogger.currentDateString = null;
+        SystemLogger._isLogging = false;
+        SystemLogger._bytesWrittenSinceLastCheck = 0;
         delete process.env.ENABLE_SYSTEM_LOG;
         delete process.env.LOG_MAX_SIZE_MB;
         delete process.env.LOG_RETENTION_DAYS;
@@ -101,6 +103,7 @@ describe('SystemLogger', () => {
     test('_write triggers rotation on size limit', () => {
         SystemLogger.logFile = path.join(logDir, 'system.log');
         process.env.LOG_MAX_SIZE_MB = '1';
+        SystemLogger._bytesWrittenSinceLastCheck = 1024 * 1024;
         fs.existsSync.mockReturnValue(true);
         fs.statSync.mockReturnValue({ size: 2 * 1024 * 1024 }); // 2MB > 1MB limit
         

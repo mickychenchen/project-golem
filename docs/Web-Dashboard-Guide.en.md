@@ -1,6 +1,6 @@
 # 🖥️ Project Golem Web Dashboard Guide
 
-> Last Updated: 2026-03-20  
+> Last Updated: 2026-03-23  
 > Tech Stack: Next.js + Tailwind CSS + Socket.io
 
 ## 1. How to Start
@@ -44,6 +44,9 @@ Features:
 The central hub for managing Golem's capabilities:
 - **List Skills**: View descriptions of CORE and USER skills.
 - **Toggle Skills**: Enable or disable specific functions.
+- **Export Skill Book**: Download the full skill book as Markdown.
+- **Export Single Skill**: Download the selected skill as a `.md` file.
+- **Import Skill Book**: Upload `.md/.json` backups with pre-import preview and conflict strategy.
 - **Inject Skills**: Reload skill books into Gemini (equivalent to `/reload`).
 
 ---
@@ -88,17 +91,32 @@ System configuration and status monitoring:
 
 ---
 
-## 3. Backend APIs (server.js)
+## 3. Backend APIs (`web-dashboard/server.js`)
 
 | Route | Description |
 |------|------|
+| `GET /api/system/status` | Get runtime/system status |
+| `GET /api/system/config` | Read system config (including memory mode) |
+| `POST /api/system/config` | Update system config (guarded) |
+| `POST /api/system/login` / `POST /api/system/logout` | Remote login/logout |
+| `GET /api/system/security/events` | Read security audit events |
 | `GET /api/golems` | Get Golem list |
-| `GET /api/status/:id` | Get status of a specific Golem |
-| `POST /api/message` | Send a message to Golem |
+| `POST /api/chat` | Send a web chat message to Golem |
+| `GET /api/skills/export` | Export full skill book or a specific skill |
+| `POST /api/skills/import` | Import skill book from JSON/Markdown |
+| `GET /api/memory` | Read memory entries |
+| `POST /api/upload` | Upload file (size-limited) |
 | `GET /api/mcp/servers` | Get MCP Server list |
 | `POST /api/mcp/servers/:name/test` | Test specific MCP connection |
 | `GET /api/mcp/logs` | Read MCP call logs |
 | `Socket.IO` | Real-time push for responses, system events, and MCP logs |
+
+### Security Hardening Notes
+
+- API-level rate limiting and remote session authentication are enabled.
+- Sensitive operations (restart/shutdown, MCP write, skill/memory mutations) are protected by operation guards.
+- If `SYSTEM_OP_TOKEN` is set, sensitive operations additionally require `x-system-op-token`.
+- Uploads and attachment paths are validated with size and directory-boundary checks.
 
 ---
 

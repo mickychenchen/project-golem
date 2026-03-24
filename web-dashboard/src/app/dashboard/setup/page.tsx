@@ -4,8 +4,10 @@ import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { useGolem } from "@/components/GolemContext";
+import { useToast } from "@/components/ui/toast-provider";
 import { BrainCircuit, Cpu, Palette, Sparkles, User, Settings2, PlayCircle, Search, Tag, X, Filter } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { apiGet, apiPost } from "@/lib/api-client";
 
 interface Preset {
     id: string;
@@ -31,6 +33,7 @@ const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
 
 export default function GolemSetupPage() {
     const router = useRouter();
+    const toast = useToast();
     const { activeGolem, activeGolemStatus, isLoadingGolems, refreshGolems } = useGolem();
 
     const [templates, setTemplates] = useState<Preset[]>([]);
@@ -49,15 +52,9 @@ export default function GolemSetupPage() {
     useEffect(() => {
         const fetchTemplates = async () => {
             try {
-                const res = await fetch("/api/golems/templates");
-                const data = await res.json();
+                const data = await apiGet<{ templates?: Preset[] }>("/api/golems/templates");
                 if (data.templates && data.templates.length > 0) {
                     setTemplates(data.templates);
-                    // Default to first template if nothing selected
-                    const first = data.templates[0];
-                    if (!activePresetId) {
-                        applyPreset(first);
-                    }
                 }
             } catch (e) {
                 console.error("Failed to fetch templates:", e);
@@ -65,6 +62,12 @@ export default function GolemSetupPage() {
         };
         fetchTemplates();
     }, []);
+
+    useEffect(() => {
+        if (templates.length > 0 && !activePresetId) {
+            applyPreset(templates[0]);
+        }
+    }, [activePresetId, templates]);
 
     // Get all unique tags
     const allTags = Array.from(new Set(templates.flatMap(t => t.tags || [])));
@@ -102,29 +105,24 @@ export default function GolemSetupPage() {
 
         try {
             setIsLoading(true);
-            const res = await fetch("/api/golems/setup", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    golemId: activeGolem,
-                    aiName,
-                    userName,
-                    currentRole: role,
-                    tone,
-                    skills,
-                }),
+            const data = await apiPost<{ success?: boolean; error?: string }>("/api/golems/setup", {
+                golemId: activeGolem,
+                aiName,
+                userName,
+                currentRole: role,
+                tone,
+                skills,
             });
 
-            const data = await res.json();
             if (data.success) {
                 await refreshGolems();
                 router.push("/dashboard");
             } else {
-                alert("建立失敗：" + data.error);
-                setIsLoading(false);
+                toast.error("建立失敗", data.error || "建立失敗");
             }
-        } catch (e) {
-            alert("設定過程中發生錯誤，請檢查網路狀態。");
+        } catch {
+            toast.error("設定失敗", "設定過程中發生錯誤，請檢查網路狀態。");
+        } finally {
             setIsLoading(false);
         }
     };

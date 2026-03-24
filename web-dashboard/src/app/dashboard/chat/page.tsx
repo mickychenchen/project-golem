@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import { Typewriter } from "@/components/Typewriter";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { apiGet, apiPost } from "@/lib/api-client";
 
 interface ChatMessage {
     id: string;
@@ -15,7 +16,7 @@ interface ChatMessage {
     content: string;
     timestamp: string;
     isSystem: boolean;
-    actionData?: any;
+    actionData?: ChatActionButton[];
     isHistory?: boolean;
     isThinking?: boolean;
     attachments?: {
@@ -25,55 +26,45 @@ interface ChatMessage {
     }[];
 }
 
-const COMMANDS: { command: string; description: string; options?: { name: string; description: string }[] }[] = [
-    { command: '/sos', description: '輕量級急救：清除「網頁元素快取」，強迫 DOM Doctor 重新掃描並修復。' },
-    { command: '/new', description: '物理重生：強制重新整理底層瀏覽器，開啟一個全新的對話視窗。' },
-    { command: '/new_memory', description: '徹底轉生：物理清空底層資料庫 (DB) 並重置對話，完全忘記過去細節。' },
-    { 
-        command: '/model', 
-        description: '模型切換：切換 Gemini 的大腦模型 (fast/thinking/pro)。',
-        options: [
-            { name: 'fast', description: '回答速度快 (效能優先)' },
-            { name: 'thinking', description: '具備深度思考 (邏輯優先)' },
-            { name: 'pro', description: '進階程式碼與數學能力 (專業優先)' }
-        ]
-    },
-    { 
-        command: '/enable_silent', 
-        description: '開啟完全靜默模式：暫時關閉感知，且不會記錄任何對話。',
-        options: [{ name: '@username', description: '請輸入目標 Bot ID' }]
-    },
-    { 
-        command: '/disable_silent', 
-        description: '解除靜默模式。',
-        options: [{ name: '@username', description: '請輸入目標 Bot ID' }]
-    },
-    { 
-        command: '/enable_observer', 
-        description: '進入觀察者模式：同步所有對話上下文，但預設不發言。',
-        options: [{ name: '@username', description: '請輸入目標 Bot ID' }]
-    },
-    { 
-        command: '/disable_observer', 
-        description: '解除觀察者模式。',
-        options: [{ name: '@username', description: '請輸入目標 Bot ID' }]
-    },
-    { command: '/patch', description: '執行自我反思與代碼優化。' },
-    { command: '/dashboard', description: '顯示控制台連線網址：包含本地 (Local) 與遠端 (Remote) 存取網址。' },
-    { command: '/@Gmail', description: '讀取、搜尋您的個人電子郵件。' },
-    { command: '/@Google 雲端硬碟', description: '搜尋您的 Google Drive 檔案 (文件、PDF、圖片等)。' },
-    { command: '/@Google 文件', description: '讀取或搜尋特定的 Google Docs。' },
-    { command: '/@Google Keep', description: '讀取您的個人筆記。' },
-    { command: '/@Google Tasks', description: '讀取或管理您的待辦事項。' },
-    { command: '/@YouTube', description: '搜尋 YouTube 影片資料。' },
-    { command: '/@Google Maps', description: '查詢地圖、地點資訊。' },
-    { command: '/@Google 航班', description: '查詢航班資訊。' },
-    { command: '/@Google 飯店', description: '查詢飯店住宿資訊。' },
-    { command: '/@Workspace', description: '讓 AI 自行推斷要使用哪個辦公軟體。' },
-];
+interface CommandOption {
+    name: string;
+    description: string;
+}
+
+interface CommandItem {
+    command: string;
+    description: string;
+    options?: CommandOption[];
+}
+
+interface ChatActionButton {
+    text: string;
+    callback_data: string;
+}
+
+interface ChatHistoryRecord {
+    time: string;
+    msg: string;
+    actionData?: ChatActionButton[];
+    attachments?: ChatMessage["attachments"];
+    attachment?: ChatMessage["attachments"] extends Array<infer T> ? T : never;
+}
+
+type SocketLogPayload = {
+    type?: string;
+    msg?: string;
+    time?: string;
+    actionData?: ChatActionButton[];
+    attachments?: ChatMessage["attachments"];
+    attachment?: ChatMessage["attachments"] extends Array<infer T> ? T : never;
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null;
+}
 
 export default function DirectChatPage() {
-    const { activeGolem, isSingleNode } = useGolem();
+    const { activeGolem } = useGolem();
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [completedTypingMsgs, setCompletedTypingMsgs] = useState<Set<string>>(new Set());
     const [input, setInput] = useState("");
@@ -82,7 +73,23 @@ export default function DirectChatPage() {
     const [isDragging, setIsDragging] = useState(false);
     // Command suggestions state
     const [showSuggestions, setShowSuggestions] = useState(false);
-    const [filteredCommands, setFilteredCommands] = useState(COMMANDS);
+    const [filteredCommands, setFilteredCommands] = useState<CommandItem[]>([]);
+    const [allCommands, setAllCommands] = useState<CommandItem[]>([]);
+
+    useEffect(() => {
+        const fetchCommands = async () => {
+            try {
+                const data = await apiGet<{ success?: boolean; commands?: CommandItem[] }>("/api/commands");
+                if (data.success && data.commands) {
+                    setAllCommands(data.commands);
+                    setFilteredCommands(data.commands);
+                }
+            } catch (err) {
+                console.error("Failed to fetch commands:", err);
+            }
+        };
+        fetchCommands();
+    }, []);
     const [suggestionIndex, setSuggestionIndex] = useState(0);
     const suggestionListRef = useRef<HTMLDivElement>(null);
 
@@ -91,11 +98,17 @@ export default function DirectChatPage() {
     const dragCounterRef = useRef(0);
 
     useEffect(() => {
-        socket.on("log", (data: any) => {
-            const isThinkingMessage = data.type === 'thinking';
+        const handleSocketLog = (payload: unknown) => {
+            if (!isRecord(payload)) return;
 
-            if (isThinkingMessage || data.type === 'agent' || data.type === 'approval' || data.msg.includes('[MultiAgent]') || data.msg.includes('[User]')) {
-                let rawMsg = data.msg;
+            const data = payload as SocketLogPayload;
+            const type = typeof data.type === "string" ? data.type : "";
+            const rawPayloadMessage = typeof data.msg === "string" ? data.msg : "";
+            if (!rawPayloadMessage) return;
+            const isThinkingMessage = type === 'thinking';
+
+            if (isThinkingMessage || type === 'agent' || type === 'approval' || rawPayloadMessage.includes('[MultiAgent]') || rawPayloadMessage.includes('[User]')) {
+                let rawMsg = rawPayloadMessage;
 
                 if (rawMsg.startsWith('[MultiAgent]')) {
                     rawMsg = rawMsg.replace('[MultiAgent]', '').trim();
@@ -133,10 +146,11 @@ export default function DirectChatPage() {
                     }];
                 });
             }
-        });
+        };
+        socket.on("log", handleSocketLog);
 
         return () => {
-            socket.off("log");
+            socket.off("log", handleSocketLog);
         };
     }, []);
 
@@ -146,10 +160,11 @@ export default function DirectChatPage() {
         let isMounted = true;
         const fetchHistory = async () => {
             try {
-                const res = await fetch(`/api/chat/history?golemId=${activeGolem}`);
-                const data = await res.json();
+                const data = await apiGet<{ success?: boolean; history?: ChatHistoryRecord[] }>(
+                    `/api/chat/history?golemId=${encodeURIComponent(activeGolem)}`
+                );
                 if (data.success && data.history && isMounted) {
-                    const parsedHistory = data.history.map((h: any) => {
+                    const parsedHistory = data.history.map((h) => {
                         let rawMsg = h.msg;
                         if (rawMsg.startsWith('[MultiAgent]')) rawMsg = rawMsg.replace('[MultiAgent]', '').trim();
                         let sender = "System";
@@ -174,7 +189,7 @@ export default function DirectChatPage() {
                     });
 
                     setMessages(parsedHistory);
-                    setCompletedTypingMsgs(new Set(parsedHistory.map((m: any) => m.id)));
+                    setCompletedTypingMsgs(new Set(parsedHistory.map((m) => m.id)));
                 }
             } catch (err) {
                 console.error("Failed to fetch chat history:", err);
@@ -213,11 +228,7 @@ export default function DirectChatPage() {
         if (!activeGolem) return;
         setIsSending(true);
         try {
-            await fetch('/api/chat/callback', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ golemId: activeGolem, callback_data: callbackData })
-            });
+            await apiPost("/api/chat/callback", { golemId: activeGolem, callback_data: callbackData });
         } catch (e) {
             console.error("Failed to send action:", e);
         } finally {
@@ -314,15 +325,10 @@ export default function DirectChatPage() {
             let attachmentInfo = null;
             
             if (selectedFile) {
-                const uploadRes = await fetch('/api/upload', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        fileName: selectedFile.name,
-                        base64Data: selectedFile.base64
-                    })
+                const uploadData = await apiPost<{ success?: boolean; path?: string; url?: string }>("/api/upload", {
+                    fileName: selectedFile.name,
+                    base64Data: selectedFile.base64,
                 });
-                const uploadData = await uploadRes.json();
                 if (uploadData.success) {
                     attachmentInfo = {
                         path: uploadData.path,
@@ -333,14 +339,10 @@ export default function DirectChatPage() {
                 setSelectedFile(null);
             }
 
-            await fetch('/api/chat', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ 
-                    golemId: activeGolem, 
-                    message: val,
-                    attachment: attachmentInfo
-                })
+            await apiPost("/api/chat", {
+                golemId: activeGolem,
+                message: val,
+                attachment: attachmentInfo
             });
         } catch (e) {
             console.error("Failed to send message:", e);
@@ -362,7 +364,7 @@ export default function DirectChatPage() {
             const arg = parts.length > 1 ? parts[1] : '';
 
             // 如果有完全符合的頂層指令，且該指令有選項，且使用者已經輸入了空格
-            const exactCmd = COMMANDS.find(c => c.command.toLowerCase() === cmdName.toLowerCase());
+            const exactCmd = allCommands.find(c => c.command.toLowerCase() === cmdName.toLowerCase());
 
             if (exactCmd && exactCmd.options && val.includes(' ')) {
                 // 顯示選項
@@ -382,7 +384,7 @@ export default function DirectChatPage() {
                 setShowSuggestions(filteredOptions.length > 0);
             } else {
                 // 顯示頂層指令
-                const filtered = COMMANDS.filter(c => c.command.toLowerCase().includes(cmdName.toLowerCase()));
+                const filtered = allCommands.filter(c => c.command.toLowerCase().includes(cmdName.toLowerCase()));
                 setFilteredCommands(filtered);
                 // 只有在還沒輸入空格時才顯示頂層指令列表
                 setShowSuggestions(filtered.length > 0 && !val.includes(' '));
@@ -455,6 +457,7 @@ export default function DirectChatPage() {
                                             <div className="mb-2 flex flex-col gap-2">
                                                 {msg.attachments.map((att, attIdx) => (
                                                     (att.mimeType || "").startsWith('image/') ? (
+                                                        // eslint-disable-next-line @next/next/no-img-element
                                                         <img
                                                             key={attIdx}
                                                             src={att.url}
@@ -493,7 +496,7 @@ export default function DirectChatPage() {
                                     </div>
                                     {msg.actionData && Array.isArray(msg.actionData) && (!msg.isSystem || msg.isHistory || completedTypingMsgs.has(msg.id)) && (
                                         <div className="flex flex-wrap gap-2 mt-3">
-                                            {msg.actionData.map((btn: any, idx: number) => {
+                                            {msg.actionData.map((btn, idx) => {
                                                 const isApprove = btn.text.includes('批准') || btn.text.includes('Approve');
                                                 const isDeny = btn.text.includes('拒絕') || btn.text.includes('Reject') || btn.text.includes('Deny');
 
@@ -579,6 +582,7 @@ export default function DirectChatPage() {
                     {selectedFile && (
                         <div className="mb-3 flex items-center p-2 bg-secondary/50 border border-border rounded-lg relative group w-fit">
                             {selectedFile.type.startsWith('image/') ? (
+                                // eslint-disable-next-line @next/next/no-img-element
                                 <img 
                                     src={`data:${selectedFile.type};base64,${selectedFile.base64}`} 
                                     alt="preview" 

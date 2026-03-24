@@ -2,7 +2,7 @@ const ConfigManager = require('../config');
 const Introspection = require('../services/Introspection');
 const ResponseParser = require('../utils/ResponseParser');
 const PatchManager = require('../managers/PatchManager');
-const NeuroShunter = require('../core/NeuroShunter');
+const { NeuroShunter } = require('../../packages/protocol');
 const path = require('path');
 const fs = require('fs');
 
@@ -25,6 +25,12 @@ class AutonomyManager {
     }
 
     start() {
+        const hasTelegram = !!ConfigManager.CONFIG.TG_TOKEN;
+        const hasDiscord = !!ConfigManager.CONFIG.DC_TOKEN;
+        if (!hasTelegram && !hasDiscord) {
+            console.warn(`⚠️ [Autonomy][${this.golemId}] No TG_TOKEN or DC_TOKEN configured — autonomy services not started.`);
+            return;
+        }
         console.log(`🚀 [Autonomy][${this.golemId}] Starting autonomy services...`);
         this.resumeOrScheduleAwakening();
         setInterval(() => this.timeWatcher(), 60000);
@@ -49,12 +55,8 @@ class AutonomyManager {
     async checkArchiveStatus() {
         console.log(`🕒 [Autonomy] 定時檢查日誌壓縮狀態 (雙重門檻掃描: ${ConfigManager.CONFIG.ARCHIVE_CHECK_INTERVAL}min)...`);
         try {
-            const ChatLogManager = require('../managers/ChatLogManager');
-            // ✅ [H-1 Fix] 傳入正確 golemId/logDir，確保掃描正確目錄
-            const logManager = new ChatLogManager({
-                golemId: this.golemId,
-                logDir: ConfigManager.LOG_BASE_DIR
-            });
+            const logManager = this.brain.chatLogManager;
+            if (!logManager) return;
             const logDir = logManager.dirs.hourly;
 
             const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
@@ -107,19 +109,33 @@ class AutonomyManager {
         const nowTime = now.getTime();
         let fileTasks = [];
         const updatedSchedules = [];
+        const promises = fs.promises || {};
+        const statAsync = typeof promises.stat === 'function' ? promises.stat.bind(promises) : null;
+        const readFileAsync = typeof promises.readFile === 'function' ? promises.readFile.bind(promises) : null;
+        const writeFileAsync = typeof promises.writeFile === 'function' ? promises.writeFile.bind(promises) : null;
 
         // --- ✨ 路徑隔離 (Path Isolation) ---
         const logDir = ConfigManager.LOG_BASE_DIR;
 
         const scheduleFile = path.join(logDir, 'schedules.json');
 
-        // M-5 Fix: 寫入前先確保目錄存在，防止拍程觸發在首次對話之前導致寫入失敗
-        fs.mkdirSync(path.dirname(scheduleFile), { recursive: true });
+        // M-5 Fix: 異步寫入前確保目錄存在
+        // 測試環境可能會 mock fs 導致 fs.promises 不完整，這裡做相容退化。
+        if (fs.promises && typeof fs.promises.mkdir === 'function') {
+            await fs.promises.mkdir(path.dirname(scheduleFile), { recursive: true }).catch(() => { });
+        } else {
+            try { fs.mkdirSync(path.dirname(scheduleFile), { recursive: true }); } catch (e) { }
+        }
 
         // 1. 讀取並檢查檔案資料庫 (New Path: logs/schedules.json)
-        if (fs.existsSync(scheduleFile)) {
+        const stat = statAsync
+            ? await statAsync(scheduleFile).catch(() => null)
+            : (fs.existsSync(scheduleFile) ? { fallback: true } : null);
+        if (stat) {
             try {
-                const rawData = await fs.promises.readFile(scheduleFile, 'utf-8');
+                const rawData = readFileAsync
+                    ? await readFileAsync(scheduleFile, 'utf-8')
+                    : fs.readFileSync(scheduleFile, 'utf-8');
                 if (rawData.trim()) {
                     const schedules = JSON.parse(rawData);
                     schedules.forEach(item => {
@@ -133,7 +149,11 @@ class AutonomyManager {
 
                     // 如果有過期或已處理的，寫回檔案進行更新 (物理移除)
                     if (fileTasks.length > 0) {
-                        await fs.promises.writeFile(scheduleFile, JSON.stringify(updatedSchedules, null, 2));
+                        if (writeFileAsync) {
+                            await writeFileAsync(scheduleFile, JSON.stringify(updatedSchedules, null, 2));
+                        } else {
+                            fs.writeFileSync(scheduleFile, JSON.stringify(updatedSchedules, null, 2));
+                        }
                     }
                 }
             } catch (e) {
@@ -289,13 +309,8 @@ class AutonomyManager {
         console.log(`🧠 [Autonomy][${this.golemId}] 啟動自我反思程序...`);
 
         // 1. 讀取最近的對話摘要 (Tier 1)
-        const ChatLogManager = require('../managers/ChatLogManager');
-        const logManager = new ChatLogManager({
-            golemId: this.golemId,
-            logDir: ConfigManager.LOG_BASE_DIR
-        });
-
-        const recentSummaries = logManager.readTier('daily', 3);
+        const logManager = this.brain.chatLogManager;
+        const recentSummaries = logManager ? await logManager.readTierAsync('daily', 3) : [];
         const summaryContext = recentSummaries.map(s => `[${s.date}] ${s.content}`).join('\n\n');
 
         // 2. 建構反思 Prompt
@@ -355,29 +370,32 @@ ${summaryContext || "（目前尚無對話摘要）"}
         let sent = false;
 
         // ✅ [Fix] 同步廣播到 Web Dashboard
-        try {
-            const dashboard = require('../../dashboard');
-            if (dashboard && dashboard.webServer) {
-                const notifyText = msgText; // Use msgText as notifyText
-                let payloadType = 'general';
-                let actionData = null;
+        // 測試環境下避免動態 require dashboard 造成額外 server side effects。
+        if (process.env.NODE_ENV !== 'test') {
+            try {
+                const dashboard = require('../../dashboard');
+                if (dashboard && dashboard.webServer) {
+                    const notifyText = msgText; // Use msgText as notifyText
+                    let payloadType = 'general';
+                    let actionData = null;
 
-                if (opts.reply_markup && opts.reply_markup.inline_keyboard) {
-                    payloadType = 'approval';
-                    actionData = opts.reply_markup.inline_keyboard[0];
+                    if (opts.reply_markup && opts.reply_markup.inline_keyboard) {
+                        payloadType = 'approval';
+                        actionData = opts.reply_markup.inline_keyboard[0];
+                    }
+
+                    dashboard.webServer.broadcastLog({
+                        time: new Date().toLocaleTimeString('zh-TW', { hour12: false }),
+                        msg: `[${this.golemId}] ${notifyText}`,
+                        type: payloadType,
+                        raw: notifyText,
+                        actionData,
+                        golemId: this.golemId
+                    });
                 }
-
-                dashboard.webServer.broadcastLog({
-                    time: new Date().toLocaleTimeString('zh-TW', { hour12: false }),
-                    msg: `[${this.golemId}] ${notifyText}`,
-                    type: payloadType,
-                    raw: notifyText,
-                    actionData,
-                    golemId: this.golemId
-                });
+            } catch (e) {
+                // 忽略 Dashboard 未載入的錯誤
             }
-        } catch (e) {
-            // 忽略 Dashboard 未載入的錯誤
         }
 
         if (this.tgBot && tgTargetId) {

@@ -6,8 +6,11 @@
 
 ## 🏗️ 核心架構模式: "Browser-in-the-Loop"
 
-- **入口點**: `src/index.js` 或 `src/main.js`。
-- **LLM 控制**: 除非明確要求，否則**不得**將 `GolemBrain` 改寫為官方 REST API。Golem 的核心價值在於透過 Puppeteer 操控瀏覽器以存取 Web Gemini。
+- **入口點**:
+  - 相容入口：`index.js`、`dashboard.js`
+  - 實際 App 層入口：`apps/runtime/index.js`、`apps/dashboard/plugin.js`
+- **架構守門**: 提交前建議執行 `npm run arch:check`，避免跨層依賴回流。
+- **LLM 控制**: 除非明確要求，否則**不得**將 `GolemBrain` 改寫為官方 REST API。Golem 的核心價值在於透過 **Playwright** 操控瀏覽器以存取 Web Gemini。
 - **狀態管理**: 大部分狀態保存在 `ConversationManager` 中。跨平台邏輯抽象於 `UniversalContext`。
 
 ## 🧠 記憶協定: "Pyramid Memory" (金字塔記憶)
@@ -35,4 +38,4 @@
 - **系統存取**: AI 可執行本地腳本；請確保新的本地執行技能具備安全防護。
 
 ---
-*最後更新: 2026-03-16*
+*最後更新: 2026-03-23*

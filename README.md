@@ -4,9 +4,9 @@
   <p><b>Ultimate Chronos + MultiAgent + Social Node Edition</b></p>
 
   <p>
-    <img src="https://img.shields.io/badge/Version-9.1.3-blue?style=for-the-badge" alt="Version">
+    <img src="https://img.shields.io/badge/Version-9.1.6-blue?style=for-the-badge" alt="Version">
     <img src="https://img.shields.io/badge/Engine-Node.js%2020-green?style=for-the-badge&logo=nodedotjs" alt="Engine">
-    <img src="https://img.shields.io/badge/Brain-Web%20Gemini-orange?style=for-the-badge&logo=google" alt="Brain">
+    <img src="https://img.shields.io/badge/Brain-Gemini%20Web%20%7C%20Ollama-orange?style=for-the-badge&logo=google" alt="Brain">
     <img src="https://img.shields.io/badge/Platform-Telegram%20%7C%20Discord-blue?style=for-the-badge" alt="Platform">
     <img src="https://img.shields.io/badge/License-MIT-red?style=for-the-badge" alt="License">
   </p>
@@ -31,6 +31,7 @@
 - [⚡ 快速開始](#-快速開始)
 - [🎮 指令速查](#-指令速查-command-reference)
 - [🏗️ 系統架構](#-系統架構)
+- [🗂️ 產品級目錄分層](#-產品級目錄分層)
 - [🧠 金字塔式長期記憶](#-金字塔式長期記憶-pyramidal-long-term-memory)
 - [📖 完整文件與指南](#-完整文件與指南)
 
@@ -38,14 +39,14 @@
 
 ## ✨ 這是什麼？
 
-**Project Golem** 不是一個普通的聊天機器人。它是一個以 **Web Gemini 的無限上下文**為大腦、以 **Puppeteer** 為雙手的自主 AI 代理系統。
+**Project Golem** 不是一個普通的聊天機器人。它是一個可選擇 **Web Gemini（Browser-in-the-Loop）** 或 **Ollama（本地/私有部署）** 作為大腦的自主 AI 代理系統。
 
 - 🧠 **記住你** — 金字塔式 5 層記憶壓縮，理論上可保存 **50 年**的對話精華。
 - 🤖 **自主行動** — 當你不在時，它會主動瀏覽新聞、自省思考、發送消息給你。
 - 🎭 **召喚 AI 團隊** — 一個指令生成多個 AI 專家進行圓桌討論，產出共識摘要。
 - 🔧 **動態擴充** — 支援熱載入技能模組 (Skills)，甚至能讓 AI 在沙盒中寫扣自學新技能。
 
-> **Browser-in-the-Loop 架構**：Golem 不依賴限制繁多的官方 API，而是直接操控瀏覽器存取 Web Gemini，享有「無限上下文視窗」與網頁視覺理解的優勢。
+> **雙後端架構**：預設可使用 Browser-in-the-Loop 直接操控 Web Gemini；也可切換到 Ollama API 走本地模型與私有部署路線。
 
 ---
 
@@ -116,7 +117,7 @@
 
 ### 環境需求
 - **Node.js** v20+
-- **Google Chrome** (供 Puppeteer 自動化操控使用)
+- **Chromium / Google Chrome** (供 Playwright 自動化操控使用)
 - **Telegram/Discord Bot Token** (非必填，若只需本機操作可免)
 
 ### ⚡ 最推薦：一鍵安裝與啟動模式 (Magic Mode)
@@ -133,6 +134,33 @@ chmod +x setup.sh
 
 # 直接啟動
 ./setup.sh --start
+```
+
+**🔐 建議設定（純 Playwright + 安全）**
+```env
+GOLEM_MEMORY_MODE=lancedb-pro
+GOLEM_BACKEND=gemini
+GOLEM_EMBEDDING_PROVIDER=local
+PLAYWRIGHT_STEALTH_ENABLED=true
+ALLOW_REMOTE_ACCESS=false
+# 若需要遠端管理，務必設定：
+# REMOTE_ACCESS_PASSWORD=your-strong-password
+# SYSTEM_OP_TOKEN=your-operation-token
+```
+
+**🦙 Ollama 私有化範例**
+```env
+GOLEM_BACKEND=ollama
+GOLEM_OLLAMA_BASE_URL=http://127.0.0.1:11434
+GOLEM_OLLAMA_BRAIN_MODEL=llama3.1:8b
+GOLEM_EMBEDDING_PROVIDER=ollama
+GOLEM_OLLAMA_EMBEDDING_MODEL=nomic-embed-text
+# 選填：GOLEM_OLLAMA_RERANK_MODEL=bge-reranker-v2-m3
+```
+
+**🏗️ 架構治理檢查**
+```bash
+npm run arch:check
 ```
 
 
@@ -175,8 +203,28 @@ graph TD
 ```
 
 ### 🧠 技術深潛
-- **Browser-in-the-Loop**: 與傳統基於 API 的機器人不同，Golem 使用 Puppeteer 在 Web Gemini 上模擬人類行為。這提供了免費訪問 **1M+ Token 無限上下文視窗** 的能力。
+- **Browser-in-the-Loop**: 與傳統基於 API 的機器人不同，Golem 使用 **Playwright** 在 Web Gemini 上模擬人類行為。這提供了免費訪問 **1M+ Token 無限上下文視窗** 的能力。
+- **Ollama Local Backend**: 可切換為本地/私有部署模型，支援 `brain + embedding`，並可選填 `rerank` 模型做記憶召回重排。
 - **Reflex Shunting**: Golem 的大腦產出結構化的 `GOLEM_PROTOCOL` 指令而非純文字。這讓代理人能精準決定何時該說話、何時該記憶、以及何時該執行技能腳本。
+
+## 🗂️ 產品級目錄分層
+
+為了支援多人協作與長期演進，專案已改為「產品級分層」：
+
+```text
+project-golem/
+├── apps/
+│   ├── runtime/       # 核心啟動入口（實際執行）
+│   └── dashboard/     # Dashboard 插件層
+├── src/               # 核心領域邏輯（Brain / Memory / Skills / Managers）
+├── web-dashboard/     # Web UI 與 API 路由
+├── packages/          # 共用套件（已落地 security/memory/protocol facade）
+├── infra/             # 預留：部署、監控、環境治理
+├── index.js           # 相容入口（shim，轉發到 apps/runtime）
+└── dashboard.js       # 相容入口（shim，轉發到 apps/dashboard）
+```
+
+> 此次重構採「相容優先」策略：既有指令與腳本可持續使用，同時逐步遷移到大型產品結構。
 
 ---
 
@@ -205,6 +253,8 @@ graph TD
 | 文件 | 說明 |
 |------|------|
 | [🤖 編碼代理指南](docs/AGENTS.md) | **[重要]** 供 AI 助理或開發者參考的程式碼維護與架構規範 |
+| [🗂️ 大型產品架構藍圖](docs/大型產品架構藍圖.md) | `apps + packages + infra` 分層策略與遷移路線圖 |
+| [🏗️ 架構治理規範](infra/architecture/README.md) | 分層邊界規則與 `arch:check` 自動檢查 |
 | [🔌 MCP 使用與開發指南](docs/MCP-使用與開發指南.md) | **[最新]** 如何安裝、配置與調用 MCP Server (含 Hacker News 範例) |
 | [🧠 記憶系統架構說明](docs/記憶系統架構說明.md) | 金字塔壓縮原理與存放路徑解析 |
 | [🖥️ Web Dashboard 使用說明](docs/Web-Dashboard-使用說明.md) | Web UI 各個分頁的延伸細節 |

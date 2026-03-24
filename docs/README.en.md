@@ -4,9 +4,9 @@
   <p><b>Ultimate Chronos + MultiAgent + Social Node Edition</b></p>
 
   <p>
-    <img src="https://img.shields.io/badge/Version-9.1.3-blue?style=for-the-badge" alt="Version">
+    <img src="https://img.shields.io/badge/Version-9.1.6-blue?style=for-the-badge" alt="Version">
     <img src="https://img.shields.io/badge/Engine-Node.js%2020-green?style=for-the-badge&logo=nodedotjs" alt="Engine">
-    <img src="https://img.shields.io/badge/Brain-Web%20Gemini-orange?style=for-the-badge&logo=google" alt="Brain">
+    <img src="https://img.shields.io/badge/Brain-Gemini%20Web%20%7C%20Ollama-orange?style=for-the-badge&logo=google" alt="Brain">
     <img src="https://img.shields.io/badge/Platform-Telegram%20%7C%20Discord-blue?style=for-the-badge" alt="Platform">
     <img src="https://img.shields.io/badge/License-MIT-red?style=for-the-badge" alt="License">
   </p>
@@ -31,6 +31,7 @@
 - [⚡ Quick Start](#-quick-start)
 - [🎮 Command Reference](#-command-reference)
 - [🏗️ System Architecture](#-system-architecture)
+- [🗂️ Product-scale Project Layout](#-product-scale-project-layout)
 - [🧠 Pyramidal Long-term Memory](#-pyramidal-long-term-memory)
 - [📖 Complete Documentation & Guides](#-complete-documentation--guides)
 
@@ -38,14 +39,14 @@
 
 ## ✨ What is this?
 
-**Project Golem** is not just another chatbot. It is an autonomous AI agent that uses **Web Gemini's infinite context** as its brain and **Puppeteer** as its hands.
+**Project Golem** is not just another chatbot. It is an autonomous AI agent that can use either **Web Gemini (Browser-in-the-Loop)** or **Ollama (local/self-hosted)** as its brain backend.
 
 - 🧠 **Remember You** — Pyramidal 5-tier memory compression, theoretically preserving **50 years** of conversational essence.
 - 🤖 **Autonomous Action** — While you're away, it proactively browses news, introspects, and sends messages to you.
 - 🎭 **Summon AI Team** — A single command generates multiple AI experts for roundtable discussions and consensus summaries.
 - 🔧 **Dynamic Expansion** — Supports hot-loading skill modules (Skills), and even allows AI to code and learn new skills in a sandbox.
 
-> **Browser-in-the-Loop Architecture**: Golem doesn't rely on restrictive official APIs. It directly controls a browser to use Web Gemini, enjoying the advantages of an "infinite context window" and intuitive operations.
+> **Dual-backend Architecture**: Use Browser-in-the-Loop with Web Gemini by default, or switch to Ollama API for local/private deployment workflows.
 
 ---
 
@@ -116,7 +117,7 @@ To help you better monitor and manage your Golem, we provide a fully functional 
 
 ### Prerequisites
 - **Node.js** v20+
-- **Google Chrome** (Required for Puppeteer)
+- **Chromium / Google Chrome** (Required for Playwright)
 - **Telegram Bot Token** (Get from [@BotFather](https://t.me/BotFather))
 
 ### ⚡ Recommended: One-click Magic Mode
@@ -133,6 +134,33 @@ chmod +x setup.sh
 
 # Start directly
 ./setup.sh --start
+```
+
+**🔐 Recommended baseline config (Playwright + Security)**
+```env
+GOLEM_MEMORY_MODE=lancedb-pro
+GOLEM_BACKEND=gemini
+GOLEM_EMBEDDING_PROVIDER=local
+PLAYWRIGHT_STEALTH_ENABLED=true
+ALLOW_REMOTE_ACCESS=false
+# If remote admin is needed, set both:
+# REMOTE_ACCESS_PASSWORD=your-strong-password
+# SYSTEM_OP_TOKEN=your-operation-token
+```
+
+**🦙 Ollama private deployment example**
+```env
+GOLEM_BACKEND=ollama
+GOLEM_OLLAMA_BASE_URL=http://127.0.0.1:11434
+GOLEM_OLLAMA_BRAIN_MODEL=llama3.1:8b
+GOLEM_EMBEDDING_PROVIDER=ollama
+GOLEM_OLLAMA_EMBEDDING_MODEL=nomic-embed-text
+# Optional: GOLEM_OLLAMA_RERANK_MODEL=bge-reranker-v2-m3
+```
+
+**🏗️ Architecture boundary check**
+```bash
+npm run arch:check
 ```
 
 ### Windows
@@ -174,8 +202,28 @@ graph TD
 ```
 
 ### 🧠 Technical Deep Dive
-- **Browser-in-the-Loop**: Unlike traditional API-based bots, Golem uses Puppeteer to simulate human behavior on Web Gemini. This provides access to the **1M+ Token Infinite Context Window** for free.
+- **Browser-in-the-Loop**: Unlike traditional API-based bots, Golem uses **Playwright** to simulate human behavior on Web Gemini. This provides access to the **1M+ Token Infinite Context Window** for free.
+- **Ollama Local Backend**: You can switch to local/self-hosted models for both `brain` and `embedding`, with optional `rerank` for memory retrieval reordering.
 - **Reflex Shunting**: Golem's brain produces structured `GOLEM_PROTOCOL` instructions instead of raw text. This allows the agent to precisely determine when to talk, when to remember, and when to execute skill scripts.
+
+## 🗂️ Product-scale Project Layout
+
+To support long-term evolution and team collaboration, the repository now follows a product-scale layered layout:
+
+```text
+project-golem/
+├── apps/
+│   ├── runtime/       # Real runtime entrypoint
+│   └── dashboard/     # Dashboard plugin layer
+├── src/               # Core domain logic (Brain / Memory / Skills / Managers)
+├── web-dashboard/     # Web UI and API routes
+├── packages/          # Shared packages (security/memory/protocol facades)
+├── infra/             # Reserved for deployment/ops assets
+├── index.js           # Compatibility shim -> apps/runtime
+└── dashboard.js       # Compatibility shim -> apps/dashboard
+```
+
+> Migration strategy is compatibility-first: existing commands still work while new modules gradually move into clear layers.
 
 ---
 
@@ -203,6 +251,8 @@ To keep this page concise, more in-depth technical details have been moved to de
 |------|------|
 | [🔌 MCP Usage & Development Guide](MCP-Guide.en.md) | **[New]** How to install, configure, and call MCP Servers (includes Hacker News example) |
 | [🤖 AI Agent Guide](AGENTS.en.md) | **[Important]** Guidelines for AI assistants and developers on code maintenance |
+| [🗂️ Product Architecture Blueprint](Product-Architecture-Blueprint.en.md) | Layering strategy (`apps + packages + infra`) and migration roadmap |
+| [🏗️ Architecture Governance](../infra/architecture/README.md) | Boundary rules and `arch:check` automation |
 | [🧠 Memory System Architecture](記憶系統架構說明.md) | Pyramid compression principles and storage path analysis |
 | [🖥️ Web Dashboard Guide](Web-Dashboard-Guide.en.md) | Extended details for each tab in the Web UI |
 | [🛠️ Developer Implementation Guide](開發者實作指南.md) | How to implement new Skills and Golem Protocol specifications |

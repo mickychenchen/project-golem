@@ -3,40 +3,37 @@
 import { useEffect, useState } from "react";
 import { MemoryTable } from "@/components/MemoryTable";
 import { useGolem } from "@/components/GolemContext";
-import { BrainCircuit, Cpu, Database, Activity } from "lucide-react";
+import { BrainCircuit, Cpu, Database, Activity, type LucideIcon } from "lucide-react";
 import { LogStream } from "@/components/LogStream";
 import { cn } from "@/lib/utils";
+import { apiGet } from "@/lib/api-client";
+import { useQuery } from "@/hooks/useQuery";
+
+type MemoryConfig = {
+    golemEmbeddingProvider?: string;
+    golemOllamaEmbeddingModel?: string;
+    golemLocalEmbeddingModel?: string;
+    golemMemoryMode?: string;
+};
 
 export default function MemoryPage() {
     const { activeGolem, golems } = useGolem();
     const [status, setStatus] = useState("initializing");
-    const [config, setConfig] = useState<any>(null);
-
-    useEffect(() => {
-        const fetchConfig = async () => {
-            try {
-                const res = await fetch("/api/system/config");
-                if (res.ok) {
-                    const data = await res.json();
-                    setConfig(data);
-                }
-            } catch (e) {
-                console.error("Failed to fetch config", e);
-            }
-        };
-        fetchConfig();
-    }, []);
+    const { data: config } = useQuery<MemoryConfig>(() => apiGet<MemoryConfig>("/api/system/config"), []);
 
     useEffect(() => {
         if (activeGolem) {
-            setStatus("initializing");
+            const rafId = requestAnimationFrame(() => setStatus("initializing"));
             const timer = setTimeout(() => setStatus("ready"), 1500);
-            return () => clearTimeout(timer);
+            return () => {
+                cancelAnimationFrame(rafId);
+                clearTimeout(timer);
+            };
         }
     }, [activeGolem]);
 
-    const getModelDisplayName = (modelId: string, provider: string) => {
-        if (provider === 'gemini') return "Google Gemini (004)";
+    const getModelDisplayName = (modelId?: string, provider?: string) => {
+        if (provider === "ollama") return modelId || "Ollama Embedding";
         const models: Record<string, string> = {
             "Xenova/bge-small-zh-v1.5": "BGE-Small (ZH)",
             "Xenova/bge-base-zh-v1.5": "BGE-Base (ZH)",
@@ -44,7 +41,7 @@ export default function MemoryPage() {
             "Xenova/nomic-embed-text-v1.5": "Nomic Embed",
             "Xenova/all-MiniLM-L6-v2": "MiniLM-L6 (EN)"
         };
-        return models[modelId] || modelId || "Unknown Model";
+        return modelId ? models[modelId] || modelId : "Unknown Model";
     };
 
     return (
@@ -93,9 +90,16 @@ export default function MemoryPage() {
                         <StatusCard
                             icon={Cpu}
                             title="向量模型 (Embedding)"
-                            value={getModelDisplayName(config?.golemLocalEmbeddingModel, config?.golemEmbeddingProvider)}
+                            value={getModelDisplayName(
+                                config?.golemEmbeddingProvider === 'ollama' ? config?.golemOllamaEmbeddingModel : config?.golemLocalEmbeddingModel,
+                                config?.golemEmbeddingProvider
+                            )}
                             status={status === 'ready' ? 'online' : 'loading'}
-                            description={config?.golemEmbeddingProvider === 'gemini' ? "Google 雲端模型 (Cloud-based)" : "本地 Transformers.js 推論引擎 (Local)"}
+                            description={
+                                config?.golemEmbeddingProvider === 'ollama'
+                                    ? "Ollama 本地/私有部署模型"
+                                    : "本地 Transformers.js 推論引擎 (Local)"
+                            }
                         />
                         <StatusCard
                             icon={Database}
@@ -164,7 +168,7 @@ export default function MemoryPage() {
     );
 }
 
-function StatusCard({ icon: Icon, title, value, description, status }: { icon: any, title: string, value: string, description: string, status: 'online' | 'loading' }) {
+function StatusCard({ icon: Icon, title, value, description, status }: { icon: LucideIcon, title: string, value: string, description: string, status: "online" | "loading" }) {
     return (
         <div className="bg-card/50 backdrop-blur-sm border border-border rounded-xl p-4 flex flex-col relative overflow-hidden group hover:border-primary/50 transition-colors">
             <div className="flex items-start justify-between">

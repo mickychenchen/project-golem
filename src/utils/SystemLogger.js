@@ -36,6 +36,7 @@ class SystemLogger {
         this._isLogging = false; 
         this.lastRotationFailure = 0; // ✨ [新增] 避免寫入失敗時無限嘗試輪替 (造成 EIO 循環)
         this.rotationCooldown = 60000; // 60s cooldown
+        this._bytesWrittenSinceLastCheck = 0; // ✨ [新增] 累積字節，避免頻繁呼叫 statSync
     }
 
     static _ensureDirectory(dir) {
@@ -57,7 +58,10 @@ class SystemLogger {
 
         try {
             // 檢查是否手動關閉了系統日誌
-            if (process.env.ENABLE_SYSTEM_LOG === 'false') return;
+            if (process.env.ENABLE_SYSTEM_LOG === 'false') {
+                this._isLogging = false;
+                return;
+            }
         } catch (e) {
             this._isLogging = false;
             return;
@@ -78,30 +82,7 @@ class SystemLogger {
         }
         this.currentDateString = dateString;
 
-        // == 輪替條件 2: 容量達標 ==
-        if (!shouldRotate) {
-            const maxSizeMb = parseFloat(process.env.LOG_MAX_SIZE_MB) || 10;
-            if (maxSizeMb > 0) {
-                const maxBytes = maxSizeMb * 1024 * 1024;
-                if (fs.existsSync(this.logFile)) {
-                    try {
-                        const stats = fs.statSync(this.logFile);
-                        if (stats.size >= maxBytes) {
-                            shouldRotate = true;
-                        }
-                    } catch (e) { }
-                }
-            }
-        }
-
-        // 執行輪替 (增加冷卻機制防止磁碟滿額時無限嘗試)
-        if (shouldRotate) {
-            const nowTime = Date.now();
-            if (nowTime - this.lastRotationFailure > this.rotationCooldown) {
-                this._rotateAndCompress(rotateTag);
-            }
-        }
-
+        // 預估寫入字節
         const util = require('util');
         const message = args.map(arg => {
             if (arg instanceof Error) {
@@ -117,6 +98,39 @@ class SystemLogger {
         }).join(' ');
 
         const logLine = `[${timestamp}] [${level}] ${message}\n`;
+        const lineBytes = Buffer.byteLength(logLine, 'utf8');
+
+        // == 輪替條件 2: 容量達標 ==
+        if (!shouldRotate) {
+            const maxSizeMb = parseFloat(process.env.LOG_MAX_SIZE_MB) || 10;
+            if (maxSizeMb > 0) {
+                const maxBytes = maxSizeMb * 1024 * 1024;
+                this._bytesWrittenSinceLastCheck += lineBytes;
+
+                // 只有累積超過 1MB 時才進行一次真正的 disk stat 檢查
+                if (this._bytesWrittenSinceLastCheck >= 1024 * 1024) {
+                    this._bytesWrittenSinceLastCheck = 0;
+                    if (fs.existsSync(this.logFile)) {
+                        try {
+                            const stats = fs.statSync(this.logFile);
+                            if (stats.size >= maxBytes) {
+                                shouldRotate = true;
+                            }
+                        } catch (e) { }
+                    }
+                }
+            }
+        }
+
+        // 執行輪替 (增加冷卻機制防止磁碟滿額時無限嘗試)
+        if (shouldRotate) {
+            const nowTime = Date.now();
+            if (nowTime - this.lastRotationFailure > this.rotationCooldown) {
+                this._rotateAndCompress(rotateTag);
+            }
+        }
+
+        // (message 與 logLine 等變數已經移到前面計算，此處保留註解即可)
         try {
             fs.appendFileSync(this.logFile, logLine);
         } catch (e) {

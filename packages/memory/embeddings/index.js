@@ -1,6 +1,7 @@
 const LocalProvider = require('./LocalProvider');
 const GeminiProvider = require('./GeminiProvider');
-const { CONFIG } = require('../../config');
+const OllamaProvider = require('./OllamaProvider');
+const { CONFIG } = require('../../../src/config');
 
 /**
  * 🧠 Embedding Provider Factory
@@ -14,6 +15,8 @@ class EmbeddingFactory {
             return new LocalProvider(CONFIG.LOCAL_EMBEDDING_MODEL);
         } else if (providerType === 'gemini') {
             return new GeminiProvider(keyChain);
+        } else if (providerType === 'ollama') {
+            return new OllamaProvider(CONFIG.OLLAMA_EMBEDDING_MODEL);
         } else {
             console.warn(`⚠️ [Embedding] 未知的 Provider 類型: ${providerType}，將退回本地模式。`);
             return new LocalProvider();
@@ -24,5 +27,6 @@ class EmbeddingFactory {
 module.exports = {
     EmbeddingFactory,
     LocalProvider,
-    GeminiProvider
+    GeminiProvider,
+    OllamaProvider
 };

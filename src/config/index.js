@@ -19,6 +19,18 @@ const isPlaceholder = (str) => {
     return hasPlaceholderKeywords || str.length < 8;
 };
 
+const normalizeBackend = (value) => {
+    const backend = cleanEnv(value).toLowerCase();
+    if (backend === 'gemini' || backend === 'ollama' || backend === 'perplexity') return backend;
+    return 'gemini';
+};
+
+const normalizeEmbeddingProvider = (value) => {
+    const provider = cleanEnv(value).toLowerCase();
+    if (provider === 'local' || provider === 'ollama') return provider;
+    return 'local';
+};
+
 const CONFIG = {
     TG_TOKEN: cleanEnv(process.env.TELEGRAM_TOKEN),
     TG_AUTH_MODE: cleanEnv(process.env.TG_AUTH_MODE) || 'ADMIN',
@@ -35,12 +47,12 @@ const CONFIG = {
     DONATE_URL: 'https://buymeacoffee.com/arvincreator',
     TZ: cleanEnv(process.env.TZ) || 'Asia/Taipei',
     INTERVENTION_LEVEL: cleanEnv(process.env.GOLEM_INTERVENTION_LEVEL) || 'CONSERVATIVE',
-    TG_ENGINE: cleanEnv(process.env.TG_ENGINE) || 'legacy',
+    TG_ENGINE: cleanEnv(process.env.TG_ENGINE) || 'grammy',
     CB_TG_TIMEOUT_MS: cleanEnv(process.env.CB_TG_TIMEOUT_MS) || '10000',
     CB_TG_RESET_MS: cleanEnv(process.env.CB_TG_RESET_MS) || '15000',
     CB_TG_ERROR_PCT: cleanEnv(process.env.CB_TG_ERROR_PCT) || '30',
     // --- AI Backend ---
-    GOLEM_BACKEND: cleanEnv(process.env.GOLEM_BACKEND) || 'gemini',
+    GOLEM_BACKEND: normalizeBackend(process.env.GOLEM_BACKEND),
     GOLEM_MEMORY_MODE: cleanEnv(process.env.GOLEM_MEMORY_MODE) || 'lancedb-pro',
     // --- Scheduled Tasks ---
     AWAKE_INTERVAL_MIN: Number(cleanEnv(process.env.GOLEM_AWAKE_INTERVAL_MIN)) || 10, // 預設最小 10 分鐘
@@ -53,8 +65,13 @@ const CONFIG = {
     ARCHIVE_THRESHOLD_YESTERDAY: Number(cleanEnv(process.env.ARCHIVE_THRESHOLD_YESTERDAY)) || 3,
     ARCHIVE_THRESHOLD_TODAY: Number(cleanEnv(process.env.ARCHIVE_THRESHOLD_TODAY)) || 1,
     // --- Embedding Config ---
-    EMBEDDING_PROVIDER: cleanEnv(process.env.GOLEM_EMBEDDING_PROVIDER) || 'local',
+    EMBEDDING_PROVIDER: normalizeEmbeddingProvider(process.env.GOLEM_EMBEDDING_PROVIDER),
     LOCAL_EMBEDDING_MODEL: cleanEnv(process.env.GOLEM_LOCAL_EMBEDDING_MODEL) || 'Xenova/bge-small-zh-v1.5',
+    OLLAMA_BASE_URL: cleanEnv(process.env.GOLEM_OLLAMA_BASE_URL || process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434', true),
+    OLLAMA_BRAIN_MODEL: cleanEnv(process.env.GOLEM_OLLAMA_BRAIN_MODEL || process.env.OLLAMA_BRAIN_MODEL || 'llama3.1:8b', true),
+    OLLAMA_EMBEDDING_MODEL: cleanEnv(process.env.GOLEM_OLLAMA_EMBEDDING_MODEL || process.env.OLLAMA_EMBEDDING_MODEL || 'nomic-embed-text', true),
+    OLLAMA_RERANK_MODEL: cleanEnv(process.env.GOLEM_OLLAMA_RERANK_MODEL || process.env.OLLAMA_RERANK_MODEL || '', true),
+    OLLAMA_TIMEOUT_MS: Number(cleanEnv(process.env.GOLEM_OLLAMA_TIMEOUT_MS || process.env.OLLAMA_TIMEOUT_MS)) || 60000,
     GEMINI_URLS: (process.env.GEMINI_URLS || '').split(',').map(u => cleanEnv(u, true)).filter(u => u),
     MAX_AUTO_TURNS: Number(cleanEnv(process.env.GOLEM_MAX_AUTO_TURNS)) || 5,
     MAX_RESPONSE_WORDS: Number(cleanEnv(process.env.GOLEM_MAX_RESPONSE_WORDS)) || 0,
@@ -137,11 +154,11 @@ const reloadConfig = () => {
     CONFIG.QMD_PATH = cleanEnv(process.env.GOLEM_QMD_PATH || 'qmd', true);
     CONFIG.TZ = cleanEnv(process.env.TZ) || 'Asia/Taipei';
     CONFIG.INTERVENTION_LEVEL = cleanEnv(process.env.GOLEM_INTERVENTION_LEVEL) || 'CONSERVATIVE';
-    CONFIG.TG_ENGINE = cleanEnv(process.env.TG_ENGINE) || 'legacy';
+    CONFIG.TG_ENGINE = cleanEnv(process.env.TG_ENGINE) || 'grammy';
     CONFIG.CB_TG_TIMEOUT_MS = cleanEnv(process.env.CB_TG_TIMEOUT_MS) || '10000';
     CONFIG.CB_TG_RESET_MS = cleanEnv(process.env.CB_TG_RESET_MS) || '15000';
     CONFIG.CB_TG_ERROR_PCT = cleanEnv(process.env.CB_TG_ERROR_PCT) || '30';
-    CONFIG.GOLEM_BACKEND = cleanEnv(process.env.GOLEM_BACKEND) || 'gemini';
+    CONFIG.GOLEM_BACKEND = normalizeBackend(process.env.GOLEM_BACKEND);
     CONFIG.AWAKE_INTERVAL_MIN = Number(cleanEnv(process.env.GOLEM_AWAKE_INTERVAL_MIN)) || 10;
     CONFIG.AWAKE_INTERVAL_MAX = Number(cleanEnv(process.env.GOLEM_AWAKE_INTERVAL_MAX)) || 60;
     CONFIG.SLEEP_START = process.env.GOLEM_SLEEP_START !== undefined ? Number(cleanEnv(process.env.GOLEM_SLEEP_START)) : 1;
@@ -151,8 +168,13 @@ const reloadConfig = () => {
     CONFIG.ARCHIVE_CHECK_INTERVAL = Number(cleanEnv(process.env.ARCHIVE_CHECK_INTERVAL)) || 30;
     CONFIG.ARCHIVE_THRESHOLD_YESTERDAY = Number(cleanEnv(process.env.ARCHIVE_THRESHOLD_YESTERDAY)) || 3;
     CONFIG.ARCHIVE_THRESHOLD_TODAY = Number(cleanEnv(process.env.ARCHIVE_THRESHOLD_TODAY)) || 1;
-    CONFIG.EMBEDDING_PROVIDER = cleanEnv(process.env.GOLEM_EMBEDDING_PROVIDER) || 'local';
+    CONFIG.EMBEDDING_PROVIDER = normalizeEmbeddingProvider(process.env.GOLEM_EMBEDDING_PROVIDER);
     CONFIG.LOCAL_EMBEDDING_MODEL = cleanEnv(process.env.GOLEM_LOCAL_EMBEDDING_MODEL) || 'Xenova/bge-small-zh-v1.5';
+    CONFIG.OLLAMA_BASE_URL = cleanEnv(process.env.GOLEM_OLLAMA_BASE_URL || process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434', true);
+    CONFIG.OLLAMA_BRAIN_MODEL = cleanEnv(process.env.GOLEM_OLLAMA_BRAIN_MODEL || process.env.OLLAMA_BRAIN_MODEL || 'llama3.1:8b', true);
+    CONFIG.OLLAMA_EMBEDDING_MODEL = cleanEnv(process.env.GOLEM_OLLAMA_EMBEDDING_MODEL || process.env.OLLAMA_EMBEDDING_MODEL || 'nomic-embed-text', true);
+    CONFIG.OLLAMA_RERANK_MODEL = cleanEnv(process.env.GOLEM_OLLAMA_RERANK_MODEL || process.env.OLLAMA_RERANK_MODEL || '', true);
+    CONFIG.OLLAMA_TIMEOUT_MS = Number(cleanEnv(process.env.GOLEM_OLLAMA_TIMEOUT_MS || process.env.OLLAMA_TIMEOUT_MS)) || 60000;
     CONFIG.GOLEM_MEMORY_MODE = cleanEnv(process.env.GOLEM_MEMORY_MODE) || 'lancedb-pro';
 
     const newGeminiUrls = (process.env.GEMINI_URLS || '').split(',').map(u => cleanEnv(u, true)).filter(u => u);
@@ -184,6 +206,8 @@ const reloadConfig = () => {
 module.exports = {
     cleanEnv,
     isPlaceholder,
+    normalizeBackend,
+    normalizeEmbeddingProvider,
     CONFIG,
     GOLEMS_CONFIG,
     GOLEM_MODE,
