@@ -1218,7 +1218,7 @@ export default function SkillsPage() {
 
     return (
         <>
-            <div className="flex-1 overflow-hidden bg-background p-6 flex flex-col text-foreground">
+            <div className="flex-1 min-h-0 overflow-hidden bg-background p-6 flex flex-col text-foreground">
                 <div className="max-w-7xl w-full mx-auto h-full flex flex-col pt-4">
  
                     {/* Header */}

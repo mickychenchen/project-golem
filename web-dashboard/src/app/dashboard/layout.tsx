@@ -434,7 +434,7 @@ function DashboardContent({
             <main className="enterprise-shell flex-1 overflow-auto bg-background flex flex-col h-screen relative">
                 <BootScreen isBooting={isBooting} />
                 <GlobalAutoDiaryBell hidden={shouldHideSidebar} />
-                <div className="relative z-10 flex-1">
+                <div className="relative z-10 flex-1 min-h-0 overflow-hidden flex flex-col">
                     {children}
                 </div>
             </main>
