@@ -7,6 +7,11 @@ const { ResponseExtractor } = require('../../packages/protocol');
 // 共用的按鈕偵測關鍵字 (供 autoClick 快速點擊使用)
 const WORKSPACE_SAVE_KEYWORDS = ['儲存活動', '儲存', '建立', '建立活動', 'Save event', 'Save', 'Create'];
 
+function isClosedTargetError(error) {
+    const message = String((error && error.message) || error || '');
+    return /Target page, context or browser has been closed|Execution context was destroyed|browser has been closed|Page closed/i.test(message);
+}
+
 class PageInteractor {
     /**
      * @param {import('playwright').Page} page - Playwright 頁面實例
@@ -108,6 +113,11 @@ class PageInteractor {
 
         } catch (e) {
             console.warn(`⚠️ [Brain] 互動失敗: ${e.message}`);
+
+            // Page/Context 被回收時，不做 DOM Doctor（會二次噴錯），交由上層自癒重建。
+            if (isClosedTargetError(e)) {
+                throw e;
+            }
 
             if (retryCount === 0) {
                 console.log('🩺 [Brain] 啟動 DOM Doctor 進行 Response 診斷...');

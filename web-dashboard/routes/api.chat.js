@@ -4,12 +4,6 @@ const path = require('path');
 
 module.exports = function(server) {
     const router = express.Router();
-    const resolveConvoManager = (instance) => {
-        // Backward/forward compatibility:
-        // - newer core uses "convoManager"
-        // - legacy code might still expose "conversationManager"
-        return instance?.convoManager || instance?.conversationManager || null;
-    };
 
     router.post('/api/chat', async (req, res) => {
         try {
@@ -18,14 +12,7 @@ module.exports = function(server) {
                 return res.status(400).json({ error: 'Missing golemId, message or attachment' });
             }
 
-            const index = require('../../index.js');
-            const dashboardMessageHandler =
-                (typeof index.handleDashboardMessage === 'function' && index.handleDashboardMessage) ||
-                (typeof index.handleUnifiedMessage === 'function' && index.handleUnifiedMessage) ||
-                (typeof global.handleDashboardMessage === 'function' && global.handleDashboardMessage) ||
-                null;
-
-            if (!dashboardMessageHandler) {
+            if (!server.runtimeController) {
                 return res.status(503).json({ error: 'Dashboard message handler not ready' });
             }
 
@@ -57,37 +44,6 @@ module.exports = function(server) {
                 attachment.path = resolvedPath;
             }
 
-            const mockContext = {
-                platform: 'web',
-                isAdmin: true,
-                text: message,
-                messageTime: Date.now(),
-                senderName: 'User',
-                replyToName: '',
-                chatId: 'web-dashboard',
-                reply: async (text, options) => {
-                    let payloadType = 'agent';
-                    let actionData = null;
-
-                    if (options && options.reply_markup && options.reply_markup.inline_keyboard) {
-                        payloadType = 'approval';
-                        actionData = options.reply_markup.inline_keyboard[0];
-                    }
-
-                    server.broadcastLog({
-                        time: new Date().toLocaleTimeString('zh-TW', { hour12: false }),
-                        msg: `[${golemId}] ${text}`,
-                        type: payloadType,
-                        raw: text,
-                        actionData,
-                        golemId
-                    });
-                },
-                sendTyping: async () => { },
-                getAttachment: async () => attachment,
-                instance: { username: golemId }
-            };
-
             server.broadcastLog({
                 time: new Date().toLocaleTimeString(),
                 msg: `[User] ${message || (attachment ? '[圖片]' : '')}`,
@@ -105,7 +61,16 @@ module.exports = function(server) {
                 golemId
             });
 
-            dashboardMessageHandler(mockContext, golemId).catch(exp => {
+            server.runtimeController.sendDashboardChat({
+                golemId,
+                message,
+                attachment,
+                meta: {
+                    platform: 'web',
+                    chatId: 'web-dashboard',
+                    senderName: 'User',
+                },
+            }).catch(exp => {
                 console.error('[WebServer] Direct chat error:', exp);
             });
 
@@ -123,39 +88,6 @@ module.exports = function(server) {
                 return res.status(400).json({ error: 'Missing golemId or callback_data' });
             }
 
-            const index = require('../../index.js');
-
-            const mockContext = {
-                platform: 'web',
-                isAdmin: true,
-                data: callback_data,
-                messageTime: Date.now(),
-                senderName: 'User',
-                replyToName: '',
-                chatId: 'web-dashboard',
-                reply: async (text, options) => {
-                    let payloadType = 'agent';
-                    let actionData = null;
-
-                    if (options && options.reply_markup && options.reply_markup.inline_keyboard) {
-                        payloadType = 'approval';
-                        actionData = options.reply_markup.inline_keyboard[0];
-                    }
-
-                    server.broadcastLog({
-                        time: new Date().toLocaleTimeString('zh-TW', { hour12: false }),
-                        msg: `[${golemId}] ${text}`,
-                        type: payloadType,
-                        raw: text,
-                        actionData,
-                        golemId
-                    });
-                },
-                answerCallbackQuery: async () => { },
-                sendTyping: async () => { },
-                instance: { username: golemId }
-            };
-
             let translatedMsg = callback_data;
             let displayType = 'agent';
 
@@ -169,15 +101,10 @@ module.exports = function(server) {
                     displayType = 'agent';
 
                     try {
-                        const instance = index.getOrCreateGolem ? index.getOrCreateGolem(golemId) : null;
-                        if (instance && instance.controller && instance.controller.pendingTasks) {
-                            const task = instance.controller.pendingTasks.get(taskId);
-                            if (task && task.steps && task.steps[task.nextIndex]) {
-                                const step = task.steps[task.nextIndex];
-                                const cmd = step.cmd || step.parameter || step.command || "";
-                                if (cmd) {
-                                    translatedMsg += `: \`${cmd.length > 50 ? cmd.substring(0, 47) + '...' : cmd}\``;
-                                }
+                        if (server.runtimeController) {
+                            const task = await server.runtimeController.getPendingTaskSummary(golemId, taskId);
+                            if (task && task.cmd) {
+                                translatedMsg += `: \`${task.cmd.length > 50 ? task.cmd.substring(0, 47) + '...' : task.cmd}\``;
                             }
                         }
                     } catch (err) {
@@ -202,18 +129,18 @@ module.exports = function(server) {
                 golemId
             });
 
-            setTimeout(() => {
-                const callbackHandler =
-                    (typeof index.handleUnifiedCallback === 'function' && index.handleUnifiedCallback) ||
-                    (typeof global.handleUnifiedCallback === 'function' && global.handleUnifiedCallback) ||
-                    null;
-
-                if (callbackHandler) {
-                    callbackHandler(mockContext, callback_data, golemId).catch(console.error);
-                } else {
-                    console.error('[WebServer] handleUnifiedCallback not found in index.js exports or global');
-                }
-            }, 100);
+            if (server.runtimeController) {
+                setTimeout(() => {
+                    server.runtimeController.sendDashboardCallback({
+                        golemId,
+                        callbackData: callback_data,
+                        meta: {
+                            platform: 'web',
+                            chatId: 'web-dashboard',
+                        },
+                    }).catch(console.error);
+                }, 100);
+            }
 
             return res.json({ success: true });
         } catch (e) {
@@ -250,14 +177,11 @@ module.exports = function(server) {
             const { golemId } = req.query;
             if (!golemId) return res.status(400).json({ error: 'golemId required' });
             
-            const index = require('../../index.js');
-            const instance = index.getOrCreateGolem ? index.getOrCreateGolem(golemId) : null;
-            const convoManager = resolveConvoManager(instance);
-            if (!convoManager || !convoManager.confidenceTracker) {
-                return res.status(404).json({ error: 'ConfidenceTracker not found for this golem instance' });
+            if (!server.runtimeController) {
+                return res.status(503).json({ error: 'Runtime controller not ready' });
             }
 
-            const stats = await convoManager.confidenceTracker.getStats();
+            const stats = await server.runtimeController.getMetacognitionStats(golemId);
             return res.json({ success: true, stats });
         } catch (e) {
             console.error('Failed to fetch metacognition stats:', e);
@@ -270,16 +194,13 @@ module.exports = function(server) {
             const { golemId, limit } = req.query;
             if (!golemId) return res.status(400).json({ error: 'golemId required' });
 
-            const index = require('../../index.js');
-            const instance = index.getOrCreateGolem ? index.getOrCreateGolem(golemId) : null;
-            const convoManager = resolveConvoManager(instance);
-            if (!convoManager || !convoManager.confidenceTracker) {
-                return res.status(404).json({ error: 'ConfidenceTracker not found for this golem instance' });
+            if (!server.runtimeController) {
+                return res.status(503).json({ error: 'Runtime controller not ready' });
             }
 
             const rawLimit = limit ? parseInt(limit, 10) : 20;
             const parsedLimit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(rawLimit, 500)) : 20;
-            const history = await convoManager.confidenceTracker.getHistory(parsedLimit);
+            const history = await server.runtimeController.getMetacognitionHistory(golemId, parsedLimit);
             return res.json({ success: true, history });
         } catch (e) {
             console.error('Failed to fetch metacognition history:', e);

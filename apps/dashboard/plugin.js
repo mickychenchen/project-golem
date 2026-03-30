@@ -111,6 +111,9 @@ class DashboardPlugin {
 
         this.timer = setInterval(() => {
             if (this.manager.state.isDetached) return clearInterval(this.timer);
+            const runtimeSnapshot = this.webServer && this.webServer.runtimeController
+                ? this.webServer.runtimeController.getRuntimeSnapshot()
+                : null;
 
             // CPU Usage Calculation
             const currentCpuUsage = this._getCPUInfo();
@@ -119,11 +122,15 @@ class DashboardPlugin {
             const cpuUsagePerc = totalDiff > 0 ? (1 - idleDiff / totalDiff) * 100 : 0;
             lastCpuUsage = currentCpuUsage;
 
-            const memUsage = process.memoryUsage().heapUsed / 1024 / 1024;
+            const memUsage = runtimeSnapshot && runtimeSnapshot.memory
+                ? runtimeSnapshot.memory.heapUsedMb
+                : process.memoryUsage().heapUsed / 1024 / 1024;
             const metricsData = this.manager.updateMetrics(memUsage);
 
-            const mode = process.env.GOLEM_MEMORY_MODE || 'Browser';
-            const uptime = Math.floor(process.uptime());
+            const mode = runtimeSnapshot ? 'supervisor-worker' : (process.env.GOLEM_MEMORY_MODE || 'Browser');
+            const uptime = runtimeSnapshot && runtimeSnapshot.worker
+                ? runtimeSnapshot.worker.uptimeSec
+                : Math.floor(process.uptime());
             const hours = Math.floor(uptime / 3600);
             const minutes = Math.floor((uptime % 3600) / 60);
             const uptimeStr = `${hours}h ${minutes}m`;
@@ -137,7 +144,8 @@ class DashboardPlugin {
                 this.webServer.broadcastHeartbeat({
                     memUsage,
                     uptime: uptimeStr,
-                    cpu: parseFloat(cpuUsagePerc.toFixed(1))
+                    cpu: parseFloat(cpuUsagePerc.toFixed(1)),
+                    runtime: runtimeSnapshot
                 });
             }
         }, 1000);

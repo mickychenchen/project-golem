@@ -7,6 +7,7 @@
 
 const { spawn } = require('child_process');
 const { EventEmitter } = require('events');
+const { getManagedProcessRegistry } = require('../runtime/RuntimeState');
 
 class MCPClient extends EventEmitter {
     /**
@@ -40,11 +41,24 @@ class MCPClient extends EventEmitter {
 
         return new Promise((resolve, reject) => {
             const env = { ...process.env, ...this.env };
+            const registry = getManagedProcessRegistry();
 
             this._process = spawn(this.command, this.args, {
                 stdio: ['pipe', 'pipe', 'pipe'],
                 env
             });
+            this._registration = registry
+                ? registry.registerResource(`mcp:${this.name}`, {
+                    child: this._process,
+                    protected: true,
+                    recyclable: true,
+                    stop: async () => {
+                        if (this._process && this._process.exitCode === null) {
+                            this._process.kill('SIGTERM');
+                        }
+                    },
+                })
+                : null;
 
             this._process.stdout.on('data', (chunk) => this._onData(chunk));
             this._process.stderr.on('data', (chunk) => {
@@ -61,6 +75,10 @@ class MCPClient extends EventEmitter {
 
             this._process.on('exit', (code, signal) => {
                 console.log(`[MCPClient:${this.name}] Process exited (code=${code}, signal=${signal})`);
+                if (this._registration) {
+                    this._registration.unregister();
+                    this._registration = null;
+                }
                 this._connected = false;
                 this.emit('disconnected', { code, signal });
                 // Reject all pending requests
@@ -85,6 +103,10 @@ class MCPClient extends EventEmitter {
         if (this._process) {
             this._process.kill('SIGTERM');
             this._process = null;
+        }
+        if (this._registration) {
+            this._registration.unregister();
+            this._registration = null;
         }
         this._connected = false;
     }

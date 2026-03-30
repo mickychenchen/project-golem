@@ -12,13 +12,17 @@ module.exports = function registerSocketHandlers(server) {
             lastSchedule: server.dashboard ? server.dashboard.lastSchedule : 'N/A',
             uptime: process.uptime(),
             logs: server.logBuffer,
-            golems: getGolemsData()
+            golems: getGolemsData(),
+            runtime: server.runtimeController ? server.runtimeController.getRuntimeSnapshot() : null,
         };
 
         socket.emit('init', payload);
 
         socket.on('request_logs', () => {
-            socket.emit('init', { logs: server.logBuffer });
+            socket.emit('init', {
+                logs: server.logBuffer,
+                runtime: server.runtimeController ? server.runtimeController.getRuntimeSnapshot() : null,
+            });
         });
     });
 };

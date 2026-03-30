@@ -2,6 +2,7 @@
 // 🧠 Golem Brain (Multi-Backend) - Clean Architecture Facade
 // ============================================================
 const path = require('path');
+const { randomUUID } = require('crypto');
 const ConfigManager = require('../config');
 const DOMDoctor = require('../services/DOMDoctor');
 const OllamaClient = require('../services/OllamaClient');
@@ -69,6 +70,13 @@ class GolemBrain {
         
         // ── 實體生命週期追蹤 ──
         this.browserStartTime = null;
+        this._activeInteractionCount = 0;
+        this._pendingForcedRestart = false;
+    }
+
+    _isRecoverablePageClosedError(error) {
+        const message = String((error && error.message) || error || '');
+        return /Target page, context or browser has been closed|Execution context was destroyed|browser has been closed|Page closed/i.test(message);
     }
 
     // ─── Public API (向後相容) ─────────────────────────────
@@ -175,11 +183,17 @@ class GolemBrain {
         // 4. Dashboard 整合 (可選)
         this._linkDashboard();
 
-        // 5. 新會話: 注入系統 Prompt
-        if (forceReload || isNewSession) {
-            await this._injectSystemPrompt(forceReload);
-        }
         this.isInitialized = true;
+
+        // 5. 新會話: 注入系統 Prompt
+        // 先標記 initialized，避免 _injectSystemPrompt 內部 sendMessage 觸發巢狀 init。
+        if (forceReload || isNewSession) {
+            try {
+                await this._injectSystemPrompt(forceReload);
+            } catch (e) {
+                console.warn(`⚠️ [Brain] 系統提示注入失敗，保留運作並稍後再試: ${e.message}`);
+            }
+        }
     }
 
     /**
@@ -344,21 +358,42 @@ class GolemBrain {
         const interactor = new PageInteractor(this.page, this.doctor);
 
         let result;
+        this._activeInteractionCount++;
         try {
-            result = await interactor.interact(
-                payload, this.selectors, isSystem, startTag, endTag, 0, attachment
-            );
-        } catch (e) {
-            // 處理 selector 修復觸發的重試
-            if (e.message && e.message.startsWith('SELECTOR_HEALED:')) {
-                const [, type, newSelector] = e.message.split(':');
-                this.selectors[type] = newSelector;
-                this.doctor.saveSelectors(this.selectors);
+            try {
                 result = await interactor.interact(
-                    payload, this.selectors, isSystem, startTag, endTag, 1, attachment
+                    payload, this.selectors, isSystem, startTag, endTag, 0, attachment
                 );
-            } else {
-                throw e;
+            } catch (e) {
+                // 處理 selector 修復觸發的重試
+                if (e.message && e.message.startsWith('SELECTOR_HEALED:')) {
+                    const [, type, newSelector] = e.message.split(':');
+                    this.selectors[type] = newSelector;
+                    this.doctor.saveSelectors(this.selectors);
+                    result = await interactor.interact(
+                        payload, this.selectors, isSystem, startTag, endTag, 1, attachment
+                    );
+                } else if (this._isRecoverablePageClosedError(e)) {
+                    console.warn(`⚠️ [Brain] 偵測到頁面/上下文已關閉，執行自癒重試: ${e.message}`);
+                    await this._ensureBrowserHealth(true, { allowDuringInteraction: true });
+                    try { await this.page.bringToFront(); } catch {}
+                    const retryInteractor = new PageInteractor(this.page, this.doctor);
+                    result = await retryInteractor.interact(
+                        payload, this.selectors, isSystem, startTag, endTag, 0, attachment
+                    );
+                } else {
+                    throw e;
+                }
+            }
+        } finally {
+            this._activeInteractionCount = Math.max(0, this._activeInteractionCount - 1);
+            if (this._activeInteractionCount === 0 && this._pendingForcedRestart) {
+                this._pendingForcedRestart = false;
+                setTimeout(() => {
+                    this._ensureBrowserHealth(true).catch((err) => {
+                        console.warn(`⚠️ [Brain] 延後自癒重啟失敗: ${err.message}`);
+                    });
+                }, 0);
             }
         }
 
@@ -366,7 +401,6 @@ class GolemBrain {
         if (result.attachments && result.attachments.length > 0) {
             const { downloadFile } = require('../utils/HttpUtils');
             const path = require('path');
-            const { v4: uuidv4 } = require('uuid');
 
             const localAttachments = [];
             for (const att of result.attachments) {
@@ -379,7 +413,7 @@ class GolemBrain {
                     else if (att.mimeType === 'image/png') ext = 'png';
                     else if (att.mimeType === 'application/pdf') ext = 'pdf';
 
-                    const fileName = `gemini_res_${Date.now()}_${uuidv4().substring(0, 8)}.${ext}`;
+                    const fileName = `gemini_res_${Date.now()}_${randomUUID().substring(0, 8)}.${ext}`;
                     const projectRoot = path.resolve(__dirname, '../../');
                     const localPath = path.join(projectRoot, 'data', 'temp_uploads', fileName);
 
@@ -481,6 +515,7 @@ class GolemBrain {
 
     /** 連結 Dashboard (若以 dashboard 模式啟動) */
     _linkDashboard(autonomy = null) {
+        if (process.env.GOLEM_RUNTIME_ROLE === 'worker') return;
         if (!process.argv.includes('dashboard')) return;
         try {
             const dashboard = require('../../dashboard');
@@ -695,8 +730,16 @@ class GolemBrain {
     /**
      * 🛡️ 瀏覽器健康檢查與自癒機制
      */
-    async _ensureBrowserHealth(forceRestart = false) {
+    async _ensureBrowserHealth(forceRestart = false, options = {}) {
         if (this.backend === 'ollama') return;
+
+        const allowDuringInteraction = options && options.allowDuringInteraction === true;
+        if (forceRestart && this._activeInteractionCount > 0 && !allowDuringInteraction) {
+            this._pendingForcedRestart = true;
+            console.warn(`⏸️ [Brain] forceRestart 延後：目前仍有 ${this._activeInteractionCount} 個互動執行中。`);
+            return false;
+        }
+
         let isHealthy = !forceRestart;
         if (!forceRestart) {
             try {
@@ -748,7 +791,10 @@ class GolemBrain {
             // 重新初始化 (forceReload = true)
             await this.init(true);
             console.log("✅ [Brain] 自癒初始化完成。");
+            return true;
         }
+
+        return isHealthy;
     }
 }
 

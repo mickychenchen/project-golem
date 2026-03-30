@@ -27,7 +27,7 @@ type SystemConfigResponse = {
     allowRemoteAccess?: boolean | string;
 };
 type SystemStatusResponse = {
-    runtime?: {
+    runtimeEnv?: {
         platform?: string;
         arch?: string;
     };
@@ -119,8 +119,8 @@ export default function SystemSetupPage() {
                     apiGet<SystemStatusResponse>("/api/system/status").catch(() => null)
                 ]);
 
-                const runtimePlatform = String(status?.runtime?.platform || "").toLowerCase();
-                const runtimeArch = String(status?.runtime?.arch || "").toLowerCase();
+                const runtimePlatform = String(status?.runtimeEnv?.platform || "").toLowerCase();
+                const runtimeArch = String(status?.runtimeEnv?.arch || "").toLowerCase();
                 const intelMac = runtimePlatform === "darwin" && runtimeArch === "x64";
                 setIsIntelMacRuntime(intelMac);
 

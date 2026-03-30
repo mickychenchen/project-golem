@@ -36,10 +36,39 @@ type HoveredPoint = TimePoint & {
 };
 
 type SystemStatusData = {
-    runtime?: {
+    runtimeEnv?: {
         osName?: string;
         uptime?: number;
         platform?: string;
+        arch?: string;
+    };
+    runtime?: {
+        mode?: string;
+        worker?: {
+            status?: string;
+            uptimeSec?: number;
+            restarts?: number;
+        };
+        memory?: {
+            pressure?: string;
+            rssMb?: number;
+            heapUsedMb?: number;
+            heapTotalMb?: number;
+            lastMitigation?: string;
+            memoryLimitMb?: number;
+            memoryLimitSource?: string;
+            fatalEligible?: boolean;
+            fatalConsecutive?: number;
+            fatalRequired?: number;
+            fatalStartupGraceMs?: number;
+            fatalSuppressedReason?: string;
+            fatalReason?: string;
+        };
+        managedChildren?: {
+            total?: number;
+            protected?: number;
+            recyclable?: number;
+        };
     };
     health?: {
         env?: boolean;
@@ -58,6 +87,7 @@ type HeartbeatPayload = {
     uptime?: string;
     memUsage?: number;
     cpu?: number;
+    runtime?: SystemStatusData["runtime"];
 };
 
 type UnifiedTab = "OVERVIEW" | "LOGS";
@@ -171,27 +201,85 @@ function parseMetricsUpdate(payload: unknown): MetricsUpdatePayload | null {
 function parseHeartbeat(payload: unknown): HeartbeatPayload | null {
     if (!isRecord(payload)) return null;
     const memUsage = parseNumber(payload.memUsage);
-    if (memUsage === null) return null;
+    const runtime = isRecord(payload.runtime) ? parseRuntimeSnapshot(payload.runtime) : undefined;
+    if (memUsage === null && !runtime) return null;
 
-    const heartbeat: HeartbeatPayload = { memUsage };
+    const heartbeat: HeartbeatPayload = {};
+    if (memUsage !== null) heartbeat.memUsage = memUsage;
     if (typeof payload.uptime === "string") heartbeat.uptime = payload.uptime;
 
     const cpu = parseNumber(payload.cpu);
     if (cpu !== null) heartbeat.cpu = cpu;
+    if (runtime) heartbeat.runtime = runtime;
     return heartbeat;
+}
+
+function parseRuntimeSnapshot(payload: unknown): SystemStatusData["runtime"] | undefined {
+    if (!isRecord(payload)) return undefined;
+    const worker = isRecord(payload.worker)
+        ? {
+            status: typeof payload.worker.status === "string" ? payload.worker.status : undefined,
+            uptimeSec: parseNumber(payload.worker.uptimeSec) ?? undefined,
+            restarts: parseNumber(payload.worker.restarts) ?? undefined,
+        }
+        : undefined;
+    const memory = isRecord(payload.memory)
+        ? {
+            pressure: typeof payload.memory.pressure === "string" ? payload.memory.pressure : undefined,
+            rssMb: parseNumber(payload.memory.rssMb) ?? undefined,
+            heapUsedMb: parseNumber(payload.memory.heapUsedMb) ?? undefined,
+            heapTotalMb: parseNumber(payload.memory.heapTotalMb) ?? undefined,
+            lastMitigation: typeof payload.memory.lastMitigation === "string" ? payload.memory.lastMitigation : undefined,
+            memoryLimitMb: parseNumber(payload.memory.memoryLimitMb) ?? undefined,
+            memoryLimitSource: typeof payload.memory.memoryLimitSource === "string" ? payload.memory.memoryLimitSource : undefined,
+            fatalEligible: typeof payload.memory.fatalEligible === "boolean" ? payload.memory.fatalEligible : undefined,
+            fatalConsecutive: parseNumber(payload.memory.fatalConsecutive) ?? undefined,
+            fatalRequired: parseNumber(payload.memory.fatalRequired) ?? undefined,
+            fatalStartupGraceMs: parseNumber(payload.memory.fatalStartupGraceMs) ?? undefined,
+            fatalSuppressedReason: typeof payload.memory.fatalSuppressedReason === "string" ? payload.memory.fatalSuppressedReason : undefined,
+            fatalReason: typeof payload.memory.fatalReason === "string" ? payload.memory.fatalReason : undefined,
+        }
+        : undefined;
+    const managedChildren = isRecord(payload.managedChildren)
+        ? {
+            total: parseNumber(payload.managedChildren.total) ?? undefined,
+            protected: parseNumber(payload.managedChildren.protected) ?? undefined,
+            recyclable: parseNumber(payload.managedChildren.recyclable) ?? undefined,
+        }
+        : undefined;
+
+    return {
+        mode: typeof payload.mode === "string" ? payload.mode : undefined,
+        worker,
+        memory,
+        managedChildren,
+    };
 }
 
 function parseSystemStatus(payload: unknown): SystemStatusData | null {
     if (!isRecord(payload)) return null;
     const status: SystemStatusData = {};
 
-    if (isRecord(payload.runtime)) {
-        const uptime = parseNumber(payload.runtime.uptime);
-        status.runtime = {
-            osName: typeof payload.runtime.osName === "string" ? payload.runtime.osName : undefined,
-            platform: typeof payload.runtime.platform === "string" ? payload.runtime.platform : undefined,
+    if (isRecord(payload.runtimeEnv)) {
+        const uptime = parseNumber(payload.runtimeEnv.uptime);
+        status.runtimeEnv = {
+            osName: typeof payload.runtimeEnv.osName === "string" ? payload.runtimeEnv.osName : undefined,
+            platform: typeof payload.runtimeEnv.platform === "string" ? payload.runtimeEnv.platform : undefined,
+            arch: typeof payload.runtimeEnv.arch === "string" ? payload.runtimeEnv.arch : undefined,
             uptime: uptime ?? undefined,
         };
+    } else if (isRecord(payload.runtime) && ("osName" in payload.runtime || "platform" in payload.runtime)) {
+        const uptime = parseNumber(payload.runtime.uptime);
+        status.runtimeEnv = {
+            osName: typeof payload.runtime.osName === "string" ? payload.runtime.osName : undefined,
+            platform: typeof payload.runtime.platform === "string" ? payload.runtime.platform : undefined,
+            arch: typeof payload.runtime.arch === "string" ? payload.runtime.arch : undefined,
+            uptime: uptime ?? undefined,
+        };
+    }
+
+    if (isRecord(payload.runtime)) {
+        status.runtime = parseRuntimeSnapshot(payload.runtime);
     }
 
     if (isRecord(payload.health)) {
@@ -271,7 +359,7 @@ export default function UnifiedConsole({
             if (data.success) {
                 setConfirmDialog((prev) => ({ ...prev, open: false }));
                 setDoneDialog({ open: true, variant: "restarted" });
-                setTimeout(() => window.location.reload(), 3000);
+                setTimeout(() => setDoneDialog({ open: false, variant: "restarted" }), 2500);
             }
         } catch (error) {
             console.error("Reload failed:", error);
@@ -410,6 +498,7 @@ export default function UnifiedConsole({
         const handleConnect = () => setIsConnected(true);
         const handleDisconnect = () => setIsConnected(false);
         const handleInit = (payload: unknown) => {
+            const payloadRecord = isRecord(payload) ? payload : null;
             const patch = parseMetricsUpdate(payload);
             if (!patch) return;
             const timeStr = new Date().toLocaleTimeString(locale, { hour12: false });
@@ -418,8 +507,15 @@ export default function UnifiedConsole({
                 setQueueHistory((history) => [...history, { time: timeStr, value: next.queueCount }].slice(-60));
                 return next;
             });
+            if (payloadRecord && isRecord(payloadRecord.runtime)) {
+                setSystemStatus((prev) => ({
+                    ...(prev || {}),
+                    runtime: parseRuntimeSnapshot(payloadRecord.runtime),
+                }));
+            }
         };
         const handleStateUpdate = (payload: unknown) => {
+            const payloadRecord = isRecord(payload) ? payload : null;
             const patch = parseMetricsUpdate(payload);
             if (!patch) return;
             const timeStr = new Date().toLocaleTimeString(locale, { hour12: false });
@@ -428,6 +524,12 @@ export default function UnifiedConsole({
                 setQueueHistory((history) => [...history, { time: timeStr, value: next.queueCount }].slice(-60));
                 return next;
             });
+            if (payloadRecord && isRecord(payloadRecord.runtime)) {
+                setSystemStatus((prev) => ({
+                    ...(prev || {}),
+                    runtime: parseRuntimeSnapshot(payloadRecord.runtime),
+                }));
+            }
         };
         const handleHeartbeat = (payload: unknown) => {
             const heartbeat = parseHeartbeat(payload);
@@ -444,11 +546,19 @@ export default function UnifiedConsole({
                 setQueueHistory((history) => [...history, { time: timeStr, value: next.queueCount }].slice(-60));
                 return next;
             });
+            if (heartbeat.runtime) {
+                setSystemStatus((prev) => ({
+                    ...(prev || {}),
+                    runtime: heartbeat.runtime,
+                }));
+            }
 
-            setMemHistory((prev) => {
-                const next = [...prev, { time: timeStr, value: Number(heartbeat.memUsage?.toFixed(1) ?? "0") }];
-                return next.slice(-60);
-            });
+            if (heartbeat.memUsage !== undefined) {
+                setMemHistory((prev) => {
+                    const next = [...prev, { time: timeStr, value: Number(heartbeat.memUsage?.toFixed(1) ?? "0") }];
+                    return next.slice(-60);
+                });
+            }
 
             if (heartbeat.cpu !== undefined) {
                 setCpuHistory((prev) => {
@@ -609,7 +719,7 @@ export default function UnifiedConsole({
             {
                 id: "runtimePlatform",
                 title: isEnglish ? "Runtime Platform" : "運行平台",
-                value: systemStatus?.runtime?.platform?.toUpperCase() || "N/A",
+                value: systemStatus?.runtimeEnv?.platform?.toUpperCase() || "N/A",
                 icon: Cpu,
             },
             {
@@ -669,7 +779,9 @@ export default function UnifiedConsole({
         metrics.queueCount,
         metrics.uptime,
         queueHistory,
-        systemStatus?.runtime?.platform,
+        systemStatus?.runtime?.memory?.pressure,
+        systemStatus?.runtime?.worker?.restarts,
+        systemStatus?.runtimeEnv?.platform,
         systemStatus?.system?.diskAvail,
         systemStatus?.system?.freeMem,
     ]);
@@ -754,8 +866,10 @@ export default function UnifiedConsole({
 
                     <div className="flex items-center gap-3">
                         <div className="enterprise-badge">
-                            {typeof systemStatus?.runtime?.uptime === "number"
-                                ? `${Math.floor(systemStatus.runtime.uptime / 3600)}h ${Math.floor((systemStatus.runtime.uptime % 3600) / 60)}m`
+                            {typeof systemStatus?.runtime?.worker?.uptimeSec === "number"
+                                ? `${Math.floor(systemStatus.runtime.worker.uptimeSec / 3600)}h ${Math.floor((systemStatus.runtime.worker.uptimeSec % 3600) / 60)}m`
+                                : typeof systemStatus?.runtimeEnv?.uptime === "number"
+                                    ? `${Math.floor(systemStatus.runtimeEnv.uptime / 3600)}h ${Math.floor((systemStatus.runtimeEnv.uptime % 3600) / 60)}m`
                                 : metrics.uptime}
                         </div>
                         <div className={cn("enterprise-badge", isConnected ? "text-emerald-500" : "text-destructive")}>
@@ -982,7 +1096,25 @@ export default function UnifiedConsole({
                                     <PanelHeader icon={<ShieldCheck className="w-3 h-3" />} title={isEnglish ? "System Status" : "系統狀態"} />
                                     <div className="p-5 text-sm font-mono bg-background/35">
                                         <ul className="space-y-3.5">
-                                            <StatusItem label={isEnglish ? "Core Mode" : "核心模式"} value={systemStatus?.runtime?.platform?.toUpperCase() || "N/A"} icon={<Cpu className="w-3 h-3" />} />
+                                            <StatusItem
+                                                label={isEnglish ? "Core Mode" : "核心模式"}
+                                                value={systemStatus?.runtime?.mode || systemStatus?.runtimeEnv?.platform?.toUpperCase() || "N/A"}
+                                                icon={<Cpu className="w-3 h-3" />}
+                                            />
+                                            <StatusItem
+                                                label={isEnglish ? "Worker Status" : "Worker 狀態"}
+                                                value={systemStatus?.runtime?.worker?.status?.replaceAll("_", " ") || "N/A"}
+                                                color={systemStatus?.runtime?.worker?.status === "running" ? "primary" : "destructive"}
+                                            />
+                                            <StatusItem
+                                                label={isEnglish ? "Memory Pressure" : "記憶體壓力"}
+                                                value={(systemStatus?.runtime?.memory?.pressure || "normal").toUpperCase()}
+                                                color={systemStatus?.runtime?.memory?.pressure === "normal" ? "primary" : "destructive"}
+                                            />
+                                            <StatusItem
+                                                label={isEnglish ? "Worker Restarts" : "Worker 重啟次數"}
+                                                value={String(systemStatus?.runtime?.worker?.restarts ?? 0)}
+                                            />
                                             <StatusItem label={isEnglish ? "Environment" : "環境配置"} value={systemStatus?.health?.env ? (isEnglish ? "Loaded" : "已載入") : (isEnglish ? "Check" : "檢查")} color={systemStatus?.health?.env ? "primary" : "destructive"} />
                                             <StatusItem label={isEnglish ? "Dependencies" : "依賴狀態"} value={systemStatus?.health?.deps ? (isEnglish ? "Healthy" : "正常") : (isEnglish ? "Check" : "檢查")} color={systemStatus?.health?.deps ? "primary" : "destructive"} />
                                             <StatusItem label={isEnglish ? "Core Service" : "核心服務"} value={systemStatus?.health?.core ? (isEnglish ? "Online" : "在線") : (isEnglish ? "Offline" : "離線")} color={systemStatus?.health?.core ? "primary" : "destructive"} />
@@ -1006,16 +1138,16 @@ export default function UnifiedConsole({
                                         />
                                         <ActionButton
                                             icon={<RefreshCw className="w-5 h-5" />}
-                                            label={isEnglish ? "Restart" : "重新啟動"}
-                                            description={isEnglish ? "Hot-reload · Auto reconnect" : "Hot-reload · 自動重連"}
+                                            label={isEnglish ? "Recycle Worker" : "重建 Worker"}
+                                            description={isEnglish ? "Recycle runtime worker · Dashboard auto reconnect" : "回收並重建 runtime worker · Dashboard 自動重連"}
                                             onClick={() => openConfirm("restart")}
                                             disabled={!isConnected || isLoading}
                                             color="primary"
                                         />
                                         <ActionButton
                                             icon={<Zap className="w-5 h-5" />}
-                                            label={isEnglish ? "Shutdown Golem" : "關閉 Golem"}
-                                            description={isEnglish ? "Full stop · Manual restart required" : "完全停止 · 需手動重啟"}
+                                            label={isEnglish ? "Shutdown Supervisor" : "關閉 Supervisor"}
+                                            description={isEnglish ? "Full stop · Manual restart required" : "完整停止 · 需手動重啟"}
                                             onClick={() => openConfirm("shutdown")}
                                             disabled={!isConnected || isLoading}
                                             color="destructive"

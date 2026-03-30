@@ -49,12 +49,13 @@ module.exports = function registerSystemRoutes(server) {
     router.get('/api/system/status', (req, res) => {
         try {
             const liveCount = server.contexts.size;
+            const runtimeSnapshot = server.runtimeController ? server.runtimeController.getRuntimeSnapshot() : null;
             const EnvManager = require('../../src/utils/EnvManager');
             const envVars = EnvManager.readEnv();
             const configuredCount = (envVars.TELEGRAM_TOKEN || envVars.DISCORD_TOKEN) ? 1 : 0;
             const isSystemConfigured = envVars.SYSTEM_CONFIGURED === 'true';
 
-            const runtime = {
+            const runtimeEnv = {
                 node: process.version,
                 npm: 'N/A',
                 platform: process.platform,
@@ -63,24 +64,24 @@ module.exports = function registerSystemRoutes(server) {
                 osName: 'Unknown'
             };
 
-            try { runtime.npm = `v${execSync('npm -v').toString().trim()}`; } catch { }
+            try { runtimeEnv.npm = `v${execSync('npm -v').toString().trim()}`; } catch { }
 
             try {
                 if (process.platform === 'darwin') {
                     const name = execSync('sw_vers -productName').toString().trim();
                     const ver = execSync('sw_vers -productVersion').toString().trim();
-                    runtime.osName = `${name} ${ver}`;
+                    runtimeEnv.osName = `${name} ${ver}`;
                 } else if (process.platform === 'linux') {
                     if (fs.existsSync('/etc/os-release')) {
                         const content = fs.readFileSync('/etc/os-release', 'utf8');
                         const match = content.match(/PRETTY_NAME="([^"]+)"/);
-                        if (match) runtime.osName = match[1];
+                        if (match) runtimeEnv.osName = match[1];
                     }
                 } else {
-                    runtime.osName = `${os.type()} ${os.release()}`;
+                    runtimeEnv.osName = `${os.type()} ${os.release()}`;
                 }
             } catch {
-                runtime.osName = `${os.type()} ${os.release()}`;
+                runtimeEnv.osName = `${os.type()} ${os.release()}`;
             }
 
             const dotEnvPath = path.join(process.cwd(), '.env');
@@ -114,7 +115,8 @@ module.exports = function registerSystemRoutes(server) {
                 allowRemote: server.allowRemote,
                 localIp: getLocalIp(),
                 dashboardPort: process.env.DASHBOARD_PORT || 3000,
-                runtime,
+                runtimeEnv,
+                runtime: runtimeSnapshot,
                 health,
                 system
             });
@@ -319,17 +321,15 @@ module.exports = function registerSystemRoutes(server) {
 
     router.post('/api/system/restart', requireRestart, (req, res) => {
         try {
-            console.log('🔄 [System] Restart requested by user. Triggering hard restart...');
-            res.json({ success: true, message: 'Restarting system... Full re-initialization in progress.' });
+            console.log('🔄 [System] Restart requested by user. Recycling worker runtime...');
+            res.json({ success: true, message: 'Recycling runtime worker...' });
 
-            if (typeof global.gracefulRestart === 'function') {
+            if (server.runtimeController) {
                 setTimeout(() => {
-                    global.gracefulRestart().catch((err) => {
+                    server.runtimeController.restartWorker('api-system-restart').catch((err) => {
                         console.error('❌ [System] Restart error:', err);
                     });
                 }, 1000);
-            } else {
-                console.warn('⚠️ [System] global.gracefulRestart not found, skipping forced process exit');
             }
         } catch (e) {
             return res.status(500).json({ error: e.message });
@@ -337,17 +337,15 @@ module.exports = function registerSystemRoutes(server) {
     });
 
     router.post('/api/system/reload', requireReload, (req, res) => {
-        console.log('🔄 [WebServer] Received reload request. Restarting system...');
-        res.json({ success: true, message: 'System is restarting with full re-initialization...' });
+        console.log('🔄 [WebServer] Received reload request. Recycling runtime worker...');
+        res.json({ success: true, message: 'Runtime worker is restarting...' });
 
-        if (typeof global.gracefulRestart === 'function') {
+        if (server.runtimeController) {
             setTimeout(() => {
-                global.gracefulRestart().catch((err) => {
+                server.runtimeController.restartWorker('api-system-reload').catch((err) => {
                     console.error('❌ [System] Reload error:', err);
                 });
             }, 1000);
-        } else {
-            console.warn('⚠️ [System] global.gracefulRestart not found, skipping forced process exit');
         }
     });
 
@@ -355,14 +353,12 @@ module.exports = function registerSystemRoutes(server) {
         console.log('⛔ [WebServer] Received shutdown request. Stopping system...');
         res.json({ success: true, message: 'System is shutting down... Please restart manually if needed.' });
 
-        if (typeof global.fullShutdown === 'function') {
+        if (server.runtimeController) {
             setTimeout(() => {
-                global.fullShutdown().catch((err) => {
+                server.runtimeController.shutdownSupervisor('api-system-shutdown').catch((err) => {
                     console.error('❌ [System] Shutdown error:', err);
                 });
             }, 1000);
-        } else {
-            console.warn('⚠️ [System] global.fullShutdown not found, skipping forced process exit');
         }
     });
 
@@ -395,10 +391,13 @@ module.exports = function registerSystemRoutes(server) {
             skillCount = resolveEnabledSkills(process.env.OPTIONAL_SKILLS || '', []).size;
         } catch { }
 
+        const runtimeSnapshot = server.runtimeController ? server.runtimeController.getRuntimeSnapshot() : null;
+
         res.json({
             status: 'ok',
             uptime: process.uptime(),
             memory: process.memoryUsage(),
+            runtime: runtimeSnapshot,
             brain: {
                 connected: hasActivePage,
                 runningCount,

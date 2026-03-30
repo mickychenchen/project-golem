@@ -23,11 +23,23 @@ export default function SystemHealthDashboard({ systemStatus }: { systemStatus: 
     const { t } = useI18n();
     if (!systemStatus) return null;
 
-    const { runtime, health, system } = systemStatus;
+    const runtimeEnv = systemStatus.runtimeEnv;
+    const runtime = systemStatus.runtime;
+    const { health, system } = systemStatus;
     const healthChecks = health ? Object.values(health) : [];
     const healthyCount = healthChecks.filter(Boolean).length;
     const isReady = healthyCount === healthChecks.length && healthChecks.length > 0;
     const needsAction = healthyCount < healthChecks.length;
+    const workerStatus = runtime?.worker?.status || t("settings.health.status.unknown");
+    const workerPressure = runtime?.memory?.pressure || "normal";
+    const workerUptimeSec = runtime?.worker?.uptimeSec ?? runtimeEnv?.uptime ?? 0;
+    const pressureTone = workerPressure === "fatal"
+        ? "text-red-500"
+        : workerPressure === "critical"
+            ? "text-amber-500"
+            : workerPressure === "warning"
+                ? "text-yellow-500"
+                : "text-emerald-500";
 
     return (
         <div className="space-y-6 mb-8 animate-in fade-in slide-in-from-top-4 duration-500">
@@ -85,23 +97,37 @@ export default function SystemHealthDashboard({ systemStatus }: { systemStatus: 
                     <div className="space-y-3">
                         <div className="flex justify-between text-xs">
                             <span className="text-muted-foreground">{t("settings.health.runtime.os")}</span>
-                            <span className="text-primary font-medium truncate max-w-[150px]" title={runtime?.osName}>{runtime?.osName || t("settings.health.status.unknown")}</span>
+                            <span className="text-primary font-medium truncate max-w-[150px]" title={runtimeEnv?.osName}>{runtimeEnv?.osName || t("settings.health.status.unknown")}</span>
                         </div>
                         <div className="flex justify-between text-xs">
                             <span className="text-muted-foreground">{t("settings.health.runtime.node")}</span>
-                            <span className="text-foreground font-mono">{runtime?.node || t("settings.health.status.unknown")}</span>
+                            <span className="text-foreground font-mono">{runtimeEnv?.node || t("settings.health.status.unknown")}</span>
                         </div>
                         <div className="flex justify-between text-xs">
                             <span className="text-muted-foreground">{t("settings.health.runtime.npm")}</span>
-                            <span className="text-foreground font-mono">{runtime?.npm || t("settings.health.status.unknown")}</span>
+                            <span className="text-foreground font-mono">{runtimeEnv?.npm || t("settings.health.status.unknown")}</span>
                         </div>
                         <div className="flex justify-between text-xs">
                             <span className="text-muted-foreground">{t("settings.health.runtime.platform")}</span>
-                            <span className="text-foreground capitalize">{runtime?.platform} ({runtime?.arch})</span>
+                            <span className="text-foreground capitalize">
+                                {runtimeEnv?.platform ? `${runtimeEnv.platform} (${runtimeEnv?.arch || "unknown"})` : t("settings.health.status.unknown")}
+                            </span>
                         </div>
                         <div className="flex justify-between text-xs">
                             <span className="text-muted-foreground">{t("settings.health.runtime.uptime")}</span>
-                            <span className="text-foreground">{Math.floor((runtime?.uptime || 0) / 3600)}h {Math.floor(((runtime?.uptime || 0) % 3600) / 60)}m</span>
+                            <span className="text-foreground">{Math.floor(workerUptimeSec / 3600)}h {Math.floor((workerUptimeSec % 3600) / 60)}m</span>
+                        </div>
+                        <div className="flex justify-between text-xs pt-1 border-t border-border/50 mt-1">
+                            <span className="text-muted-foreground">Worker</span>
+                            <span className="text-foreground font-medium capitalize">{workerStatus.replaceAll("_", " ")}</span>
+                        </div>
+                        <div className="flex justify-between text-xs">
+                            <span className="text-muted-foreground">Pressure</span>
+                            <span className={cn("font-semibold uppercase", pressureTone)}>{workerPressure}</span>
+                        </div>
+                        <div className="flex justify-between text-xs">
+                            <span className="text-muted-foreground">Restarts</span>
+                            <span className="text-foreground font-mono">{runtime?.worker?.restarts ?? 0}</span>
                         </div>
                         {systemStatus?.allowRemote && (
                             <div className="flex justify-between text-xs pt-1 border-t border-border/50 mt-1">
@@ -143,12 +169,35 @@ export default function SystemHealthDashboard({ systemStatus }: { systemStatus: 
                                 />
                             </div>
                         </div>
+                        <div className="flex justify-between text-xs">
+                            <div className="flex items-center gap-2 text-muted-foreground">
+                                <Activity className="w-4 h-4" />
+                                Worker RSS
+                            </div>
+                            <span className="text-foreground font-mono">{runtime?.memory?.rssMb ?? 0} MB</span>
+                        </div>
+                        <div className="flex justify-between text-xs">
+                            <div className="flex items-center gap-2 text-muted-foreground">
+                                <Server className="w-4 h-4" />
+                                Managed Children
+                            </div>
+                            <span className="text-foreground font-mono">{runtime?.managedChildren?.total ?? 0}</span>
+                        </div>
                         <div className="flex justify-between text-xs pt-1">
                             <div className="flex items-center gap-2 text-muted-foreground">
                                 <HardDrive className="w-4 h-4" />
                                 {t("settings.health.resources.diskAvail")}
                             </div>
                             <span className="text-primary font-bold">{system?.diskAvail || "N/A"}</span>
+                        </div>
+                        <div className="flex justify-between text-xs">
+                            <div className="flex items-center gap-2 text-muted-foreground">
+                                <AlertCircle className="w-4 h-4" />
+                                Last Mitigation
+                            </div>
+                            <span className="text-foreground font-mono truncate max-w-[140px]" title={runtime?.memory?.lastMitigation}>
+                                {runtime?.memory?.lastMitigation || "none"}
+                            </span>
                         </div>
                     </div>
                 </div>
