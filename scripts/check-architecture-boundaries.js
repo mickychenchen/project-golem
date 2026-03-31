@@ -5,8 +5,8 @@ const fs = require('fs');
 const path = require('path');
 
 const ROOT = path.resolve(__dirname, '..');
-const SCAN_ROOTS = ['apps', 'src', 'packages', 'web-dashboard/routes', 'web-dashboard/server', 'scripts'];
-const CODE_EXTENSIONS = new Set(['.js', '.cjs', '.mjs']);
+const SCAN_ROOTS = ['apps', 'src', 'packages', 'web-dashboard/src', 'web-dashboard/routes', 'web-dashboard/server', 'scripts'];
+const CODE_EXTENSIONS = new Set(['.js', '.cjs', '.mjs', '.ts', '.tsx', '.mts', '.cts']);
 const IGNORE_DIRS = new Set(['node_modules', '.git', '.next', 'out', 'coverage']);
 
 const REQUIRE_RE = /require\(\s*['"]([^'"]+)['"]\s*\)/g;
@@ -120,6 +120,19 @@ function checkViolations() {
                     line,
                     reason: `cross-package dependency is not allowed (${from.scope} -> ${to.scope})`,
                     importPath: ref.spec
+                });
+            }
+
+            if (
+                from.layer === 'web-dashboard' &&
+                from.scope === 'src' &&
+                (to.layer === 'src' || to.layer === 'apps' || to.layer === 'packages')
+            ) {
+                violations.push({
+                    file: fileRel,
+                    line,
+                    reason: 'web-dashboard/src must not depend on backend runtime layers directly',
+                    importPath: ref.spec,
                 });
             }
         }

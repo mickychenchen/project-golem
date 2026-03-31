@@ -6,6 +6,8 @@ import path from "path";
 const packageJson = JSON.parse(fs.readFileSync(path.resolve(__dirname, "../package.json"), "utf8"));
 const version = packageJson.version || "9.1.5";
 const staticExportEnabled = process.env.NEXT_STATIC_EXPORT !== "false" && process.env.NODE_ENV === "production";
+const heartbeatIntervalMs = String(process.env.GOLEM_HEARTBEAT_INTERVAL_MS || "2000");
+const heartbeatHiddenIntervalMs = String(process.env.GOLEM_HEARTBEAT_HIDDEN_INTERVAL_MS || "5000");
 
 const nextConfig: NextConfig = {
   turbopack: {
@@ -13,6 +15,8 @@ const nextConfig: NextConfig = {
   },
   env: {
     NEXT_PUBLIC_GOLEM_VERSION: version,
+    NEXT_PUBLIC_GOLEM_HEARTBEAT_INTERVAL_MS: heartbeatIntervalMs,
+    NEXT_PUBLIC_GOLEM_HEARTBEAT_HIDDEN_INTERVAL_MS: heartbeatHiddenIntervalMs,
   },
   output: staticExportEnabled ? "export" : undefined,
   images: {

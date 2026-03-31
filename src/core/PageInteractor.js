@@ -6,6 +6,25 @@ const { ResponseExtractor } = require('../../packages/protocol');
 
 // 共用的按鈕偵測關鍵字 (供 autoClick 快速點擊使用)
 const WORKSPACE_SAVE_KEYWORDS = ['儲存活動', '儲存', '建立', '建立活動', 'Save event', 'Save', 'Create'];
+const INPUT_FALLBACK_SELECTORS = Object.freeze([
+    '.ProseMirror',
+    'rich-textarea',
+    'div[role="textbox"][contenteditable="true"]',
+    'div[contenteditable="true"]',
+    'textarea',
+]);
+const SEND_FALLBACK_SELECTORS = Object.freeze([
+    'button[aria-label*="發送"]',
+    'button[aria-label*="Send"]',
+    'button[aria-label*="傳送"]',
+    'button[type="submit"]',
+]);
+const RESPONSE_FALLBACK_SELECTORS = Object.freeze([
+    '.model-response-text',
+    '.message-content',
+    '.markdown',
+    '.prose',
+]);
 
 function isClosedTargetError(error) {
     const message = String((error && error.message) || error || '');
@@ -20,6 +39,14 @@ class PageInteractor {
     constructor(page, doctor) {
         this.page = page;
         this.doctor = doctor;
+        this.actionTimeoutMs = TIMINGS.ACTION_TIMEOUT_MS || 15000;
+        this.retryBackoffBaseMs = TIMINGS.RETRY_BACKOFF_BASE_MS || 500;
+        this.selectorFallbackStats = {
+            input: 0,
+            send: 0,
+            response: 0,
+            upload: 0,
+        };
     }
 
     /**
@@ -57,36 +84,45 @@ class PageInteractor {
             }
 
             // 0. 確保頁面處於空閒狀態 (避免前一則訊息還在發送中)
-            await this._waitForReady(selectors.send);
+            await this._runObservedStep('ready-check', () => this._waitForReady(selectors.send), { retries: 1 });
 
             // 1. 捕獲基準文字
-            const baseline = await this._captureBaseline(selectors.response);
+            const responseSelector = await this._runObservedStep(
+                'resolve-response-selector',
+                () => this._resolveSelectorWithFallback('response', selectors.response, RESPONSE_FALLBACK_SELECTORS),
+                { retries: 1 }
+            );
+            const baseline = await this._runObservedStep('baseline-capture', () => this._captureBaseline(responseSelector), { retries: 1 });
 
             // 1.5 處理附件貼入 (如果有的話) - 模擬人類 Ctrl+V / Cmd+V
             if (attachment && attachment.path) {
-                await this._attachFile(selectors.input, attachment.path, attachment.mimeType);
+                await this._runObservedStep('attachment-paste', () => this._attachFile(selectors.input, attachment.path, attachment.mimeType), { retries: 1 });
             }
 
             // 2. 輸入文字 (使用無敵定位法 + 斜線指令標籤召喚術)
-            await this._typeInput(selectors.input, payload);
+            await this._runObservedStep('type-input', () => this._typeInput(selectors.input, payload), { retries: 1 });
 
             // 3. 等待輸入穩定
-            await new Promise(r => setTimeout(r, TIMINGS.INPUT_DELAY));
+            await this._sleep(TIMINGS.INPUT_DELAY);
 
             // 4. 發送訊息 (使用物理 Enter 爆破法)
-            await this._clickSend(selectors.send);
+            await this._runObservedStep('send-message', () => this._clickSend(selectors.send), { retries: 1 });
 
             // 5. 若為系統訊息，延遲後直接返回
             if (isSystem) {
-                await new Promise(r => setTimeout(r, TIMINGS.SYSTEM_DELAY));
+                await this._sleep(TIMINGS.SYSTEM_DELAY);
                 return "";
             }
 
             // 6. 等待信封回應
             console.log(`⚡ [Brain] 等待信封完整性 (${startTag} ... ${endTag})...`);
-            const finalResponse = await ResponseExtractor.waitForResponse(
-                this.page, selectors.response, startTag, endTag, baseline
-            );
+            const finalResponse = await this._runObservedStep('extract-response', () => ResponseExtractor.waitForResponse(
+                this.page,
+                responseSelector,
+                startTag,
+                endTag,
+                baseline
+            ), { retries: 1, timeoutMs: Math.max(this.actionTimeoutMs, TIMINGS.TIMEOUT) });
 
             if (finalResponse.status === 'TIMEOUT') throw new Error("等待回應超時");
 
@@ -103,7 +139,7 @@ class PageInteractor {
             console.log(`🏁 [Brain] 捕獲: ${finalResponse.status} | 長度: ${finalResponse.text.length} | 附件: ${finalResponse.attachments?.length || 0}`);
             
             // 🧹 [Memory Optimization] 實體修剪老舊 DOM 節點
-            await this._pruneDOM();
+            await this._runObservedStep('dom-prune', () => this._pruneDOM(), { retries: 0 });
 
             return {
                 text: ResponseExtractor.cleanResponse(finalResponse.text, startTag, endTag),
@@ -132,10 +168,105 @@ class PageInteractor {
 
     // ─── Private Methods ─────────────────────────────────────
 
+    _sleep(ms) {
+        return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+
+    _withStepTimeout(stepName, task, timeoutMs = this.actionTimeoutMs) {
+        return new Promise((resolve, reject) => {
+            const timer = setTimeout(() => {
+                reject(new Error(`STEP_TIMEOUT:${stepName}:${timeoutMs}ms`));
+            }, timeoutMs);
+
+            Promise.resolve()
+                .then(task)
+                .then((result) => {
+                    clearTimeout(timer);
+                    resolve(result);
+                })
+                .catch((error) => {
+                    clearTimeout(timer);
+                    reject(error);
+                });
+        });
+    }
+
+    _isRetryableInteractionError(error) {
+        if (!error) return false;
+        const message = String(error.message || error);
+        return /STEP_TIMEOUT|Timeout|detached from document|Execution context was destroyed|Cannot find context with specified id|Navigation failed|Protocol error/i.test(message);
+    }
+
+    async _runObservedStep(stepName, task, options = {}) {
+        const retries = Number.isFinite(options.retries) ? options.retries : 1;
+        const timeoutMs = Number.isFinite(options.timeoutMs) ? options.timeoutMs : this.actionTimeoutMs;
+
+        let lastError = null;
+        for (let attempt = 0; attempt <= retries; attempt += 1) {
+            try {
+                return await this._withStepTimeout(stepName, task, timeoutMs);
+            } catch (error) {
+                lastError = error;
+                if (isClosedTargetError(error)) {
+                    throw error;
+                }
+                const shouldRetry = attempt < retries && this._isRetryableInteractionError(error);
+                if (!shouldRetry) {
+                    throw error;
+                }
+                const backoffMs = this.retryBackoffBaseMs * Math.pow(2, attempt);
+                console.warn(`⚠️ [PageInteractor] 步驟 ${stepName} 失敗，${backoffMs}ms 後重試 (${attempt + 1}/${retries})：${error.message}`);
+                await this._sleep(backoffMs);
+            }
+        }
+        throw lastError || new Error(`Step failed: ${stepName}`);
+    }
+
+    async _resolveSelectorWithFallback(type, primarySelector, fallbackSelectors = [], options = {}) {
+        const candidates = [];
+        const pushCandidate = (value) => {
+            if (!value || typeof value !== 'string') return;
+            const trimmed = value.trim();
+            if (!trimmed) return;
+            if (!candidates.includes(trimmed)) candidates.push(trimmed);
+        };
+
+        pushCandidate(primarySelector);
+        fallbackSelectors.forEach(pushCandidate);
+
+        const waitTimeout = Number.isFinite(options.waitTimeout)
+            ? Math.max(250, options.waitTimeout)
+            : Math.min(this.actionTimeoutMs, 5000);
+
+        for (let i = 0; i < candidates.length; i += 1) {
+            const candidate = candidates[i];
+            try {
+                await this.page.waitForSelector(candidate, { state: 'attached', timeout: waitTimeout });
+                if (i > 0) {
+                    this.selectorFallbackStats[type] = (this.selectorFallbackStats[type] || 0) + 1;
+                    console.log(`🧭 [PageInteractor] ${type} selector fallback 命中 (#${this.selectorFallbackStats[type]}): ${candidate}`);
+                }
+                return candidate;
+            } catch {}
+        }
+
+        if (options.allowNull) return null;
+
+        if (this.doctor && typeof this.doctor.diagnose === 'function') {
+            const html = await this.page.content();
+            const newSel = await this.doctor.diagnose(html, type);
+            if (newSel) {
+                const cleaned = PageInteractor.cleanSelector(newSel);
+                throw new Error(`SELECTOR_HEALED:${type}:${cleaned}`);
+            }
+        }
+
+        throw new Error(`無法定位 ${type} selector`);
+    }
+
     async _captureBaseline(responseSelector) {
-        if (!responseSelector || responseSelector.trim() === "") {
-            console.log("⚠️ Response Selector 為空，等待觸發修復。");
-            throw new Error("空的 Response Selector");
+        if (!responseSelector || !responseSelector.trim()) {
+            throw new Error('空的 Response Selector');
         }
 
         return this.page.evaluate((s) => {
@@ -154,46 +285,14 @@ class PageInteractor {
      * 在輸入框中填入文字 (無敵屬性定位法 + 斜線標籤召喚)
      */
     async _typeInput(inputSelector, text) {
-        // 🚀 定義網頁原生文字編輯器的通用特徵 (無視 class 改變)
-        const fallbackSelectors = [
-            '.ProseMirror',
-            'rich-textarea',
-            'div[role="textbox"][contenteditable="true"]',
-            'div[contenteditable="true"]',
-            'textarea'
-        ];
-
-        let targetSelector = inputSelector;
-
-        if (!targetSelector || targetSelector.trim() === "") {
-            targetSelector = fallbackSelectors.join(', ');
-        }
-
-        // 🚀 [Playwright] 增加 waitForSelector 確保頁面渲染完成
-        try {
-            await this.page.waitForSelector(targetSelector, { state: 'attached', timeout: 5000 });
-        } catch (e) {
-            // 如果超時，嘗試使用通用特徵再次等待
-            if (targetSelector !== fallbackSelectors.join(', ')) {
-                try {
-                    targetSelector = fallbackSelectors.join(', ');
-                    await this.page.waitForSelector(targetSelector, { state: 'attached', timeout: 3000 });
-                } catch (e2) { }
-            }
-        }
-
-        let inputEl = await this.page.$(targetSelector);
-
-        if (!inputEl) {
-            console.log("🚑 連通用特徵都找不到輸入框，呼叫 DOM Doctor...");
-            const html = await this.page.content();
-            const newSel = await this.doctor.diagnose(html, 'input');
-            if (newSel) {
-                const cleaned = PageInteractor.cleanSelector(newSel);
-                throw new Error(`SELECTOR_HEALED:input:${cleaned}`);
-            }
-            throw new Error("無法修復輸入框 Selector");
-        }
+        const mergedFallbackSelector = INPUT_FALLBACK_SELECTORS.join(', ');
+        const targetSelector = await this._resolveSelectorWithFallback(
+            'input',
+            inputSelector,
+            [mergedFallbackSelector, ...INPUT_FALLBACK_SELECTORS]
+        );
+        const inputEl = await this.page.$(targetSelector);
+        if (!inputEl) throw new Error("無法定位輸入框元素");
 
         const extRegex = /\/@(Gmail|Google Calendar|Google Keep|Google Tasks|Google 文件|Google 雲端硬碟|Workspace|YouTube Music|YouTube|Google Maps|Google 航班|Google 飯店|Spotify|Google Home|SynthID)/i;
         const extMatch = text.match(extRegex);
@@ -212,9 +311,9 @@ class PageInteractor {
             await inputEl.focus();
 
             await this.page.keyboard.type(summonWord, { delay: 100 });
-            await new Promise(r => setTimeout(r, 1500));
+            await this._sleep(1500);
             await this.page.keyboard.press('Enter');
-            await new Promise(r => setTimeout(r, 500));
+            await this._sleep(500);
 
             console.log(`✅ [PageInteractor] [${summonWord}] 標籤召喚完成！準備貼上主指令...`);
         }
@@ -230,7 +329,7 @@ class PageInteractor {
             await inputEl.scrollIntoViewIfNeeded(); // [Playwright 強化] 確保在可視區域
             await inputEl.click({ delay: 50 });    // [強化] 點擊一下以確保真實 Focus
             await inputEl.focus();
-            await new Promise(r => setTimeout(r, 300)); // 給予瀏覽器反應時間
+            await this._sleep(300); // 給予瀏覽器反應時間
             
             // 🧹 清除可能殘留的舊內容
             const isMac = process.platform === 'darwin';
@@ -238,7 +337,7 @@ class PageInteractor {
             await this.page.keyboard.press('a');
             await this.page.keyboard.up(isMac ? 'Meta' : 'Control');
             await this.page.keyboard.press('Backspace');
-            await new Promise(r => setTimeout(r, 100));
+            await this._sleep(100);
         } catch (e) {
             console.warn(`⚠️ [PageInteractor] focus 失敗: ${e.message}`);
         }
@@ -284,23 +383,23 @@ class PageInteractor {
     async _clickSend(sendSelector) {
         // 1. Enter 爆破 (確保焦點在輸入框，而非按鈕)
         try {
-            const fallbackSelectors = [
-                '.ProseMirror',
-                'rich-textarea',
-                'div[role="textbox"][contenteditable="true"]',
-                'div[contenteditable="true"]',
-                'textarea'
-            ];
-            const inputEl = await this.page.$(fallbackSelectors.join(', '));
+            const inputEl = await this.page.$(INPUT_FALLBACK_SELECTORS.join(', '));
             if (inputEl) {
                 await inputEl.focus();
-                await new Promise(r => setTimeout(r, 100));
+                await this._sleep(100);
             }
         } catch (e) { }
 
         // 防止 Enter 太快，給予輸入框更新時間
-        await new Promise(r => setTimeout(r, 500));
+        await this._sleep(Math.min(this.actionTimeoutMs, 500));
         await this.page.keyboard.press('Enter');
+
+        const fallbackSendSelector = await this._resolveSelectorWithFallback(
+            'send',
+            sendSelector,
+            SEND_FALLBACK_SELECTORS,
+            { allowNull: true }
+        );
 
         // 2. 實體按鈕補強 (優先使用 ARIA Label 狙擊)
         await this.page.evaluate((s) => {
@@ -322,12 +421,12 @@ class PageInteractor {
                     btn.click();
                 }
             }
-        }, sendSelector);
+        }, fallbackSendSelector || sendSelector);
 
         // 3. 自動置底 (最小化干擾)
         await this._moveWindowToBottom();
 
-        await new Promise(r => setTimeout(r, 200));
+        await this._sleep(200);
     }
 
     /**
@@ -379,7 +478,7 @@ class PageInteractor {
         try {
             console.log("🕵️ [PageInteractor] 啟動幽靈掃描，尋找是否需要點擊【儲存/建立】按鈕...");
 
-            await new Promise(r => setTimeout(r, 1500));
+            await this._sleep(1500);
 
             const clickedButtonText = await this.page.evaluate((keywords) => {
                 const buttons = Array.from(document.querySelectorAll('button, [role="button"], a.btn'));
@@ -409,7 +508,7 @@ class PageInteractor {
 
             if (clickedButtonText) {
                 console.log(`🎯 [PageInteractor] 幽靈突刺成功！已自動幫忙點擊：【${clickedButtonText}】`);
-                await new Promise(r => setTimeout(r, 2000));
+                await this._sleep(2000);
             } else {
                 console.log("👻 [PageInteractor] 掃描完畢，沒有發現需要自動點擊的卡片按鈕。");
             }
@@ -454,6 +553,12 @@ class PageInteractor {
             // 🚀 將 Buffer 轉換為 Base64 以便傳入 evaluate
             const base64 = buffer.toString('base64');
 
+            const resolvedTargetSelector = await this._resolveSelectorWithFallback(
+                'input',
+                targetSelector,
+                [INPUT_FALLBACK_SELECTORS.join(', '), ...INPUT_FALLBACK_SELECTORS]
+            );
+
             await this.page.evaluate(async ({ s, b64, name, type }) => {
                 const el = document.querySelector(s);
                 if (!el) throw new Error("找不到貼上目標選取器");
@@ -480,10 +585,10 @@ class PageInteractor {
 
                 el.focus();
                 el.dispatchEvent(event);
-            }, { s: targetSelector, b64: base64, name: fileName, type: resolvedMimeType });
+            }, { s: resolvedTargetSelector, b64: base64, name: fileName, type: resolvedMimeType });
 
             console.log(`✅ [PageInteractor] 附件 [${fileName}] 已模擬貼入，等待 UI 反映...`);
-            await new Promise(r => setTimeout(r, 1500)); // 等待預覽圖/檔案圖示出現
+            await this._sleep(1500); // 等待預覽圖/檔案圖示出現
         } catch (e) {
             console.error(`❌ [PageInteractor] 附件貼上失敗: ${e.message}`);
         }
@@ -494,7 +599,7 @@ class PageInteractor {
      */
     async _waitForReady(sendSelector) {
         console.log("🔍 [PageInteractor] 正在檢查頁面空閒狀態...");
-        const maxWait = 15000; // 最多等 15 秒
+        const maxWait = this.actionTimeoutMs;
         const startTime = Date.now();
 
         while (Date.now() - startTime < maxWait) {
@@ -533,7 +638,7 @@ class PageInteractor {
                 return;
             }
 
-            await new Promise(r => setTimeout(r, 1000));
+            await this._sleep(Math.max(250, this.retryBackoffBaseMs));
         }
         console.warn("⚠️ [PageInteractor] 頁面忙碌檢查超時，將嘗試直接發送。");
     }
@@ -555,7 +660,7 @@ class PageInteractor {
                 const uploadBtn = await this.page.$(uploadSelector);
                 if (uploadBtn) {
                     await uploadBtn.click();
-                    await new Promise(r => setTimeout(r, 1000));
+                    await this._sleep(1000);
                     fileInput = await this.page.$('input[type="file"]');
                 }
             }
@@ -571,12 +676,12 @@ class PageInteractor {
             // ⏳ 等待預覽圖出現 (Gemini 通常會顯示一個縮圖或刪除按鈕)
             await this.page.waitForSelector('button[aria-label*="移除"], button[aria-label*="Remove"], .thumbnail, mat-chip', {
                 state: 'attached',
-                timeout: 10000
+                timeout: this.actionTimeoutMs
             }).catch(() => {
                 console.warn("⚠️ [PageInteractor] 等待上傳預覽超時，將嘗試繼續流程。");
             });
 
-            await new Promise(r => setTimeout(r, 1000));
+            await this._sleep(1000);
         } catch (e) {
             console.error(`❌ [PageInteractor] 圖片上傳失敗: ${e.message}`);
             // 不要拋出錯誤，讓流程嘗試繼續 (可能有文字訊息)

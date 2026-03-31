@@ -2,6 +2,12 @@
 // ⚙️ GolemBrain Constants
 // ============================================================
 
+function parsePositiveInteger(value, fallback) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+    return Math.floor(parsed);
+}
+
 /** @enum {number} 時間相關常數 (毫秒) */
 const TIMINGS = Object.freeze({
     INPUT_DELAY: 800,
@@ -10,6 +16,8 @@ const TIMINGS = Object.freeze({
     TIMEOUT: 300000,           // 5 分鐘總超時
     BROWSER_RETRY_DELAY: 1000,
     CDP_TIMEOUT: 5000,
+    ACTION_TIMEOUT_MS: parsePositiveInteger(process.env.PLAYWRIGHT_ACTION_TIMEOUT_MS, 15000),
+    RETRY_BACKOFF_BASE_MS: parsePositiveInteger(process.env.PLAYWRIGHT_RETRY_BACKOFF_BASE_MS, 500),
 });
 
 /** @enum {number} 限制與閾值 */

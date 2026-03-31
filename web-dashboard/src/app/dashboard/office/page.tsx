@@ -62,19 +62,19 @@ function extractGolemReplyOnly(rawText: string): string {
 
 const DEFAULT_LAYOUT: OfficeItem[] = [
     // Characters
-    { id: 'user', type: 'character', name: 'user', src: '/characters/user.png', x: 8, y: 75, zIndex: 40, team: 'all', width: 192, height: 192 },
-    { id: 'alex', type: 'character', name: 'alex', src: '/characters/alex.png', x: 28, y: 65, zIndex: 30, team: 'tech', width: 176, height: 176, label: 'ALEX (FE)', labelColor: 'text-cyan-400', labelBorder: 'border-cyan-800' },
-    { id: 'bob', type: 'character', name: 'bob', src: '/characters/bob.png', x: 50, y: 75, zIndex: 20, team: 'tech', width: 128, height: 128, label: 'BOB (BE)', labelColor: 'text-orange-400', labelBorder: 'border-orange-800' },
-    { id: 'carol', type: 'character', name: 'carol', src: '/characters/carol.png', x: 72, y: 75, zIndex: 20, team: 'tech', width: 128, height: 128, label: 'CAROL (PM)', labelColor: 'text-pink-400', labelBorder: 'border-pink-800' },
+    { id: 'user', type: 'character', name: 'user', src: '/optimized/characters/user-lite.png', x: 8, y: 75, zIndex: 40, team: 'all', width: 192, height: 192 },
+    { id: 'alex', type: 'character', name: 'alex', src: '/optimized/characters/alex-lite.png', x: 28, y: 65, zIndex: 30, team: 'tech', width: 176, height: 176, label: 'ALEX (FE)', labelColor: 'text-cyan-400', labelBorder: 'border-cyan-800' },
+    { id: 'bob', type: 'character', name: 'bob', src: '/optimized/characters/bob-lite.png', x: 50, y: 75, zIndex: 20, team: 'tech', width: 128, height: 128, label: 'BOB (BE)', labelColor: 'text-orange-400', labelBorder: 'border-orange-800' },
+    { id: 'carol', type: 'character', name: 'carol', src: '/optimized/characters/carol-lite.png', x: 72, y: 75, zIndex: 20, team: 'tech', width: 128, height: 128, label: 'CAROL (PM)', labelColor: 'text-pink-400', labelBorder: 'border-pink-800' },
 
     // Props
     { id: 'bookshelf', type: 'prop', name: 'bookshelf', src: '/props/bookshelf.png', x: 85, y: 25, zIndex: 0, team: 'default', width: 96, height: 128 },
     { id: 'bean_bag', type: 'prop', name: 'bean_bag', src: '/props/bean_bag.png', x: 60, y: 60, zIndex: 20, team: 'default', width: 96, height: 96 },
-    { id: 'meeting_group', type: 'prop', name: 'meeting_group', src: '/props/meeting_group.png', x: 55, y: 35, zIndex: 20, team: 'default', width: 400, height: 300 },
+    { id: 'meeting_group', type: 'prop', name: 'meeting_group', src: '/optimized/props/meeting_group-lite.png', x: 55, y: 35, zIndex: 20, team: 'default', width: 400, height: 300 },
 
-    { id: 'tech_rack_l', type: 'prop', name: 'server_rack', src: '/props/server_rack.png', x: 8, y: 42, zIndex: 10, team: 'tech', width: 96, height: 192 },
-    { id: 'tech_rack_r', type: 'prop', name: 'server_rack', src: '/props/server_rack.png', x: 84, y: 34, zIndex: 10, team: 'tech', width: 96, height: 192 },
-    { id: 'drone_dock', type: 'prop', name: 'drone_dock', src: '/office-assets/tech/drone_dock.png', x: 65, y: 27, zIndex: 20, team: 'tech', width: 150, height: 150 },
+    { id: 'tech_rack_l', type: 'prop', name: 'server_rack', src: '/optimized/props/server_rack-lite.png', x: 8, y: 42, zIndex: 10, team: 'tech', width: 96, height: 192 },
+    { id: 'tech_rack_r', type: 'prop', name: 'server_rack', src: '/optimized/props/server_rack-lite.png', x: 84, y: 34, zIndex: 10, team: 'tech', width: 96, height: 192 },
+    { id: 'drone_dock', type: 'prop', name: 'drone_dock', src: '/optimized/office-assets/tech/drone_dock-lite.png', x: 65, y: 27, zIndex: 20, team: 'tech', width: 150, height: 150 },
     { id: 'arcade', type: 'prop', name: 'arcade', src: '/office-assets/tech/arcade.png', x: 84, y: 58, zIndex: 20, team: 'tech', width: 128, height: 128 },
 
     // New Decorations
@@ -89,6 +89,7 @@ export default function OfficePage() {
         alex: null, bob: null, carol: null
     });
     const [isTeamDropdownOpen, setIsTeamDropdownOpen] = useState(false);
+    const [techBackgroundLoaded, setTechBackgroundLoaded] = useState(false);
 
     const containerRef = useRef<HTMLDivElement>(null);
     const dropdownRef = useRef<HTMLDivElement>(null);
@@ -120,6 +121,25 @@ export default function OfficePage() {
             logConsoleRef.current.scrollTop = logConsoleRef.current.scrollHeight;
         }
     }, [messageHistory]);
+
+    useEffect(() => {
+        if (selectedTeam !== "tech") return;
+        let cancelled = false;
+        const schedule = typeof window !== "undefined" && "requestIdleCallback" in window
+            ? (cb: () => void) => (window as Window & { requestIdleCallback: (handler: () => void) => number }).requestIdleCallback(cb)
+            : (cb: () => void) => window.setTimeout(cb, 120);
+        const clear = typeof window !== "undefined" && "cancelIdleCallback" in window
+            ? (id: number) => (window as Window & { cancelIdleCallback: (idleId: number) => void }).cancelIdleCallback(id)
+            : (id: number) => window.clearTimeout(id);
+
+        const idleId = schedule(() => {
+            if (!cancelled) setTechBackgroundLoaded(true);
+        });
+        return () => {
+            cancelled = true;
+            clear(idleId);
+        };
+    }, [selectedTeam]);
 
     useEffect(() => {
         const handleLog = (payload: unknown) => {
@@ -214,7 +234,9 @@ export default function OfficePage() {
                     ref={containerRef}
                     className="flex-1 relative bg-center bg-no-repeat border-4 border-border rounded-sm overflow-hidden z-0 shadow-[inset_0_20px_50px_rgba(0,0,0,0.5)] transition-all duration-700"
                     style={{
-                        backgroundImage: selectedTeam === 'tech' ? "url('/pixel_bg_tech.png')" : "url('/office_bg.png')",
+                        backgroundImage: selectedTeam === 'tech'
+                            ? (techBackgroundLoaded ? "url('/optimized/pixel_bg_tech-lite.jpg')" : "url('/office_bg.png')")
+                            : "url('/office_bg.png')",
                         backgroundColor: selectedTeam === 'tech' ? '#0a0a2a' : '#3B5B8C',
                         backgroundSize: 'cover',
                         backgroundPosition: 'center',
@@ -238,6 +260,8 @@ export default function OfficePage() {
                             <img
                                 src={item.src}
                                 alt={item.name}
+                                loading="lazy"
+                                decoding="async"
                                 className={`w-full h-full object-contain ${item.name === 'user' ? 'drop-shadow-[-5px_5px_8px_rgba(0,0,0,0.6)]' : 'drop-shadow-[0px_10px_15px_rgba(0,0,0,0.5)]'} transition-transform`}
                             />
 

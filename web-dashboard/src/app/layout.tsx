@@ -3,6 +3,7 @@ import { JetBrains_Mono, Manrope, Space_Grotesk } from "next/font/google";
 import { ThemeProvider } from "../components/ThemeProvider";
 import { I18nProvider } from "../components/I18nProvider";
 import { OpsStyleProvider } from "../components/OpsStyleProvider";
+import { RealtimeTelemetryProvider } from "../components/RealtimeTelemetryProvider";
 import { ToastProvider } from "../components/ui/toast-provider";
 import "./globals.css";
 
@@ -39,7 +40,9 @@ export default function RootLayout({
         <ThemeProvider>
           <I18nProvider>
             <OpsStyleProvider>
-              <ToastProvider>{children}</ToastProvider>
+              <RealtimeTelemetryProvider>
+                <ToastProvider>{children}</ToastProvider>
+              </RealtimeTelemetryProvider>
             </OpsStyleProvider>
           </I18nProvider>
         </ThemeProvider>

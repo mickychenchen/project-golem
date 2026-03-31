@@ -10,11 +10,14 @@ describe('PageInteractor Improvements', () => {
         mockKeyboard = {
             type: jest.fn().mockResolvedValue(undefined),
             press: jest.fn().mockResolvedValue(undefined),
+            down: jest.fn().mockResolvedValue(undefined),
+            up: jest.fn().mockResolvedValue(undefined),
         };
         mockPage = {
             $: jest.fn().mockResolvedValue({ focus: jest.fn().mockResolvedValue(undefined) }),
             focus: jest.fn().mockResolvedValue(undefined),
             evaluate: jest.fn().mockResolvedValue(undefined),
+            waitForSelector: jest.fn().mockResolvedValue(undefined),
             keyboard: mockKeyboard,
             content: jest.fn().mockResolvedValue('<html></html>'),
             context: jest.fn().mockReturnValue({
@@ -80,5 +83,27 @@ describe('PageInteractor Improvements', () => {
         expect(mockPage.evaluate).toHaveBeenCalledTimes(2);
         
         jest.restoreAllMocks();
+    });
+
+    test('_runObservedStep should retry on transient timeout errors', async () => {
+        let callCount = 0;
+        interactor.retryBackoffBaseMs = 1;
+        const result = await interactor._runObservedStep('transient-step', async () => {
+            callCount += 1;
+            if (callCount === 1) {
+                throw new Error('Timeout while waiting for selector');
+            }
+            return 'ok';
+        }, { retries: 1, timeoutMs: 50 });
+
+        expect(result).toBe('ok');
+        expect(callCount).toBe(2);
+    });
+
+    test('_runObservedStep should not retry non-retryable errors', async () => {
+        interactor.retryBackoffBaseMs = 1;
+        await expect(interactor._runObservedStep('fatal-step', async () => {
+            throw new Error('Validation failed');
+        }, { retries: 2, timeoutMs: 50 })).rejects.toThrow('Validation failed');
     });
 });

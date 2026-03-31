@@ -2,10 +2,12 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { execSync } = require('child_process');
 const { getLocalIp } = require('../../src/utils/HttpUtils');
 const { resolveEnabledSkills } = require('../../src/skills/skillsConfig');
 const { buildOperationGuard, auditSecurityEvent } = require('../server/security');
+const SystemProbe = require('../../src/infrastructure/system/SystemProbe');
+
+const systemProbe = new SystemProbe();
 
 function normalizeMemoryMode(modeRaw) {
     const mode = String(modeRaw || '').trim().toLowerCase();
@@ -54,56 +56,29 @@ module.exports = function registerSystemRoutes(server) {
             const envVars = EnvManager.readEnv();
             const configuredCount = (envVars.TELEGRAM_TOKEN || envVars.DISCORD_TOKEN) ? 1 : 0;
             const isSystemConfigured = envVars.SYSTEM_CONFIGURED === 'true';
+            const probeSnapshot = systemProbe.getStatusSnapshot(process.cwd());
 
             const runtimeEnv = {
                 node: process.version,
-                npm: 'N/A',
+                npm: probeSnapshot.runtimeEnv.npm,
                 platform: process.platform,
                 arch: process.arch,
                 uptime: Math.floor(process.uptime()),
-                osName: 'Unknown'
+                osName: probeSnapshot.runtimeEnv.osName,
             };
 
-            try { runtimeEnv.npm = `v${execSync('npm -v').toString().trim()}`; } catch { }
-
-            try {
-                if (process.platform === 'darwin') {
-                    const name = execSync('sw_vers -productName').toString().trim();
-                    const ver = execSync('sw_vers -productVersion').toString().trim();
-                    runtimeEnv.osName = `${name} ${ver}`;
-                } else if (process.platform === 'linux') {
-                    if (fs.existsSync('/etc/os-release')) {
-                        const content = fs.readFileSync('/etc/os-release', 'utf8');
-                        const match = content.match(/PRETTY_NAME="([^"]+)"/);
-                        if (match) runtimeEnv.osName = match[1];
-                    }
-                } else {
-                    runtimeEnv.osName = `${os.type()} ${os.release()}`;
-                }
-            } catch {
-                runtimeEnv.osName = `${os.type()} ${os.release()}`;
-            }
-
-            const dotEnvPath = path.join(process.cwd(), '.env');
             const health = {
                 node: process.version.startsWith('v20') || process.version.startsWith('v21') || process.version.startsWith('v22') || process.version.startsWith('v23') || process.version.startsWith('v25'),
-                env: fs.existsSync(dotEnvPath),
-                deps: fs.existsSync(path.join(process.cwd(), 'node_modules')),
-                core: ['index.js', 'package.json', 'dashboard.js'].every((f) => fs.existsSync(path.join(process.cwd(), f))),
-                dashboard: fs.existsSync(path.join(process.cwd(), 'web-dashboard/node_modules')) || fs.existsSync(path.join(process.cwd(), 'web-dashboard/.next'))
+                env: probeSnapshot.health.env,
+                deps: probeSnapshot.health.deps,
+                core: probeSnapshot.health.core,
+                dashboard: probeSnapshot.health.dashboard,
             };
-
-            let diskUsage = 'N/A';
-            try {
-                if (process.platform === 'darwin' || process.platform === 'linux') {
-                    diskUsage = execSync("df -h . | awk 'NR==2{print $4}'").toString().trim();
-                }
-            } catch { }
 
             const system = {
                 totalMem: `${Math.floor(os.totalmem() / 1024 / 1024)} MB`,
                 freeMem: `${Math.floor(os.freemem() / 1024 / 1024)} MB`,
-                diskAvail: diskUsage
+                diskAvail: probeSnapshot.diskAvail
             };
 
             return res.json({

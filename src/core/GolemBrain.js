@@ -15,6 +15,7 @@ const ChatLogManager = require('../managers/ChatLogManager');
 const SkillIndexManager = require('../managers/SkillIndexManager');
 const NodeRouter = require('./NodeRouter');
 const { URLS } = require('./constants');
+const SendMessageUseCase = require('../application/use-cases/SendMessageUseCase');
 
 // ============================================================
 // 🧠 Golem Brain (Gemini Web + Ollama) - Dual-Engine + Titan Protocol
@@ -72,6 +73,20 @@ class GolemBrain {
         this.browserStartTime = null;
         this._activeInteractionCount = 0;
         this._pendingForcedRestart = false;
+
+        this.sendMessageUseCase = new SendMessageUseCase({
+            createInteractor: (page, doctor) => new PageInteractor(page, doctor),
+            isRecoverablePageClosedError: (error) => this._isRecoverablePageClosedError(error),
+            onSelectorHealed: async (type, newSelector) => {
+                this.selectors[type] = newSelector;
+                this.doctor.saveSelectors(this.selectors);
+            },
+            onRecoverableFailure: async (error) => {
+                console.warn(`⚠️ [Brain] 偵測到頁面/上下文已關閉，執行自癒重試: ${error.message}`);
+                await this._ensureBrowserHealth(true, { allowDuringInteraction: true });
+                try { await this.page.bringToFront(); } catch {}
+            },
+        });
     }
 
     _isRecoverablePageClosedError(error) {
@@ -355,36 +370,19 @@ class GolemBrain {
 
         console.log(`📡 [Brain] 發送訊號: ${reqId} (含每回合強制洗腦引擎)${attachment ? ' 📎 含有附件' : ''}`);
 
-        const interactor = new PageInteractor(this.page, this.doctor);
-
         let result;
         this._activeInteractionCount++;
         try {
-            try {
-                result = await interactor.interact(
-                    payload, this.selectors, isSystem, startTag, endTag, 0, attachment
-                );
-            } catch (e) {
-                // 處理 selector 修復觸發的重試
-                if (e.message && e.message.startsWith('SELECTOR_HEALED:')) {
-                    const [, type, newSelector] = e.message.split(':');
-                    this.selectors[type] = newSelector;
-                    this.doctor.saveSelectors(this.selectors);
-                    result = await interactor.interact(
-                        payload, this.selectors, isSystem, startTag, endTag, 1, attachment
-                    );
-                } else if (this._isRecoverablePageClosedError(e)) {
-                    console.warn(`⚠️ [Brain] 偵測到頁面/上下文已關閉，執行自癒重試: ${e.message}`);
-                    await this._ensureBrowserHealth(true, { allowDuringInteraction: true });
-                    try { await this.page.bringToFront(); } catch {}
-                    const retryInteractor = new PageInteractor(this.page, this.doctor);
-                    result = await retryInteractor.interact(
-                        payload, this.selectors, isSystem, startTag, endTag, 0, attachment
-                    );
-                } else {
-                    throw e;
-                }
-            }
+            result = await this.sendMessageUseCase.execute({
+                page: this.page,
+                doctor: this.doctor,
+                selectors: this.selectors,
+                payload,
+                isSystem,
+                startTag,
+                endTag,
+                attachment,
+            });
         } finally {
             this._activeInteractionCount = Math.max(0, this._activeInteractionCount - 1);
             if (this._activeInteractionCount === 0 && this._pendingForcedRestart) {
