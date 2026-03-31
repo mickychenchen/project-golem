@@ -3,6 +3,11 @@ class ActionQueue {
         this.golemId = options.golemId || 'default';
         this.queue = [];
         this.isProcessing = false;
+        this.memoryPressureGuard = null;
+    }
+
+    setMemoryPressureGuard(guard) {
+        this.memoryPressureGuard = guard || null;
     }
 
     /**
@@ -38,6 +43,18 @@ class ActionQueue {
 
         this.isProcessing = true;
         const task = this.queue.shift();
+
+        if (
+            this.memoryPressureGuard &&
+            task &&
+            !task.isPriority &&
+            ['warning', 'critical', 'fatal'].includes(this.memoryPressureGuard.getSnapshot().pressure)
+        ) {
+            this.queue.push(task);
+            this.isProcessing = false;
+            setTimeout(() => this._processQueue(), 750);
+            return;
+        }
 
         try {
             console.log(`⚙️ [Action Queue:${this.golemId}] 從隊列取出，開始非同步執行行動任務...`);

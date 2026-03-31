@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState, type MouseEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { Activity, AlertTriangle, BarChart3, Bot, CalendarClock, CheckCircle2, ChevronDown, ChevronUp, Clock3, Cpu, GripVertical, HardDrive, LayoutDashboard, ListChecks, MemoryStick, Play, RefreshCw, Server, ShieldCheck, SlidersHorizontal, Terminal as TerminalIcon, Waves, Wifi, XCircle, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { LogStream } from "@/components/LogStream";
 import { SystemActionDialogs } from "@/components/SystemActionDialogs";
 import { useGolem } from "@/components/GolemContext";
 import { useI18n } from "@/components/I18nProvider";
+import { useRealtimeTelemetry } from "@/components/RealtimeTelemetryProvider";
 import { useToast } from "@/components/ui/toast-provider";
 import { apiGet, apiPost } from "@/lib/api-client";
 import { socket } from "@/lib/socket";
@@ -36,10 +37,39 @@ type HoveredPoint = TimePoint & {
 };
 
 type SystemStatusData = {
-    runtime?: {
+    runtimeEnv?: {
         osName?: string;
         uptime?: number;
         platform?: string;
+        arch?: string;
+    };
+    runtime?: {
+        mode?: string;
+        worker?: {
+            status?: string;
+            uptimeSec?: number;
+            restarts?: number;
+        };
+        memory?: {
+            pressure?: string;
+            rssMb?: number;
+            heapUsedMb?: number;
+            heapTotalMb?: number;
+            lastMitigation?: string;
+            memoryLimitMb?: number;
+            memoryLimitSource?: string;
+            fatalEligible?: boolean;
+            fatalConsecutive?: number;
+            fatalRequired?: number;
+            fatalStartupGraceMs?: number;
+            fatalSuppressedReason?: string;
+            fatalReason?: string;
+        };
+        managedChildren?: {
+            total?: number;
+            protected?: number;
+            recyclable?: number;
+        };
     };
     health?: {
         env?: boolean;
@@ -58,6 +88,9 @@ type HeartbeatPayload = {
     uptime?: string;
     memUsage?: number;
     cpu?: number;
+    queueCount?: number;
+    lastSchedule?: string;
+    runtime?: SystemStatusData["runtime"];
 };
 
 type UnifiedTab = "OVERVIEW" | "LOGS";
@@ -171,27 +204,88 @@ function parseMetricsUpdate(payload: unknown): MetricsUpdatePayload | null {
 function parseHeartbeat(payload: unknown): HeartbeatPayload | null {
     if (!isRecord(payload)) return null;
     const memUsage = parseNumber(payload.memUsage);
-    if (memUsage === null) return null;
+    const queueCount = parseNumber(payload.queueCount);
+    const runtime = isRecord(payload.runtime) ? parseRuntimeSnapshot(payload.runtime) : undefined;
+    if (memUsage === null && queueCount === null && !runtime) return null;
 
-    const heartbeat: HeartbeatPayload = { memUsage };
+    const heartbeat: HeartbeatPayload = {};
+    if (memUsage !== null) heartbeat.memUsage = memUsage;
+    if (queueCount !== null) heartbeat.queueCount = queueCount;
     if (typeof payload.uptime === "string") heartbeat.uptime = payload.uptime;
+    if (typeof payload.lastSchedule === "string") heartbeat.lastSchedule = payload.lastSchedule;
 
     const cpu = parseNumber(payload.cpu);
     if (cpu !== null) heartbeat.cpu = cpu;
+    if (runtime) heartbeat.runtime = runtime;
     return heartbeat;
+}
+
+function parseRuntimeSnapshot(payload: unknown): SystemStatusData["runtime"] | undefined {
+    if (!isRecord(payload)) return undefined;
+    const worker = isRecord(payload.worker)
+        ? {
+            status: typeof payload.worker.status === "string" ? payload.worker.status : undefined,
+            uptimeSec: parseNumber(payload.worker.uptimeSec) ?? undefined,
+            restarts: parseNumber(payload.worker.restarts) ?? undefined,
+        }
+        : undefined;
+    const memory = isRecord(payload.memory)
+        ? {
+            pressure: typeof payload.memory.pressure === "string" ? payload.memory.pressure : undefined,
+            rssMb: parseNumber(payload.memory.rssMb) ?? undefined,
+            heapUsedMb: parseNumber(payload.memory.heapUsedMb) ?? undefined,
+            heapTotalMb: parseNumber(payload.memory.heapTotalMb) ?? undefined,
+            lastMitigation: typeof payload.memory.lastMitigation === "string" ? payload.memory.lastMitigation : undefined,
+            memoryLimitMb: parseNumber(payload.memory.memoryLimitMb) ?? undefined,
+            memoryLimitSource: typeof payload.memory.memoryLimitSource === "string" ? payload.memory.memoryLimitSource : undefined,
+            fatalEligible: typeof payload.memory.fatalEligible === "boolean" ? payload.memory.fatalEligible : undefined,
+            fatalConsecutive: parseNumber(payload.memory.fatalConsecutive) ?? undefined,
+            fatalRequired: parseNumber(payload.memory.fatalRequired) ?? undefined,
+            fatalStartupGraceMs: parseNumber(payload.memory.fatalStartupGraceMs) ?? undefined,
+            fatalSuppressedReason: typeof payload.memory.fatalSuppressedReason === "string" ? payload.memory.fatalSuppressedReason : undefined,
+            fatalReason: typeof payload.memory.fatalReason === "string" ? payload.memory.fatalReason : undefined,
+        }
+        : undefined;
+    const managedChildren = isRecord(payload.managedChildren)
+        ? {
+            total: parseNumber(payload.managedChildren.total) ?? undefined,
+            protected: parseNumber(payload.managedChildren.protected) ?? undefined,
+            recyclable: parseNumber(payload.managedChildren.recyclable) ?? undefined,
+        }
+        : undefined;
+
+    return {
+        mode: typeof payload.mode === "string" ? payload.mode : undefined,
+        worker,
+        memory,
+        managedChildren,
+    };
 }
 
 function parseSystemStatus(payload: unknown): SystemStatusData | null {
     if (!isRecord(payload)) return null;
     const status: SystemStatusData = {};
 
-    if (isRecord(payload.runtime)) {
-        const uptime = parseNumber(payload.runtime.uptime);
-        status.runtime = {
-            osName: typeof payload.runtime.osName === "string" ? payload.runtime.osName : undefined,
-            platform: typeof payload.runtime.platform === "string" ? payload.runtime.platform : undefined,
+    if (isRecord(payload.runtimeEnv)) {
+        const uptime = parseNumber(payload.runtimeEnv.uptime);
+        status.runtimeEnv = {
+            osName: typeof payload.runtimeEnv.osName === "string" ? payload.runtimeEnv.osName : undefined,
+            platform: typeof payload.runtimeEnv.platform === "string" ? payload.runtimeEnv.platform : undefined,
+            arch: typeof payload.runtimeEnv.arch === "string" ? payload.runtimeEnv.arch : undefined,
             uptime: uptime ?? undefined,
         };
+    } else if (isRecord(payload.runtime) && ("osName" in payload.runtime || "platform" in payload.runtime)) {
+        const uptime = parseNumber(payload.runtime.uptime);
+        status.runtimeEnv = {
+            osName: typeof payload.runtime.osName === "string" ? payload.runtime.osName : undefined,
+            platform: typeof payload.runtime.platform === "string" ? payload.runtime.platform : undefined,
+            arch: typeof payload.runtime.arch === "string" ? payload.runtime.arch : undefined,
+            uptime: uptime ?? undefined,
+        };
+    }
+
+    if (isRecord(payload.runtime)) {
+        status.runtime = parseRuntimeSnapshot(payload.runtime);
     }
 
     if (isRecord(payload.health)) {
@@ -212,10 +306,46 @@ function parseSystemStatus(payload: unknown): SystemStatusData | null {
     return status;
 }
 
+function computeLogStats(events: ConsoleLogEvent[], now: number) {
+    const oneMinuteStart = now - 60 * 1000;
+    const fiveMinuteStart = now - 5 * 60 * 1000;
+
+    const pruned = events.filter((event) => event.ts >= fiveMinuteStart);
+
+    let logsPerMinute = 0;
+    let errorsLastMinute = 0;
+    let agentEventsLastMinute = 0;
+    let fiveMinuteErrors = 0;
+
+    for (const event of pruned) {
+        if (event.ts >= oneMinuteStart) {
+            logsPerMinute += 1;
+            if (event.type === "error") errorsLastMinute += 1;
+            if (event.type === "agent" || event.type === "queue") agentEventsLastMinute += 1;
+        }
+        if (event.type === "error") {
+            fiveMinuteErrors += 1;
+        }
+    }
+
+    return {
+        pruned,
+        stats: {
+            logsPerMinute,
+            errorsLastMinute,
+            agentEventsLastMinute,
+            fiveMinuteErrorRate: pruned.length > 0
+                ? Math.round((fiveMinuteErrors / pruned.length) * 100)
+                : 0,
+        },
+    };
+}
+
 export default function UnifiedConsole({
     defaultTab = "OVERVIEW",
     showUpdateMarquee = true,
 }: UnifiedConsoleProps) {
+    const telemetry = useRealtimeTelemetry();
     const toast = useToast();
     const { locale } = useI18n();
     const isEnglish = locale === "en";
@@ -231,9 +361,14 @@ export default function UnifiedConsole({
     const [memHistory, setMemHistory] = useState<TimePoint[]>([]);
     const [cpuHistory, setCpuHistory] = useState<TimePoint[]>([]);
     const [queueHistory, setQueueHistory] = useState<TimePoint[]>([]);
-    const [recentLogEvents, setRecentLogEvents] = useState<ConsoleLogEvent[]>([]);
+    const logWindowRef = useRef<ConsoleLogEvent[]>([]);
+    const [logStats, setLogStats] = useState({
+        logsPerMinute: 0,
+        errorsLastMinute: 0,
+        agentEventsLastMinute: 0,
+        fiveMinuteErrorRate: 0,
+    });
     const [hoveredPoint, setHoveredPoint] = useState<HoveredPoint | null>(null);
-    const [isConnected, setIsConnected] = useState(false);
     const [systemStatus, setSystemStatus] = useState<SystemStatusData | null>(null);
     const [activeTab, setActiveTab] = useState<UnifiedTab>(defaultTab);
     const [selectedMetricIds, setSelectedMetricIds] = useState<MetricCardId[]>(() => readStoredMetricSelection());
@@ -250,6 +385,12 @@ export default function UnifiedConsole({
         variant: "restarted",
     });
     const [isLoading, setIsLoading] = useState(false);
+
+    const refreshLogStats = useCallback((now: number) => {
+        const { pruned, stats } = computeLogStats(logWindowRef.current, now);
+        logWindowRef.current = pruned;
+        setLogStats(stats);
+    }, []);
 
     useEffect(() => {
         setActiveTab(defaultTab);
@@ -271,7 +412,7 @@ export default function UnifiedConsole({
             if (data.success) {
                 setConfirmDialog((prev) => ({ ...prev, open: false }));
                 setDoneDialog({ open: true, variant: "restarted" });
-                setTimeout(() => window.location.reload(), 3000);
+                setTimeout(() => setDoneDialog({ open: false, variant: "restarted" }), 2500);
             }
         } catch (error) {
             console.error("Reload failed:", error);
@@ -407,76 +548,89 @@ export default function UnifiedConsole({
     };
 
     useEffect(() => {
-        const handleConnect = () => setIsConnected(true);
-        const handleDisconnect = () => setIsConnected(false);
-        const handleInit = (payload: unknown) => {
-            const patch = parseMetricsUpdate(payload);
-            if (!patch) return;
-            const timeStr = new Date().toLocaleTimeString(locale, { hour12: false });
-            setMetrics((prev) => {
-                const next = { ...prev, ...patch };
-                setQueueHistory((history) => [...history, { time: timeStr, value: next.queueCount }].slice(-60));
-                return next;
-            });
-        };
-        const handleStateUpdate = (payload: unknown) => {
-            const patch = parseMetricsUpdate(payload);
-            if (!patch) return;
-            const timeStr = new Date().toLocaleTimeString(locale, { hour12: false });
-            setMetrics((prev) => {
-                const next = { ...prev, ...patch };
-                setQueueHistory((history) => [...history, { time: timeStr, value: next.queueCount }].slice(-60));
-                return next;
-            });
-        };
-        const handleHeartbeat = (payload: unknown) => {
-            const heartbeat = parseHeartbeat(payload);
-            if (!heartbeat) return;
+        if (telemetry.initEvent.id === 0) return;
+        const payload = telemetry.initEvent.payload;
+        const payloadRecord = isRecord(payload) ? payload : null;
+        const patch = parseMetricsUpdate(payload);
+        if (!patch) return;
+        const timeStr = new Date().toLocaleTimeString(locale, { hour12: false });
+        setMetrics((prev) => {
+            const next = { ...prev, ...patch };
+            setQueueHistory((history) => [...history, { time: timeStr, value: next.queueCount }].slice(-60));
+            return next;
+        });
+        if (payloadRecord && isRecord(payloadRecord.runtime)) {
+            setSystemStatus((prev) => ({
+                ...(prev || {}),
+                runtime: parseRuntimeSnapshot(payloadRecord.runtime),
+            }));
+        }
+    }, [locale, telemetry.initEvent]);
 
-            const timeStr = new Date().toLocaleTimeString(locale, { hour12: false });
-            setMetrics((prev) => {
-                const next = {
-                    ...prev,
-                    uptime: heartbeat.uptime ?? prev.uptime,
-                    memUsage: heartbeat.memUsage ?? prev.memUsage,
-                    cpuUsage: heartbeat.cpu ?? prev.cpuUsage,
-                };
-                setQueueHistory((history) => [...history, { time: timeStr, value: next.queueCount }].slice(-60));
-                return next;
-            });
+    useEffect(() => {
+        if (telemetry.stateUpdateEvent.id === 0) return;
+        const payload = telemetry.stateUpdateEvent.payload;
+        const payloadRecord = isRecord(payload) ? payload : null;
+        const patch = parseMetricsUpdate(payload);
+        if (!patch) return;
+        const timeStr = new Date().toLocaleTimeString(locale, { hour12: false });
+        setMetrics((prev) => {
+            const next = { ...prev, ...patch };
+            setQueueHistory((history) => [...history, { time: timeStr, value: next.queueCount }].slice(-60));
+            return next;
+        });
+        if (payloadRecord && isRecord(payloadRecord.runtime)) {
+            setSystemStatus((prev) => ({
+                ...(prev || {}),
+                runtime: parseRuntimeSnapshot(payloadRecord.runtime),
+            }));
+        }
+    }, [locale, telemetry.stateUpdateEvent]);
 
+    useEffect(() => {
+        if (telemetry.heartbeatEvent.id === 0) return;
+        const heartbeat = parseHeartbeat(telemetry.heartbeatEvent.payload);
+        if (!heartbeat) return;
+
+        const timeStr = new Date().toLocaleTimeString(locale, { hour12: false });
+        setMetrics((prev) => ({
+            ...prev,
+            uptime: heartbeat.uptime ?? prev.uptime,
+            memUsage: heartbeat.memUsage ?? prev.memUsage,
+            cpuUsage: heartbeat.cpu ?? prev.cpuUsage,
+            queueCount: heartbeat.queueCount ?? prev.queueCount,
+            lastSchedule: heartbeat.lastSchedule ?? prev.lastSchedule,
+        }));
+        if (heartbeat.runtime) {
+            setSystemStatus((prev) => ({
+                ...(prev || {}),
+                runtime: heartbeat.runtime,
+            }));
+        }
+
+        if (heartbeat.memUsage !== undefined) {
             setMemHistory((prev) => {
                 const next = [...prev, { time: timeStr, value: Number(heartbeat.memUsage?.toFixed(1) ?? "0") }];
                 return next.slice(-60);
             });
+        }
 
-            if (heartbeat.cpu !== undefined) {
-                setCpuHistory((prev) => {
-                    const next = [...prev, { time: timeStr, value: Number(heartbeat.cpu?.toFixed(1) ?? "0") }];
-                    return next.slice(-60);
-                });
-            }
-        };
+        if (heartbeat.cpu !== undefined) {
+            setCpuHistory((prev) => {
+                const next = [...prev, { time: timeStr, value: Number(heartbeat.cpu?.toFixed(1) ?? "0") }];
+                return next.slice(-60);
+            });
+        }
+    }, [locale, telemetry.heartbeatEvent]);
 
+    useEffect(() => {
         const handleLog = (payload: unknown) => {
             if (!isRecord(payload) || typeof payload.type !== "string") return;
-            const logType = payload.type;
-            const now = Date.now();
-            const windowStart = now - 5 * 60 * 1000;
-            setRecentLogEvents((prev) => {
-                const trimmed = prev.filter((event) => event.ts >= windowStart);
-                const next = [...trimmed, { ts: now, type: logType }];
-                return next.slice(-2400);
-            });
+            logWindowRef.current.push({ ts: Date.now(), type: payload.type });
+            refreshLogStats(Date.now());
         };
 
-        socket.on("connect", handleConnect);
-        socket.on("disconnect", handleDisconnect);
-        socket.on("init", handleInit);
-        socket.on("state_update", handleStateUpdate);
-        socket.on("heartbeat", handleHeartbeat);
         socket.on("log", handleLog);
-        setIsConnected(socket.connected);
 
         const fetchFullStatus = async () => {
             try {
@@ -489,20 +643,19 @@ export default function UnifiedConsole({
         };
 
         void fetchFullStatus();
-        const interval = setInterval(() => {
+        const statusInterval = setInterval(() => {
             void fetchFullStatus();
         }, 30000);
+        const logDecayInterval = setInterval(() => {
+            refreshLogStats(Date.now());
+        }, 1000);
 
         return () => {
-            socket.off("connect", handleConnect);
-            socket.off("disconnect", handleDisconnect);
-            socket.off("init", handleInit);
-            socket.off("state_update", handleStateUpdate);
-            socket.off("heartbeat", handleHeartbeat);
             socket.off("log", handleLog);
-            clearInterval(interval);
+            clearInterval(statusInterval);
+            clearInterval(logDecayInterval);
         };
-    }, [locale]);
+    }, [refreshLogStats]);
 
     const healthScore = useMemo(() => {
         const checks = [systemStatus?.health?.env, systemStatus?.health?.deps, systemStatus?.health?.core];
@@ -521,30 +674,6 @@ export default function UnifiedConsole({
             total: definedChecks.length,
         };
     }, [isEnglish, systemStatus?.health?.core, systemStatus?.health?.deps, systemStatus?.health?.env]);
-
-    const logStats = useMemo(() => {
-        const now = Date.now();
-        const oneMinuteStart = now - 60 * 1000;
-        const fiveMinuteStart = now - 5 * 60 * 1000;
-
-        const lastMinute = recentLogEvents.filter((event) => event.ts >= oneMinuteStart);
-        const lastFiveMinutes = recentLogEvents.filter((event) => event.ts >= fiveMinuteStart);
-
-        const errorsLastMinute = lastMinute.filter((event) => event.type === "error").length;
-        const agentEventsLastMinute = lastMinute.filter((event) => event.type === "agent" || event.type === "queue").length;
-
-        const fiveMinuteErrors = lastFiveMinutes.filter((event) => event.type === "error").length;
-        const fiveMinuteErrorRate = lastFiveMinutes.length > 0
-            ? Math.round((fiveMinuteErrors / lastFiveMinutes.length) * 100)
-            : 0;
-
-        return {
-            logsPerMinute: lastMinute.length,
-            errorsLastMinute,
-            agentEventsLastMinute,
-            fiveMinuteErrorRate,
-        };
-    }, [recentLogEvents]);
 
     const metricOptions = useMemo(() => ([
         { id: "queueLoad", label: isEnglish ? "Queue Load" : "任務佇列", description: isEnglish ? "Current queued workload" : "目前佇列負載量" },
@@ -591,7 +720,7 @@ export default function UnifiedConsole({
             {
                 id: "backendStatus",
                 title: isEnglish ? "Backend Status" : "後端連線狀態",
-                value: isConnected ? (isEnglish ? "Connected" : "已連線") : (isEnglish ? "Disconnected" : "未連線"),
+                value: telemetry.isConnected ? (isEnglish ? "Connected" : "已連線") : (isEnglish ? "Disconnected" : "未連線"),
                 icon: Wifi,
             },
             {
@@ -604,12 +733,12 @@ export default function UnifiedConsole({
                 id: "activeGolemStatus",
                 title: isEnglish ? "Golem Status" : "Golem 狀態",
                 value: statusLabel,
-                icon: isConnected ? CheckCircle2 : XCircle,
+                icon: telemetry.isConnected ? CheckCircle2 : XCircle,
             },
             {
                 id: "runtimePlatform",
                 title: isEnglish ? "Runtime Platform" : "運行平台",
-                value: systemStatus?.runtime?.platform?.toUpperCase() || "N/A",
+                value: systemStatus?.runtimeEnv?.platform?.toUpperCase() || "N/A",
                 icon: Cpu,
             },
             {
@@ -660,7 +789,7 @@ export default function UnifiedConsole({
         activeGolemStatus,
         golems.length,
         healthScore.value,
-        isConnected,
+        telemetry.isConnected,
         isEnglish,
         logStats.agentEventsLastMinute,
         logStats.fiveMinuteErrorRate,
@@ -669,7 +798,9 @@ export default function UnifiedConsole({
         metrics.queueCount,
         metrics.uptime,
         queueHistory,
-        systemStatus?.runtime?.platform,
+        systemStatus?.runtime?.memory?.pressure,
+        systemStatus?.runtime?.worker?.restarts,
+        systemStatus?.runtimeEnv?.platform,
         systemStatus?.system?.diskAvail,
         systemStatus?.system?.freeMem,
     ]);
@@ -754,12 +885,14 @@ export default function UnifiedConsole({
 
                     <div className="flex items-center gap-3">
                         <div className="enterprise-badge">
-                            {typeof systemStatus?.runtime?.uptime === "number"
-                                ? `${Math.floor(systemStatus.runtime.uptime / 3600)}h ${Math.floor((systemStatus.runtime.uptime % 3600) / 60)}m`
+                            {typeof systemStatus?.runtime?.worker?.uptimeSec === "number"
+                                ? `${Math.floor(systemStatus.runtime.worker.uptimeSec / 3600)}h ${Math.floor((systemStatus.runtime.worker.uptimeSec % 3600) / 60)}m`
+                                : typeof systemStatus?.runtimeEnv?.uptime === "number"
+                                    ? `${Math.floor(systemStatus.runtimeEnv.uptime / 3600)}h ${Math.floor((systemStatus.runtimeEnv.uptime % 3600) / 60)}m`
                                 : metrics.uptime}
                         </div>
-                        <div className={cn("enterprise-badge", isConnected ? "text-emerald-500" : "text-destructive")}>
-                            {isConnected ? (isEnglish ? "System Online" : "系統在線") : (isEnglish ? "System Offline" : "系統離線")}
+                        <div className={cn("enterprise-badge", telemetry.isConnected ? "text-emerald-500" : "text-destructive")}>
+                            {telemetry.isConnected ? (isEnglish ? "System Online" : "系統在線") : (isEnglish ? "System Offline" : "系統離線")}
                         </div>
                     </div>
                 </div>
@@ -982,7 +1115,25 @@ export default function UnifiedConsole({
                                     <PanelHeader icon={<ShieldCheck className="w-3 h-3" />} title={isEnglish ? "System Status" : "系統狀態"} />
                                     <div className="p-5 text-sm font-mono bg-background/35">
                                         <ul className="space-y-3.5">
-                                            <StatusItem label={isEnglish ? "Core Mode" : "核心模式"} value={systemStatus?.runtime?.platform?.toUpperCase() || "N/A"} icon={<Cpu className="w-3 h-3" />} />
+                                            <StatusItem
+                                                label={isEnglish ? "Core Mode" : "核心模式"}
+                                                value={systemStatus?.runtime?.mode || systemStatus?.runtimeEnv?.platform?.toUpperCase() || "N/A"}
+                                                icon={<Cpu className="w-3 h-3" />}
+                                            />
+                                            <StatusItem
+                                                label={isEnglish ? "Worker Status" : "Worker 狀態"}
+                                                value={systemStatus?.runtime?.worker?.status?.replaceAll("_", " ") || "N/A"}
+                                                color={systemStatus?.runtime?.worker?.status === "running" ? "primary" : "destructive"}
+                                            />
+                                            <StatusItem
+                                                label={isEnglish ? "Memory Pressure" : "記憶體壓力"}
+                                                value={(systemStatus?.runtime?.memory?.pressure || "normal").toUpperCase()}
+                                                color={systemStatus?.runtime?.memory?.pressure === "normal" ? "primary" : "destructive"}
+                                            />
+                                            <StatusItem
+                                                label={isEnglish ? "Worker Restarts" : "Worker 重啟次數"}
+                                                value={String(systemStatus?.runtime?.worker?.restarts ?? 0)}
+                                            />
                                             <StatusItem label={isEnglish ? "Environment" : "環境配置"} value={systemStatus?.health?.env ? (isEnglish ? "Loaded" : "已載入") : (isEnglish ? "Check" : "檢查")} color={systemStatus?.health?.env ? "primary" : "destructive"} />
                                             <StatusItem label={isEnglish ? "Dependencies" : "依賴狀態"} value={systemStatus?.health?.deps ? (isEnglish ? "Healthy" : "正常") : (isEnglish ? "Check" : "檢查")} color={systemStatus?.health?.deps ? "primary" : "destructive"} />
                                             <StatusItem label={isEnglish ? "Core Service" : "核心服務"} value={systemStatus?.health?.core ? (isEnglish ? "Online" : "在線") : (isEnglish ? "Offline" : "離線")} color={systemStatus?.health?.core ? "primary" : "destructive"} />
@@ -1006,18 +1157,18 @@ export default function UnifiedConsole({
                                         />
                                         <ActionButton
                                             icon={<RefreshCw className="w-5 h-5" />}
-                                            label={isEnglish ? "Restart" : "重新啟動"}
-                                            description={isEnglish ? "Hot-reload · Auto reconnect" : "Hot-reload · 自動重連"}
+                                            label={isEnglish ? "Recycle Worker" : "重建 Worker"}
+                                            description={isEnglish ? "Recycle runtime worker · Dashboard auto reconnect" : "回收並重建 runtime worker · Dashboard 自動重連"}
                                             onClick={() => openConfirm("restart")}
-                                            disabled={!isConnected || isLoading}
+                                            disabled={!telemetry.isConnected || isLoading}
                                             color="primary"
                                         />
                                         <ActionButton
                                             icon={<Zap className="w-5 h-5" />}
-                                            label={isEnglish ? "Shutdown Golem" : "關閉 Golem"}
-                                            description={isEnglish ? "Full stop · Manual restart required" : "完全停止 · 需手動重啟"}
+                                            label={isEnglish ? "Shutdown Supervisor" : "關閉 Supervisor"}
+                                            description={isEnglish ? "Full stop · Manual restart required" : "完整停止 · 需手動重啟"}
                                             onClick={() => openConfirm("shutdown")}
-                                            disabled={!isConnected || isLoading}
+                                            disabled={!telemetry.isConnected || isLoading}
                                             color="destructive"
                                         />
                                     </div>

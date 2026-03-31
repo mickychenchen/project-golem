@@ -2,10 +2,12 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { execSync } = require('child_process');
 const { getLocalIp } = require('../../src/utils/HttpUtils');
 const { resolveEnabledSkills } = require('../../src/skills/skillsConfig');
 const { buildOperationGuard, auditSecurityEvent } = require('../server/security');
+const SystemProbe = require('../../src/infrastructure/system/SystemProbe');
+
+const systemProbe = new SystemProbe();
 
 function normalizeMemoryMode(modeRaw) {
     const mode = String(modeRaw || '').trim().toLowerCase();
@@ -49,60 +51,34 @@ module.exports = function registerSystemRoutes(server) {
     router.get('/api/system/status', (req, res) => {
         try {
             const liveCount = server.contexts.size;
+            const runtimeSnapshot = server.runtimeController ? server.runtimeController.getRuntimeSnapshot() : null;
             const EnvManager = require('../../src/utils/EnvManager');
             const envVars = EnvManager.readEnv();
             const configuredCount = (envVars.TELEGRAM_TOKEN || envVars.DISCORD_TOKEN) ? 1 : 0;
             const isSystemConfigured = envVars.SYSTEM_CONFIGURED === 'true';
+            const probeSnapshot = systemProbe.getStatusSnapshot(process.cwd());
 
-            const runtime = {
+            const runtimeEnv = {
                 node: process.version,
-                npm: 'N/A',
+                npm: probeSnapshot.runtimeEnv.npm,
                 platform: process.platform,
                 arch: process.arch,
                 uptime: Math.floor(process.uptime()),
-                osName: 'Unknown'
+                osName: probeSnapshot.runtimeEnv.osName,
             };
 
-            try { runtime.npm = `v${execSync('npm -v').toString().trim()}`; } catch { }
-
-            try {
-                if (process.platform === 'darwin') {
-                    const name = execSync('sw_vers -productName').toString().trim();
-                    const ver = execSync('sw_vers -productVersion').toString().trim();
-                    runtime.osName = `${name} ${ver}`;
-                } else if (process.platform === 'linux') {
-                    if (fs.existsSync('/etc/os-release')) {
-                        const content = fs.readFileSync('/etc/os-release', 'utf8');
-                        const match = content.match(/PRETTY_NAME="([^"]+)"/);
-                        if (match) runtime.osName = match[1];
-                    }
-                } else {
-                    runtime.osName = `${os.type()} ${os.release()}`;
-                }
-            } catch {
-                runtime.osName = `${os.type()} ${os.release()}`;
-            }
-
-            const dotEnvPath = path.join(process.cwd(), '.env');
             const health = {
                 node: process.version.startsWith('v20') || process.version.startsWith('v21') || process.version.startsWith('v22') || process.version.startsWith('v23') || process.version.startsWith('v25'),
-                env: fs.existsSync(dotEnvPath),
-                deps: fs.existsSync(path.join(process.cwd(), 'node_modules')),
-                core: ['index.js', 'package.json', 'dashboard.js'].every((f) => fs.existsSync(path.join(process.cwd(), f))),
-                dashboard: fs.existsSync(path.join(process.cwd(), 'web-dashboard/node_modules')) || fs.existsSync(path.join(process.cwd(), 'web-dashboard/.next'))
+                env: probeSnapshot.health.env,
+                deps: probeSnapshot.health.deps,
+                core: probeSnapshot.health.core,
+                dashboard: probeSnapshot.health.dashboard,
             };
-
-            let diskUsage = 'N/A';
-            try {
-                if (process.platform === 'darwin' || process.platform === 'linux') {
-                    diskUsage = execSync("df -h . | awk 'NR==2{print $4}'").toString().trim();
-                }
-            } catch { }
 
             const system = {
                 totalMem: `${Math.floor(os.totalmem() / 1024 / 1024)} MB`,
                 freeMem: `${Math.floor(os.freemem() / 1024 / 1024)} MB`,
-                diskAvail: diskUsage
+                diskAvail: probeSnapshot.diskAvail
             };
 
             return res.json({
@@ -114,7 +90,8 @@ module.exports = function registerSystemRoutes(server) {
                 allowRemote: server.allowRemote,
                 localIp: getLocalIp(),
                 dashboardPort: process.env.DASHBOARD_PORT || 3000,
-                runtime,
+                runtimeEnv,
+                runtime: runtimeSnapshot,
                 health,
                 system
             });
@@ -319,17 +296,15 @@ module.exports = function registerSystemRoutes(server) {
 
     router.post('/api/system/restart', requireRestart, (req, res) => {
         try {
-            console.log('🔄 [System] Restart requested by user. Triggering hard restart...');
-            res.json({ success: true, message: 'Restarting system... Full re-initialization in progress.' });
+            console.log('🔄 [System] Restart requested by user. Recycling worker runtime...');
+            res.json({ success: true, message: 'Recycling runtime worker...' });
 
-            if (typeof global.gracefulRestart === 'function') {
+            if (server.runtimeController) {
                 setTimeout(() => {
-                    global.gracefulRestart().catch((err) => {
+                    server.runtimeController.restartWorker('api-system-restart').catch((err) => {
                         console.error('❌ [System] Restart error:', err);
                     });
                 }, 1000);
-            } else {
-                console.warn('⚠️ [System] global.gracefulRestart not found, skipping forced process exit');
             }
         } catch (e) {
             return res.status(500).json({ error: e.message });
@@ -337,17 +312,15 @@ module.exports = function registerSystemRoutes(server) {
     });
 
     router.post('/api/system/reload', requireReload, (req, res) => {
-        console.log('🔄 [WebServer] Received reload request. Restarting system...');
-        res.json({ success: true, message: 'System is restarting with full re-initialization...' });
+        console.log('🔄 [WebServer] Received reload request. Recycling runtime worker...');
+        res.json({ success: true, message: 'Runtime worker is restarting...' });
 
-        if (typeof global.gracefulRestart === 'function') {
+        if (server.runtimeController) {
             setTimeout(() => {
-                global.gracefulRestart().catch((err) => {
+                server.runtimeController.restartWorker('api-system-reload').catch((err) => {
                     console.error('❌ [System] Reload error:', err);
                 });
             }, 1000);
-        } else {
-            console.warn('⚠️ [System] global.gracefulRestart not found, skipping forced process exit');
         }
     });
 
@@ -355,14 +328,12 @@ module.exports = function registerSystemRoutes(server) {
         console.log('⛔ [WebServer] Received shutdown request. Stopping system...');
         res.json({ success: true, message: 'System is shutting down... Please restart manually if needed.' });
 
-        if (typeof global.fullShutdown === 'function') {
+        if (server.runtimeController) {
             setTimeout(() => {
-                global.fullShutdown().catch((err) => {
+                server.runtimeController.shutdownSupervisor('api-system-shutdown').catch((err) => {
                     console.error('❌ [System] Shutdown error:', err);
                 });
             }, 1000);
-        } else {
-            console.warn('⚠️ [System] global.fullShutdown not found, skipping forced process exit');
         }
     });
 
@@ -395,10 +366,13 @@ module.exports = function registerSystemRoutes(server) {
             skillCount = resolveEnabledSkills(process.env.OPTIONAL_SKILLS || '', []).size;
         } catch { }
 
+        const runtimeSnapshot = server.runtimeController ? server.runtimeController.getRuntimeSnapshot() : null;
+
         res.json({
             status: 'ok',
             uptime: process.uptime(),
             memory: process.memoryUsage(),
+            runtime: runtimeSnapshot,
             brain: {
                 connected: hasActivePage,
                 runningCount,

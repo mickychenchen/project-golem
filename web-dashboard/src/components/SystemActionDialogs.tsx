@@ -26,11 +26,11 @@ export function ConfirmDialog({ open, onOpenChange, variant, onConfirm, isLoadin
         ? {
             icon: <RefreshCcw className="w-5 h-5 text-primary" />,
             iconBg: "bg-primary/10 border-primary/20",
-            title: "重新啟動 Golem？",
-            description: "這將終止目前進程並立即重啟。前端會短暫斷線（約 3-5 秒）後自動重新連線。",
-            warning: "進行中的對話將被中斷。",
-            confirmLabel: "確認重啟",
-            loadingLabel: "正在重啟...",
+            title: "重建 Runtime Worker？",
+            description: "這會回收並重建 Golem runtime worker。Dashboard 連線會短暫抖動，但 supervisor 與 URL 會維持不變。",
+            warning: "進行中的工作會被中斷，之後由新 worker 接手。",
+            confirmLabel: "確認重建",
+            loadingLabel: "正在重建...",
             confirmClass: "bg-primary hover:bg-primary/90 text-primary-foreground",
         }
         : variant === "shutdown"
@@ -126,10 +126,10 @@ export function DoneDialog({ open, onOpenChange, variant }: DoneDialogProps) {
                         {variant === "shutdown" && <PowerOff className="w-5 h-5 text-gray-400" />}
                     </div>
                     <DialogTitle className="text-foreground text-base">
-                        {variant === "restarted" ? "正在重新啟動..." : variant === "started" ? "Golem 已啟動" : "Golem 已停止"}
+                        {variant === "restarted" ? "Runtime Worker 正在重建..." : variant === "started" ? "Golem 已啟動" : "Golem 已停止"}
                     </DialogTitle>
                     <DialogDescription className="text-muted-foreground text-sm">
-                        {variant === "restarted" && "系統正在重啟中，頁面將在 3 秒後自動重新整理。"}
+                        {variant === "restarted" && "Runtime worker 正在回收並重建。Dashboard 會自動重新連線。"}
                         {variant === "started" && "核心實體已成功啟動，您可以開始使用儀表板功能。"}
                         {variant === "shutdown" && "核心實體已停止運作。您可以隨時透過儀表板重新啟動服務。"}
                     </DialogDescription>

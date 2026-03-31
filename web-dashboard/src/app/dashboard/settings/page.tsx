@@ -130,8 +130,8 @@ export default function SettingsPage() {
             return;
         }
 
-        const runtimePlatform = String(systemStatus?.runtime?.platform || "").toLowerCase();
-        const runtimeArch = String(systemStatus?.runtime?.arch || "").toLowerCase();
+        const runtimePlatform = String(systemStatus?.runtimeEnv?.platform || "").toLowerCase();
+        const runtimeArch = String(systemStatus?.runtimeEnv?.arch || "").toLowerCase();
         const isIntelMac = runtimePlatform === "darwin" && runtimeArch === "x64";
         const changedMemoryMode = String(changedEnv.GOLEM_MEMORY_MODE || "").trim().toLowerCase();
         const wantsLanceDbPro = changedMemoryMode === "lancedb" || changedMemoryMode === "lancedb-pro" || changedMemoryMode === "lancedb-legacy" || changedMemoryMode === "lancedb_legacy";

@@ -174,10 +174,10 @@ module.exports = function registerGolemRoutes(server) {
             }
 
             const instance = server.contexts.get(id);
-            if (instance && instance.brain && instance.brain.browser) {
-                await instance.brain.browser.close();
+            if (instance && instance.brain && instance.brain.context && typeof instance.brain.context.close === 'function') {
+                await instance.brain.context.close();
                 instance.brain.status = 'not_started';
-                return res.json({ success: true, message: `Golem ${id} browser closed (fallback).` });
+                return res.json({ success: true, message: `Golem ${id} runtime context closed (fallback).` });
             }
             return res.status(404).json({ error: 'Stop helper not found and Golem not in memory.' });
         } catch (e) {

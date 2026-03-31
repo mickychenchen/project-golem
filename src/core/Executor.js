@@ -1,4 +1,5 @@
 const { spawn } = require('child_process');
+const { getManagedProcessRegistry } = require('../runtime/RuntimeState');
 
 class Executor {
     constructor() {
@@ -18,8 +19,13 @@ class Executor {
         return new Promise((resolve, reject) => {
             const cwd = options.cwd || process.cwd();
             const timeout = options.timeout !== undefined ? options.timeout : this.defaultTimeout;
+            const registry = getManagedProcessRegistry();
 
             console.log(`⚡ [Executor] Running: "${command}" in ${cwd}`);
+
+            if (registry) {
+                registry.assertCommandAllowed(command);
+            }
 
             // 使用 spawn 啟動子進程
             const child = spawn(command, [], {
@@ -27,6 +33,18 @@ class Executor {
                 cwd: cwd,        // 設定工作目錄
                 env: process.env // 繼承原本的環境變數
             });
+            const registration = registry
+                ? registry.registerResource(`executor:${String(command).slice(0, 80)}`, {
+                    child,
+                    protected: false,
+                    recyclable: true,
+                    stop: async () => {
+                        if (!child.killed && child.exitCode === null) {
+                            child.kill('SIGTERM');
+                        }
+                    },
+                })
+                : null;
 
             let stdout = '';
             let stderr = '';
@@ -39,6 +57,7 @@ class Executor {
                     if (!isDone) {
                         isDone = true;
                         child.kill('SIGKILL'); // 殺死進程
+                        if (registration) registration.unregister();
                         const msg = `❌ [Executor] Command timed out after ${timeout}ms: "${command}"`;
                         console.warn(msg);
                         reject(new Error(msg));
@@ -73,6 +92,7 @@ class Executor {
                 if (!isDone) {
                     isDone = true;
                     if (timer) clearTimeout(timer);
+                    if (registration) registration.unregister();
                     reject(err);
                 }
             });
@@ -82,6 +102,7 @@ class Executor {
                 if (!isDone) {
                     isDone = true;
                     if (timer) clearTimeout(timer); // 清除計時器
+                    if (registration) registration.unregister();
 
                     if (code !== 0) {
                         // 回傳詳細錯誤，讓 AI 知道發生什麼事

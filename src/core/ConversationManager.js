@@ -1,4 +1,4 @@
-const { v4: uuidv4 } = require('uuid');
+const { randomUUID } = require('crypto');
 const ConfigManager = require('../config');
 const ConfidenceTracker = require('../managers/ConfidenceTracker');
 
@@ -19,6 +19,7 @@ class ConversationManager {
         this.interventionLevel = options.interventionLevel || 'CONSERVATIVE';
         this.DEBOUNCE_MS = 1500;
         this.autoTurnCount = 0; // 🎯 [v9.1.15] Track autonomous turns
+        this.memoryPressureGuard = null;
 
         // 初始化信心追蹤器
         this.confidenceTracker = new ConfidenceTracker(this.brain.chatLogManager);
@@ -34,6 +35,15 @@ class ConversationManager {
             clearInterval(this._healthCheckInterval);
             this._healthCheckInterval = null;
         }
+    }
+
+    setMemoryPressureGuard(guard) {
+        this.memoryPressureGuard = guard || null;
+    }
+
+    _isRecoverableInteractionError(error) {
+        const message = String((error && error.message) || error || '');
+        return /Target page, context or browser has been closed|Execution context was destroyed|browser has been closed|Page closed/i.test(message);
     }
 
     async _checkInstanceHealth() {
@@ -95,7 +105,7 @@ class ConversationManager {
         // ✨ [v9.1 插隊系統：大腦層擴充]
         // 如果不是特急件 (isPriority=false)，且隊列中已有任務 (長度 >= 1)，則觸發詢問
         if (!isPriority && this.queue.length >= 1) {
-            const approvalId = uuidv4();
+            const approvalId = randomUUID();
 
             // 將對話任務暫存在 Controller 的 pendingTasks
             this.controller.pendingTasks.set(approvalId, {
@@ -194,9 +204,18 @@ class ConversationManager {
         this.isProcessing = true;
         const task = this.queue.shift();
 
+        if (this.memoryPressureGuard) {
+            try {
+                await this.memoryPressureGuard.sample({
+                    source: 'conversation.pre',
+                    queueLength: this.queue.length,
+                });
+            } catch {}
+        }
+
         // 🧹 [Extra Arch 3] Memory Guard 記憶體上限監控
         const heapObj = process.memoryUsage();
-        const heapRatio = heapObj.heapUsed / heapObj.heapTotal;
+        const heapRatio = heapObj.heapTotal > 0 ? (heapObj.heapUsed / heapObj.heapTotal) : 0;
         if (heapRatio > 0.8) {
             const usedMB = Math.round(heapObj.heapUsed / 1024 / 1024);
             const totalMB = Math.round(heapObj.heapTotal / 1024 / 1024);
@@ -244,12 +263,37 @@ class ConversationManager {
                 console.log(`📢 [Dialogue Queue:${this.golemId}] 模式中偵測到標記，強制恢復回應。`);
             }
 
-            const brainResponse = await this.brain.sendMessage(finalInput, false, {
+            const sendOptions = {
                 isObserver: this.observerMode,
                 interventionLevel: this.interventionLevel,
                 attachment: task.attachment,
                 ...task.options // 🎯 [v9.1.13] 透傳來自隊列的自定義選項 (如 suppressReply)
-            });
+            };
+
+            let brainResponse = null;
+            const maxAttempts = 3;
+            for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+                try {
+                    brainResponse = await this.brain.sendMessage(finalInput, false, sendOptions);
+                    break;
+                } catch (error) {
+                    const isRecoverable = this._isRecoverableInteractionError(error);
+                    if (!isRecoverable || attempt === maxAttempts) {
+                        throw error;
+                    }
+
+                    console.warn(`⚠️ [Dialogue Queue:${this.golemId}] 互動通道中斷，準備重試 (${attempt}/${maxAttempts})...`);
+                    try {
+                        if (this.brain && typeof this.brain._ensureBrowserHealth === 'function') {
+                            await this.brain._ensureBrowserHealth(true, { allowDuringInteraction: true });
+                        }
+                    } catch (healError) {
+                        console.warn(`⚠️ [Dialogue Queue:${this.golemId}] 重試前自癒失敗: ${healError.message}`);
+                    }
+
+                    await new Promise((resolve) => setTimeout(resolve, 400 * attempt));
+                }
+            }
 
             let { text: raw, attachments: responseAttachments, status: extractorStatus } = brainResponse;
 
@@ -322,6 +366,15 @@ class ConversationManager {
             // 🧹 [Memory Optimization] 強制執行 V8 垃圾回收，釋放回合變數
             if (global.gc) {
                 global.gc();
+            }
+
+            if (this.memoryPressureGuard) {
+                try {
+                    await this.memoryPressureGuard.sample({
+                        source: 'conversation.post',
+                        queueLength: this.queue.length,
+                    });
+                } catch {}
             }
             
             setTimeout(() => this._processQueue(), 500);

@@ -92,6 +92,7 @@ class WebServer {
 
         this.contexts = new Map();
         this.golemFactory = null;
+        this.runtimeController = null;
         this.isBooting = true;
         this.logBuffer = [];
         this.chatHistory = new Map();
@@ -129,10 +130,16 @@ class WebServer {
                         chatId: envVars.TG_CHAT_ID
                     };
                     const instance = await this.golemFactory(config);
-                    if (instance.brain.init) {
+                    const shouldInitInWebLayer = !this.runtimeController
+                        && instance
+                        && instance.brain
+                        && typeof instance.brain.init === 'function';
+
+                    if (shouldInitInWebLayer) {
                         await instance.brain.init(false);
-                        console.log('✅ [WebServer] Golem auto-started successfully.');
                     }
+
+                    console.log('✅ [WebServer] Golem auto-started successfully.');
                 } catch (e) {
                     console.error('❌ [WebServer] Failed to auto-start Golem:', e);
                 } finally {
@@ -260,13 +267,21 @@ class WebServer {
 
     broadcastState(data) {
         if (this.io) {
-            this.io.emit('state_update', data);
+            const payload = { ...data };
+            if (this.runtimeController && !payload.runtime) {
+                payload.runtime = this.runtimeController.getRuntimeSnapshot();
+            }
+            this.io.emit('state_update', payload);
         }
     }
 
     broadcastHeartbeat(data) {
         if (this.io) {
-            this.io.emit('heartbeat', data);
+            const payload = { ...data };
+            if (this.runtimeController && !payload.runtime) {
+                payload.runtime = this.runtimeController.getRuntimeSnapshot();
+            }
+            this.io.emit('heartbeat', payload);
         }
     }
 

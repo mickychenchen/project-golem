@@ -2,11 +2,11 @@
 // 🧠 Golem Brain (Multi-Backend) - Clean Architecture Facade
 // ============================================================
 const path = require('path');
+const { randomUUID } = require('crypto');
 const ConfigManager = require('../config');
 const DOMDoctor = require('../services/DOMDoctor');
 const OllamaClient = require('../services/OllamaClient');
 const { LanceDBProDriver, SystemNativeDriver } = require('../../packages/memory');
-const ErrorLedger = require('../utils/ErrorLedger');
 
 const BrowserLauncher = require('./BrowserLauncher');
 const { ProtocolFormatter } = require('../../packages/protocol');
@@ -15,6 +15,7 @@ const ChatLogManager = require('../managers/ChatLogManager');
 const SkillIndexManager = require('../managers/SkillIndexManager');
 const NodeRouter = require('./NodeRouter');
 const { URLS } = require('./constants');
+const SendMessageUseCase = require('../application/use-cases/SendMessageUseCase');
 
 // ============================================================
 // 🧠 Golem Brain (Gemini Web + Ollama) - Dual-Engine + Titan Protocol
@@ -61,7 +62,6 @@ class GolemBrain {
             golemId: this.golemId,
             logDir: options.logDir || ConfigManager.LOG_BASE_DIR
         });
-        this.errorLedger = new ErrorLedger(this.chatLogManager);
 
         // ── Backend Selection ──
         this.backend = ConfigManager.CONFIG.GOLEM_BACKEND || 'gemini';
@@ -71,6 +71,27 @@ class GolemBrain {
         
         // ── 實體生命週期追蹤 ──
         this.browserStartTime = null;
+        this._activeInteractionCount = 0;
+        this._pendingForcedRestart = false;
+
+        this.sendMessageUseCase = new SendMessageUseCase({
+            createInteractor: (page, doctor) => new PageInteractor(page, doctor),
+            isRecoverablePageClosedError: (error) => this._isRecoverablePageClosedError(error),
+            onSelectorHealed: async (type, newSelector) => {
+                this.selectors[type] = newSelector;
+                this.doctor.saveSelectors(this.selectors);
+            },
+            onRecoverableFailure: async (error) => {
+                console.warn(`⚠️ [Brain] 偵測到頁面/上下文已關閉，執行自癒重試: ${error.message}`);
+                await this._ensureBrowserHealth(true, { allowDuringInteraction: true });
+                try { await this.page.bringToFront(); } catch {}
+            },
+        });
+    }
+
+    _isRecoverablePageClosedError(error) {
+        const message = String((error && error.message) || error || '');
+        return /Target page, context or browser has been closed|Execution context was destroyed|browser has been closed|Page closed/i.test(message);
     }
 
     // ─── Public API (向後相容) ─────────────────────────────
@@ -177,11 +198,17 @@ class GolemBrain {
         // 4. Dashboard 整合 (可選)
         this._linkDashboard();
 
-        // 5. 新會話: 注入系統 Prompt
-        if (forceReload || isNewSession) {
-            await this._injectSystemPrompt(forceReload);
-        }
         this.isInitialized = true;
+
+        // 5. 新會話: 注入系統 Prompt
+        // 先標記 initialized，避免 _injectSystemPrompt 內部 sendMessage 觸發巢狀 init。
+        if (forceReload || isNewSession) {
+            try {
+                await this._injectSystemPrompt(forceReload);
+            } catch (e) {
+                console.warn(`⚠️ [Brain] 系統提示注入失敗，保留運作並稍後再試: ${e.message}`);
+            }
+        }
     }
 
     /**
@@ -343,27 +370,28 @@ class GolemBrain {
 
         console.log(`📡 [Brain] 發送訊號: ${reqId} (含每回合強制洗腦引擎)${attachment ? ' 📎 含有附件' : ''}`);
 
-        const interactor = new PageInteractor(this.page, this.doctor);
-
         let result;
+        this._activeInteractionCount++;
         try {
-            result = await interactor.interact(
-                payload, this.selectors, isSystem, startTag, endTag, 0, attachment
-            );
-        } catch (e) {
-            if (e.message && e.message.includes('TIMEOUT')) {
-                if (this.errorLedger) this.errorLedger.log('TIMEOUT', e.message);
-            }
-            // 處理 selector 修復觸發的重試
-            if (e.message && e.message.startsWith('SELECTOR_HEALED:')) {
-                const [, type, newSelector] = e.message.split(':');
-                this.selectors[type] = newSelector;
-                this.doctor.saveSelectors(this.selectors);
-                result = await interactor.interact(
-                    payload, this.selectors, isSystem, startTag, endTag, 1, attachment
-                );
-            } else {
-                throw e;
+            result = await this.sendMessageUseCase.execute({
+                page: this.page,
+                doctor: this.doctor,
+                selectors: this.selectors,
+                payload,
+                isSystem,
+                startTag,
+                endTag,
+                attachment,
+            });
+        } finally {
+            this._activeInteractionCount = Math.max(0, this._activeInteractionCount - 1);
+            if (this._activeInteractionCount === 0 && this._pendingForcedRestart) {
+                this._pendingForcedRestart = false;
+                setTimeout(() => {
+                    this._ensureBrowserHealth(true).catch((err) => {
+                        console.warn(`⚠️ [Brain] 延後自癒重啟失敗: ${err.message}`);
+                    });
+                }, 0);
             }
         }
 
@@ -371,7 +399,6 @@ class GolemBrain {
         if (result.attachments && result.attachments.length > 0) {
             const { downloadFile } = require('../utils/HttpUtils');
             const path = require('path');
-            const { v4: uuidv4 } = require('uuid');
 
             const localAttachments = [];
             for (const att of result.attachments) {
@@ -384,7 +411,7 @@ class GolemBrain {
                     else if (att.mimeType === 'image/png') ext = 'png';
                     else if (att.mimeType === 'application/pdf') ext = 'pdf';
 
-                    const fileName = `gemini_res_${Date.now()}_${uuidv4().substring(0, 8)}.${ext}`;
+                    const fileName = `gemini_res_${Date.now()}_${randomUUID().substring(0, 8)}.${ext}`;
                     const projectRoot = path.resolve(__dirname, '../../');
                     const localPath = path.join(projectRoot, 'data', 'temp_uploads', fileName);
 
@@ -438,21 +465,7 @@ class GolemBrain {
     async recall(queryText) {
         if (!queryText) return [];
         await this._ensureBrowserHealth();
-        try {
-            const semanticResults = await this.memoryDriver.recall(queryText) || [];
-            let keywordResults = [];
-            if (typeof this.memoryDriver.keywordSearch === 'function') {
-                keywordResults = await this.memoryDriver.keywordSearch(queryText) || [];
-            }
-            
-            const map = new Map();
-            [...semanticResults, ...keywordResults].forEach(item => {
-                if (!map.has(item.text)) {
-                    map.set(item.text, item);
-                }
-            });
-            return Array.from(map.values()).slice(0, 5);
-        } catch (e) { return []; }
+        try { return await this.memoryDriver.recall(queryText); } catch (e) { return []; }
     }
 
     /**
@@ -500,6 +513,7 @@ class GolemBrain {
 
     /** 連結 Dashboard (若以 dashboard 模式啟動) */
     _linkDashboard(autonomy = null) {
+        if (process.env.GOLEM_RUNTIME_ROLE === 'worker') return;
         if (!process.argv.includes('dashboard')) return;
         try {
             const dashboard = require('../../dashboard');
@@ -588,13 +602,7 @@ class GolemBrain {
         await this.sendMessage(compressedPrompt, false); // ⚡ 改為 false：等待完整回應
         console.log(`📡 [Brain] 階段一：底層協議注入完成 (${this.backend.toUpperCase()})。`);
 
-        // 🧠 [第二階段] 非同步漸進式多層記憶注入 (不阻塞啟動)
-        this._injectHistoricalMemoryAsync().catch(e => 
-            console.warn(`⚠️ [Brain] 背景記憶注入失敗 (不影響主功能): ${e.message}`)
-        );
-    }
-
-    async _injectHistoricalMemoryAsync() {
+        // 🧠 [第二階段] 金字塔式多層記憶注入
         if (this.chatLogManager) {
             try {
                 let historicalMemory = "";
@@ -720,8 +728,16 @@ class GolemBrain {
     /**
      * 🛡️ 瀏覽器健康檢查與自癒機制
      */
-    async _ensureBrowserHealth(forceRestart = false) {
+    async _ensureBrowserHealth(forceRestart = false, options = {}) {
         if (this.backend === 'ollama') return;
+
+        const allowDuringInteraction = options && options.allowDuringInteraction === true;
+        if (forceRestart && this._activeInteractionCount > 0 && !allowDuringInteraction) {
+            this._pendingForcedRestart = true;
+            console.warn(`⏸️ [Brain] forceRestart 延後：目前仍有 ${this._activeInteractionCount} 個互動執行中。`);
+            return false;
+        }
+
         let isHealthy = !forceRestart;
         if (!forceRestart) {
             try {
@@ -751,7 +767,6 @@ class GolemBrain {
         } // Close if (!forceRestart)
 
         if (!isHealthy) {
-            if (this.errorLedger) this.errorLedger.log('BROWSER_CRASH', '偵測到失效狀態或強制重啟');
             console.warn(`🩹 [Brain] 偵測到失效狀態或強制重啟 (forceRestart=${forceRestart})，正在執行物理清理並重新初始化...`);
             // 清理舊實體 (確保清理乾淨，防止殘留 Lock)
             try {
@@ -774,7 +789,10 @@ class GolemBrain {
             // 重新初始化 (forceReload = true)
             await this.init(true);
             console.log("✅ [Brain] 自癒初始化完成。");
+            return true;
         }
+
+        return isHealthy;
     }
 }
 

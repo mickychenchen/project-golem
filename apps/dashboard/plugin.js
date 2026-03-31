@@ -11,6 +11,7 @@ const os = require('os');
 const TerminalView = require('../../src/views/TerminalView');
 const DashboardManager = require('../../src/managers/DashboardManager');
 const ConsoleInterceptor = require('../../src/utils/ConsoleInterceptor');
+const RealtimeTelemetryUseCase = require('../../src/application/use-cases/RealtimeTelemetryUseCase');
 
 let WebServer = null;
 try {
@@ -23,6 +24,10 @@ class DashboardPlugin {
     constructor() {
         // 1. 保存原始的 Console 方法並初始化 UI 元件與管理器
         this.manager = new DashboardManager();
+        this.heartbeatIntervalMs = this._parsePositiveInteger(process.env.GOLEM_HEARTBEAT_INTERVAL_MS, 2000);
+        this.telemetryUseCase = new RealtimeTelemetryUseCase({
+            forceEmitIntervalMs: Math.max(10000, this.heartbeatIntervalMs * 5),
+        });
         // 初始化螢幕 (如果沒有禁用 TUI 則開啟)
         // Web Dashboard 強制啟用，停用 Terminal TUI 模式
         this.useTUI = process.env.DISABLE_TUI !== 'true' && process.env.FORCE_TUI === 'true';
@@ -58,6 +63,12 @@ class DashboardPlugin {
         }
     }
 
+    _parsePositiveInteger(value, fallback) {
+        const parsed = Number(value);
+        if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+        return Math.floor(parsed);
+    }
+
     _handleLog(args) {
         if (this.manager.state.isDetached) return;
 
@@ -79,10 +90,16 @@ class DashboardPlugin {
         // Web 廣播
         if (this.webServer) {
             this.webServer.broadcastLog({ time, msg: cleanMsg, type, raw, attachment });
-            this.webServer.broadcastState({
+            const statePayload = {
                 queueCount: this.manager.state.queueCount,
-                lastSchedule: this.manager.state.lastSchedule
-            });
+                lastSchedule: this.manager.state.lastSchedule,
+                runtime: this.webServer.runtimeController
+                    ? this.webServer.runtimeController.getRuntimeSnapshot()
+                    : null,
+            };
+            if (this.telemetryUseCase.shouldEmitState(statePayload)) {
+                this.webServer.broadcastState(statePayload);
+            }
         }
     }
 
@@ -111,6 +128,9 @@ class DashboardPlugin {
 
         this.timer = setInterval(() => {
             if (this.manager.state.isDetached) return clearInterval(this.timer);
+            const runtimeSnapshot = this.webServer && this.webServer.runtimeController
+                ? this.webServer.runtimeController.getRuntimeSnapshot()
+                : null;
 
             // CPU Usage Calculation
             const currentCpuUsage = this._getCPUInfo();
@@ -119,11 +139,15 @@ class DashboardPlugin {
             const cpuUsagePerc = totalDiff > 0 ? (1 - idleDiff / totalDiff) * 100 : 0;
             lastCpuUsage = currentCpuUsage;
 
-            const memUsage = process.memoryUsage().heapUsed / 1024 / 1024;
+            const memUsage = runtimeSnapshot && runtimeSnapshot.memory
+                ? runtimeSnapshot.memory.heapUsedMb
+                : process.memoryUsage().heapUsed / 1024 / 1024;
             const metricsData = this.manager.updateMetrics(memUsage);
 
-            const mode = process.env.GOLEM_MEMORY_MODE || 'Browser';
-            const uptime = Math.floor(process.uptime());
+            const mode = runtimeSnapshot ? 'supervisor-worker' : (process.env.GOLEM_MEMORY_MODE || 'Browser');
+            const uptime = runtimeSnapshot && runtimeSnapshot.worker
+                ? runtimeSnapshot.worker.uptimeSec
+                : Math.floor(process.uptime());
             const hours = Math.floor(uptime / 3600);
             const minutes = Math.floor((uptime % 3600) / 60);
             const uptimeStr = `${hours}h ${minutes}m`;
@@ -134,13 +158,19 @@ class DashboardPlugin {
             }
 
             if (this.webServer) {
-                this.webServer.broadcastHeartbeat({
+                const heartbeatPayload = {
                     memUsage,
                     uptime: uptimeStr,
-                    cpu: parseFloat(cpuUsagePerc.toFixed(1))
-                });
+                    cpu: parseFloat(cpuUsagePerc.toFixed(1)),
+                    runtime: runtimeSnapshot,
+                    queueCount: this.manager.state.queueCount,
+                    lastSchedule: this.manager.state.lastSchedule,
+                };
+                if (this.telemetryUseCase.shouldEmitHeartbeat(heartbeatPayload)) {
+                    this.webServer.broadcastHeartbeat(this.telemetryUseCase.buildHeartbeat(heartbeatPayload));
+                }
             }
-        }, 1000);
+        }, this.heartbeatIntervalMs);
     }
 
     _getCPUInfo() {

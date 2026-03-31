@@ -1,4 +1,4 @@
-const { v4: uuidv4 } = require('uuid');
+const { randomUUID } = require('crypto');
 const Executor = require('./Executor');
 const { SecurityManager } = require('../../packages/security');
 const ToolScanner = require('../managers/ToolScanner');
@@ -14,6 +14,7 @@ class TaskController {
         this.security = new SecurityManager();
         this.multiAgent = null; // ✨ [v9.1]
         this.pendingTasks = new Map(); // Moved from global to here
+        this.memoryPressureGuard = null;
 
         // ✨ [v9.1] 防止記憶體流失: 定期清理過期的待審批任務 (5 分鐘)
         this._cleanupTimer = setInterval(() => {
@@ -31,6 +32,22 @@ class TaskController {
             clearInterval(this._cleanupTimer);
             this._cleanupTimer = null;
         }
+    }
+
+    setMemoryPressureGuard(guard) {
+        this.memoryPressureGuard = guard || null;
+    }
+
+    trimPendingTasks(maxAgeMs = 5 * 60 * 1000) {
+        const now = Date.now();
+        let removed = 0;
+        for (const [id, task] of this.pendingTasks.entries()) {
+            if (!task || !task.timestamp || (now - task.timestamp) > maxAgeMs) {
+                this.pendingTasks.delete(id);
+                removed++;
+            }
+        }
+        return removed;
     }
 
     // ✨ [v9.1] 處理多 Agent 請求
@@ -106,7 +123,7 @@ class TaskController {
             }
             if (risk.level === 'WARNING' || risk.level === 'DANGER') {
                 console.log(`⚠️ [TaskController] 指令需審批 (${risk.level}): ${cmdToRun} - ${risk.reason}`);
-                const approvalId = uuidv4();
+                const approvalId = randomUUID();
                 this.pendingTasks.set(approvalId, {
                     steps, nextIndex: i, ctx, timestamp: Date.now()
                 });

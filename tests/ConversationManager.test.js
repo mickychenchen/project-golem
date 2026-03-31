@@ -17,6 +17,7 @@ describe('ConversationManager', () => {
                 attachments: [],
                 status: 'ENVELOPE_COMPLETE'
             }),
+            _ensureBrowserHealth: jest.fn().mockResolvedValue(true),
             _appendChatLog: jest.fn()
         };
 
@@ -93,5 +94,44 @@ describe('ConversationManager', () => {
             expect.any(Object)
         );
         expect(mockShunter.dispatch).toHaveBeenCalled();
+    });
+
+    test('should retry recoverable browser-closed errors up to three attempts', async () => {
+        jest.useRealTimers();
+        cm = new ConversationManager(mockBrain, mockShunter, mockController);
+
+        mockBrain.sendMessage
+            .mockRejectedValueOnce(new Error('page.evaluate: Target page, context or browser has been closed'))
+            .mockRejectedValueOnce(new Error('page.evaluate: Target page, context or browser has been closed'))
+            .mockResolvedValueOnce({
+                text: '[GOLEM_REPLY] recovered',
+                attachments: [],
+                status: 'ENVELOPE_COMPLETE',
+            });
+
+        cm.queue.push({ ctx: mockCtx, text: 'hello', attachment: null, options: {} });
+        await cm._processQueue();
+
+        expect(mockBrain.sendMessage).toHaveBeenCalledTimes(3);
+        expect(mockBrain._ensureBrowserHealth).toHaveBeenCalledTimes(2);
+        expect(mockBrain._ensureBrowserHealth).toHaveBeenCalledWith(true, { allowDuringInteraction: true });
+        expect(mockShunter.dispatch).toHaveBeenCalledTimes(1);
+    });
+
+    test('should complete three consecutive direct-chat turns', async () => {
+        jest.useRealTimers();
+        cm = new ConversationManager(mockBrain, mockShunter, mockController);
+
+        cm.queue.push({ ctx: mockCtx, text: 'turn-1', attachment: null, options: {} });
+        cm.queue.push({ ctx: mockCtx, text: 'turn-2', attachment: null, options: {} });
+        cm.queue.push({ ctx: mockCtx, text: 'turn-3', attachment: null, options: {} });
+
+        await cm._processQueue();
+        await cm._processQueue();
+        await cm._processQueue();
+
+        expect(mockBrain.sendMessage).toHaveBeenCalledTimes(3);
+        expect(mockShunter.dispatch).toHaveBeenCalledTimes(3);
+        expect(cm.queue.length).toBe(0);
     });
 });

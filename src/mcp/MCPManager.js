@@ -236,6 +236,12 @@ class MCPManager extends EventEmitter {
         }
     }
 
+    async stopAll() {
+        for (const name of Array.from(this._clients.keys())) {
+            await this._stopClient(name);
+        }
+    }
+
     _appendLog(entry) {
         this._logs.push(entry);
         if (this._logs.length > MAX_LOG) this._logs.shift();

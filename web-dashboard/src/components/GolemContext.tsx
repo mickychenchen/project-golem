@@ -1,9 +1,9 @@
 "use client";
 
 import React, { createContext, useContext, useEffect, useState } from "react";
-import { socket } from "@/lib/socket";
 import { apiUrl } from "@/lib/api";
 import { apiGet, apiPost } from "@/lib/api-client";
+import { useRealtimeTelemetry } from "@/components/RealtimeTelemetryProvider";
 
 interface GolemInfo {
     id: string;
@@ -55,6 +55,7 @@ const GolemContext = createContext<GolemContextType>({
 export const useGolem = () => useContext(GolemContext);
 
 export function GolemProvider({ children }: { children: React.ReactNode }) {
+    const telemetry = useRealtimeTelemetry();
     const [golems, setGolems] = useState<GolemInfo[]>([]);
     const [activeGolem, setActiveGolem] = useState<string>("");
     const [isLoadingGolems, setIsLoadingGolems] = useState(true);
@@ -206,34 +207,27 @@ export function GolemProvider({ children }: { children: React.ReactNode }) {
     }, [isBooting]);
 
     useEffect(() => {
-        const handleInit = (payload: unknown) => {
-            if (isRecord(payload) && Array.isArray(payload.golems)) {
-                const formattedGolems = typeof payload.golems[0] === 'string'
-                    ? payload.golems.map((id) => ({ id: String(id), status: 'running' }))
-                    : payload.golems as GolemInfo[];
+        if (telemetry.initEvent.id === 0) return;
+        const payload = telemetry.initEvent.payload;
+        if (isRecord(payload) && Array.isArray(payload.golems)) {
+            const formattedGolems = typeof payload.golems[0] === 'string'
+                ? payload.golems.map((id) => ({ id: String(id), status: 'running' }))
+                : payload.golems as GolemInfo[];
 
-                setGolems(formattedGolems);
-                setActiveGolem(prev => {
-                    if (!prev && formattedGolems.length > 0) return formattedGolems[0].id;
-                    return prev;
-                });
-                setIsLoadingGolems(false);
-            }
-        };
+            setGolems(formattedGolems);
+            setActiveGolem(prev => {
+                if (!prev && formattedGolems.length > 0) return formattedGolems[0].id;
+                return prev;
+            });
+            setIsLoadingGolems(false);
+        }
+    }, [telemetry.initEvent]);
 
-        const handleConnect = () => {
-            fetchGolems();
-            fetchSystemStatus();
-        };
-
-        socket.on("init", handleInit);
-        socket.on("connect", handleConnect);
-
-        return () => {
-            socket.off("init", handleInit);
-            socket.off("connect", handleConnect);
-        };
-    }, []);
+    useEffect(() => {
+        if (!telemetry.isConnected) return;
+        fetchGolems();
+        fetchSystemStatus();
+    }, [telemetry.isConnected]);
 
     const handleSetGolem = (id: string) => {
         setActiveGolem(id);

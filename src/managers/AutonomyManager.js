@@ -16,6 +16,10 @@ class AutonomyManager {
         this.dcClient = null;
         this.convoManager = null;
         this.pendingPatch = null;
+        this._started = false;
+        this.archiveTimer = null;
+        this.awakeTimer = null;
+        this._timeWatcherInterval = null;
     }
 
     setIntegrations(tgBot, dcClient, convoManager) {
@@ -25,18 +29,35 @@ class AutonomyManager {
     }
 
     start() {
+        if (this._started) return;
         const hasTelegram = !!ConfigManager.CONFIG.TG_TOKEN;
         const hasDiscord = !!ConfigManager.CONFIG.DC_TOKEN;
         if (!hasTelegram && !hasDiscord) {
             console.warn(`⚠️ [Autonomy][${this.golemId}] No TG_TOKEN or DC_TOKEN configured — autonomy services not started.`);
             return;
         }
+        this._started = true;
         console.log(`🚀 [Autonomy][${this.golemId}] Starting autonomy services...`);
         this.resumeOrScheduleAwakening();
-        setInterval(() => this.timeWatcher(), 60000);
+        this._timeWatcherInterval = setInterval(() => this.timeWatcher(), 60000);
         // ✨ [v9.1.5] 定時自動檢查一次日誌狀態 (改為動態排程，支援熱重載)
-        this.archiveTimer = null;
         this.scheduleNextArchive();
+    }
+
+    destroy() {
+        this._started = false;
+        if (this.archiveTimer) {
+            clearTimeout(this.archiveTimer);
+            this.archiveTimer = null;
+        }
+        if (this.awakeTimer) {
+            clearTimeout(this.awakeTimer);
+            this.awakeTimer = null;
+        }
+        if (this._timeWatcherInterval) {
+            clearInterval(this._timeWatcherInterval);
+            this._timeWatcherInterval = null;
+        }
     }
 
     /**
