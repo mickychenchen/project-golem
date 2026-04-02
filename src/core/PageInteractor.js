@@ -457,6 +457,7 @@ class PageInteractor {
      * 🚀 自動將 Chrome 視窗移動到螢幕最底部 (不影響使用者日常操作) - Playwright 版
      */
     async _moveWindowToBottom() {
+        return;
         // ✨ [Headless 優化] 若為無頭模式，不需要移動視窗
         if (process.env.PLAYWRIGHT_HEADLESS === 'true') return;
 
