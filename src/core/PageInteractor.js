@@ -409,7 +409,14 @@ class PageInteractor {
 
         // 防止 Enter 太快，給予輸入框更新時間
         await this._sleep(Math.min(this.actionTimeoutMs, 500));
+        // Gemini 多行輸入框現在需要 Ctrl+Enter (或 Meta+Enter) 來發送
+        await this.page.keyboard.down('Control');
         await this.page.keyboard.press('Enter');
+        await this.page.keyboard.up('Control');
+        await this._sleep(50);
+        await this.page.keyboard.down('Meta');
+        await this.page.keyboard.press('Enter');
+        await this.page.keyboard.up('Meta');
 
         const fallbackSendSelector = await this._resolveSelectorWithFallback(
             'send',
@@ -644,7 +651,7 @@ class PageInteractor {
                 }
 
                 // 檢查是否正在進行流式輸出 (可能會有一個正在閃爍的游標或類別)
-                const streamingElements = document.querySelectorAll('.generating, .is-generating, [aria-busy="true"], .loading, .spinner');
+                const streamingElements = document.querySelectorAll('.generating, .is-generating, [aria-busy="true"]');
                 for (const el of streamingElements) {
                     const style = window.getComputedStyle(el);
                     if (style.display !== 'none' && style.visibility !== 'hidden' && el.offsetHeight > 0) return true;
