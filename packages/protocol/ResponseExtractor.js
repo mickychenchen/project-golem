@@ -82,7 +82,10 @@ class ResponseExtractor {
                         const bubbles = document.querySelectorAll(sel);
                         if (bubbles.length === 0) return null;
                         const currentLastBubble = bubbles[bubbles.length - 1];
-                        return currentLastBubble.closest('model-response') ||
+                        return currentLastBubble.closest('response-container') ||
+                            currentLastBubble.closest('pending-request') ||
+                            currentLastBubble.closest('.conversation-container') ||
+                            currentLastBubble.closest('model-response') ||
                             currentLastBubble.closest('.markdown') ||
                             currentLastBubble.closest('.model-response-text') ||
                             currentLastBubble.parentElement ||

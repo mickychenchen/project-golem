@@ -14,12 +14,14 @@ const INPUT_FALLBACK_SELECTORS = Object.freeze([
     'textarea',
 ]);
 const SEND_FALLBACK_SELECTORS = Object.freeze([
-    'button[aria-label*="發送"]',
-    'button[aria-label*="Send"]',
-    'button[aria-label*="傳送"]',
-    'button[type="submit"]',
+    'button[aria-label*=\"傳送訊息\"]',
+    'button[aria-label*=\"發送\"]',
+    'button[aria-label*=\"Send\"]',
+    'button[aria-label*=\"傳送\"]',
+    'button[type=\"submit\"]',
 ]);
 const RESPONSE_FALLBACK_SELECTORS = Object.freeze([
+    '.response-container-content',
     '.model-response-text',
     '.message-content',
     '.markdown',
@@ -87,11 +89,20 @@ class PageInteractor {
             await this._runObservedStep('ready-check', () => this._waitForReady(selectors.send), { retries: 1 });
 
             // 1. 捕獲基準文字
-            const responseSelector = await this._runObservedStep(
+            // ✨ [2026 Q1 修正] Gemini 新版 UI 的回應容器在發送訊息「之後」才會動態出現，
+            // 因此在全新對話頁面，resolve-response-selector 會找不到任何元素。
+            // 改為 allowNull: true，若找不到則使用主要 selector 作為預設值，
+            // 等待 ResponseExtractor 在回應期間自然偵測。
+            let responseSelector = await this._runObservedStep(
                 'resolve-response-selector',
-                () => this._resolveSelectorWithFallback('response', selectors.response, RESPONSE_FALLBACK_SELECTORS),
+                () => this._resolveSelectorWithFallback('response', selectors.response, RESPONSE_FALLBACK_SELECTORS, { allowNull: true }),
                 { retries: 1 }
             );
+            if (!responseSelector) {
+                // 使用主要 selector 作為預設值 (它會在 Gemini 回應時動態出現)
+                responseSelector = selectors.response || RESPONSE_FALLBACK_SELECTORS[0];
+                console.log(`🔄 [PageInteractor] 回應容器尚未出現 (新對話)，使用預設 selector: ${responseSelector}`);
+            }
             const baseline = await this._runObservedStep('baseline-capture', () => this._captureBaseline(responseSelector), { retries: 1 });
 
             // 1.5 處理附件貼入 (如果有的話) - 模擬人類 Ctrl+V / Cmd+V
@@ -234,9 +245,12 @@ class PageInteractor {
         pushCandidate(primarySelector);
         fallbackSelectors.forEach(pushCandidate);
 
+        // ✨ [2026 Q1] allowNull=true 時使用較短的逐候選等待時間，
+        // 避免因逐個嘗試 5000ms 而超出外層 step 的 15s 總超時。
+        const defaultTimeout = options.allowNull ? 1500 : Math.min(this.actionTimeoutMs, 5000);
         const waitTimeout = Number.isFinite(options.waitTimeout)
             ? Math.max(250, options.waitTimeout)
-            : Math.min(this.actionTimeoutMs, 5000);
+            : defaultTimeout;
 
         for (let i = 0; i < candidates.length; i += 1) {
             const candidate = candidates[i];
@@ -273,7 +287,10 @@ class PageInteractor {
             const bubbles = document.querySelectorAll(s);
             if (bubbles.length === 0) return "";
             let target = bubbles[bubbles.length - 1];
-            let container = target.closest('model-response') ||
+            let container = target.closest('response-container') ||
+                target.closest('pending-request') ||
+                target.closest('.conversation-container') ||
+                target.closest('model-response') ||
                 target.closest('.markdown') ||
                 target.closest('.model-response-text') ||
                 target.parentElement || target;
@@ -714,8 +731,8 @@ class PageInteractor {
         try {
             console.log("🧹 [PageInteractor] 正在物理修剪頁面 DOM 結構以釋放記憶體...");
             await this.page.evaluate(() => {
-                // 涵蓋 Gemini 與主流大模型的前端對話節點特徵
-                const chatNodes = document.querySelectorAll('message-content, model-response, user-message, .message-row, .conversation-turn');
+                // 涵蓋 Gemini 2026 Q1 新版 + 舊版 + 主流大模型的前端對話節點特徵
+                const chatNodes = document.querySelectorAll('pending-request, response-container, .conversation-container, message-content, model-response, user-message, .message-row, .conversation-turn');
 
                 if (chatNodes.length <= 6) return; // 至少保留最後 6 個節點 (剛好是一兩組合法對話視窗)
 

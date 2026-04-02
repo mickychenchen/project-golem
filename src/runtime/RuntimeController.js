@@ -206,6 +206,7 @@ class RuntimeController {
                 GOLEM_RUNTIME_ROLE: 'worker',
                 GOLEM_SUPERVISOR_PID: String(process.pid),
             },
+            execArgv: ['--expose-gc', '--max-old-space-size=256'],
             stdio: ['inherit', 'pipe', 'pipe', 'ipc'],
         });
 

@@ -1,0 +1,3 @@
+{
+  "command": "sudo bash -c \"fuser -k 3006/tcp 2>/dev/null; nohup python3 -m http.server 3006 --directory /home/$(whoami)/micky_project > /home/$(whoami)/micky_project/server.log 2>&1 & sleep 2; cat << 'EOF' > /etc/traefik/dynamic/micky_beta.toml\n[http.routers.micky-beta-router]\n  rule = \\\"Host(\\`micky.eu.org\\`) && PathPrefix(\\`/beta\\`)\\\"\n  service = \\\"micky-beta-service\\\"\n  middlewares = [\\\"micky-stripprefix\\\"]\n\n[http.middlewares.micky-stripprefix.stripPrefix]\n  prefixes = [\\\"/beta\\\"]\n\n[http.services.micky-beta-service.loadBalancer]\n  [[http.services.micky-beta-service.loadBalancer.servers]]\n    url = \\\"http://127.0.0.1:3006\\\"\nEOF\n\" && echo \"[RECOVERY_SUCCESS] Server revived on 3006 with StripPrefix middleware.\""
+}

@@ -1,6 +1,7 @@
 'use strict';
 
 const os = require('os');
+const v8 = require('v8');
 
 const MB = 1024 * 1024;
 
@@ -154,7 +155,9 @@ class MemoryPressureGuard {
         const rssMb = Number((usage.rss / 1024 / 1024).toFixed(1));
         const heapUsedMb = Number((usage.heapUsed / 1024 / 1024).toFixed(1));
         const heapTotalMb = Number((usage.heapTotal / 1024 / 1024).toFixed(1));
-        const heapRatio = usage.heapTotal > 0 ? usage.heapUsed / usage.heapTotal : 0;
+        const v8Stats = v8.getHeapStatistics();
+        const absoluteHeapLimitMb = v8Stats.heap_size_limit / 1024 / 1024;
+        const heapRatio = absoluteHeapLimitMb > 0 ? usage.heapUsed / v8Stats.heap_size_limit : 0;
         const rssRatio = this.memoryLimitMb > 0 ? rssMb / this.memoryLimitMb : 0;
         const uptimeMs = Math.max(0, now - this._startedAt);
         const inGraceWindow = uptimeMs < this.fatalStartupGraceMs;
