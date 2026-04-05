@@ -687,6 +687,17 @@ if (WORKER_MODE) {
             },
             'context.call': async ({ target, method, args = [] }) => {
                 const result = await callContextMethod(target, method, args);
+                
+                if (target === 'brain' && method === 'init') {
+                    const instance = singleGolemInstance || getOrCreateGolem();
+                    if (instance && instance.brain) {
+                        const personaPath = path_sync.resolve(ConfigManager.MEMORY_BASE_DIR, 'persona.json');
+                        if (fs_sync.existsSync(personaPath)) {
+                            instance.brain.status = 'running';
+                        }
+                    }
+                }
+                
                 reportRuntimeState();
                 return result;
             },
