@@ -64,6 +64,7 @@ const { Client, GatewayIntentBits, Partials } = require('discord.js');
 const GolemBrain = require('../../src/core/GolemBrain');
 const TaskController = require('../../src/core/TaskController');
 const AutonomyManager = require('../../src/managers/AutonomyManager');
+const ResearchManager = require('../../src/managers/ResearchManager');
 const ConversationManager = require('../../src/core/ConversationManager');
 const { NeuroShunter } = require('../../packages/protocol');
 const { SecurityManager, CommandSafeguard } = require('../../packages/security');
@@ -244,12 +245,18 @@ function getOrCreateGolem() {
     });
 
     const actionQueue = new ActionQueue({ golemId });
+    const researchManager = new ResearchManager(brain, controller, {
+        golemId,
+        repoRoot: process.cwd(),
+        logBaseDir: ConfigManager.LOG_BASE_DIR
+    });
 
     autonomy.setIntegrations(activeTgBot, activeDcBot || dcClient, convoManager);
     brain.tgBot = activeTgBot;
     brain.dcBot = activeDcBot || dcClient;
+    brain.researchManager = researchManager;
 
-    singleGolemInstance = { brain, controller, autonomy, convoManager, actionQueue };
+    singleGolemInstance = { brain, controller, autonomy, convoManager, actionQueue, researchManager };
     return singleGolemInstance;
 }
 
@@ -1068,6 +1075,16 @@ async function performCleanup() {
 
     // 2. 關閉 Puppeteer 瀏覽器實體
     const instance = singleGolemInstance;
+    if (instance && instance.researchManager && typeof instance.researchManager.destroy === 'function') {
+        try {
+            console.log(`🛑 [System] 正在停止 Research Engine...`);
+            await instance.researchManager.destroy();
+            console.log(`✅ [System] Research Engine 已停止。`);
+        } catch (e) {
+            console.warn(`⚠️ [System] 停止 Research Engine 失敗: ${e.message}`);
+        }
+    }
+
     if (instance && instance.brain && instance.brain.browser) {
         try {
             console.log(`🛑 [System] 正在關閉瀏覽器...`);

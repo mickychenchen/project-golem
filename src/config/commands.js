@@ -46,6 +46,15 @@ module.exports = [
             { name: '建立一個資料清理技能', description: '範例：學習清洗與格式化輸入資料' }
         ]
     },
+    {
+        command: '/research',
+        description: '啟動/查詢/停止 autoresearch 迴圈（start|status|stop）。',
+        options: [
+            { name: 'status', description: '查詢目前研究任務狀態與最佳分數' },
+            { name: 'stop', description: '在當前回合結束後優雅停止研究任務' },
+            { name: 'start <json|args>', description: '可用 JSON、自然語句或僅主題啟動研究迴圈（系統自動補齊預設）' }
+        ]
+    },
     { command: '/patch', description: '執行自我反思與代碼優化。' },
     { command: '/dashboard', description: '顯示控制台連線網址：包含本地 (Local) 與遠端 (Remote) 存取網址。' },
     { 

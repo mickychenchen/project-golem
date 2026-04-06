@@ -14,6 +14,26 @@
 | `/new` | **物理重生** | 當對話卡死，或是網頁跳出阻擋視窗時使用。強制重新整理底層瀏覽器，回到 Gemini 根目錄，開啟一個**全新的對話視窗**。 |
 | `/new_memory`| **徹底轉生** | 當想要 Golem 完全忘記過去的所有專案細節時使用。**物理清空底層資料庫 (DB)** 並重置對話，讓 Golem 變成一張白紙。 |
 | `/model` | **模型切換** | 操控底層的網頁 UI，實體切換 Gemini 的大腦模型（例如切換 Fast / Thinking / Pro 模式）。 |
+| `/research start <json｜自然語句>` | **自動研究啟動** | 啟動 autoresearch 迴圈（單一任務），執行「修改 → 評估 → 保留/回退」循環。可只輸入主題，系統會自動推測候選檔案與預設評估策略。 |
+| `/research status` | **研究狀態查詢** | 查詢目前研究任務的狀態、回合進度、最佳分數與最佳 commit。 |
+| `/research stop` | **優雅停止研究** | 送出停止請求，系統會在當前回合完成後安全停止，不會中斷到一半。 |
+
+> **🧪 /research JSON 範例：**
+> `{"objective":"降低測試失敗數","editableFiles":["src/core/TaskController.js"],"evalCommand":"npm test -- tests/TaskController.test.js","scoreRegex":"Failed: (\\d+)","scoreMode":"min","rounds":12,"timeoutMs":600000}`
+
+> **🧪 /research 通用（非 JSON）範例：**
+> `/research start 優化 TaskController 穩定性 --eval "npm test -- tests/TaskController.test.js" --score "Failed: (\\d+)" --mode min --rounds 12`
+
+> **🧪 /research 極簡範例（只給主題）：**
+> `/research start 優化對話隊列`
+
+> **🧪 /research 中文自然語句範例：**
+> `開始研究 優化對話隊列穩定性 --評估 "npm test -- tests/ConversationManager.test.js" --指標 "Failed: (\\d+)" --方向 min --回合 10`
+
+> **📱 Telegram 使用建議：**
+> - 若參數含空白，請用雙引號包住（例如 `--eval "npm test -- tests/TaskController.test.js"`）。
+> - 可直接輸入 `/research start ...` 或 `research start ...`，兩者皆可。
+> - 若只輸入主題，系統會自動補齊檔案範圍與評估規則；你也可再用 `--eval`、`--score`、`--files` 覆蓋。
 
 ---
 

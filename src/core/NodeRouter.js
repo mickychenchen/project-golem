@@ -9,6 +9,164 @@ const SkillArchitect = require('../managers/SkillArchitect');
 const architect = new SkillArchitect();
 console.log("🏗️ [SkillArchitect] 技能架構師已就緒 (Web Mode)");
 
+const RESEARCH_KEY_ALIASES = {
+    objective: 'objective',
+    topic: 'objective',
+    '主題': 'objective',
+    '目標': 'objective',
+    eval: 'evalCommand',
+    evalcommand: 'evalCommand',
+    command: 'evalCommand',
+    '評估': 'evalCommand',
+    '評估指令': 'evalCommand',
+    score: 'scoreRegex',
+    scoreregex: 'scoreRegex',
+    regex: 'scoreRegex',
+    '指標': 'scoreRegex',
+    '分數正則': 'scoreRegex',
+    mode: 'scoreMode',
+    scoremode: 'scoreMode',
+    '方向': 'scoreMode',
+    rounds: 'rounds',
+    '回合': 'rounds',
+    timeout: 'timeoutMs',
+    timeoutms: 'timeoutMs',
+    '逾時': 'timeoutMs',
+    tag: 'tag',
+    '標籤': 'tag',
+    files: 'editableFiles',
+    file: 'editableFiles',
+    editablefiles: 'editableFiles',
+    scope: 'editableFiles',
+    '檔案': 'editableFiles'
+};
+
+function _stripQuotes(input) {
+    const text = String(input || '').trim();
+    if ((text.startsWith('"') && text.endsWith('"')) || (text.startsWith("'") && text.endsWith("'"))) {
+        return text.slice(1, -1);
+    }
+    return text;
+}
+
+function _normalizeResearchCommand(rawText) {
+    const text = String(rawText || '').trim();
+    if (!text) return null;
+
+    if (text === '/research' || text.startsWith('/research ')) return text;
+
+    const lower = text.toLowerCase();
+    if (lower === 'research' || lower.startsWith('research ')) {
+        return `/${text}`;
+    }
+
+    if (text.startsWith('開始研究')) {
+        const rest = text.replace(/^開始研究\s*/, '').trim();
+        if (!rest) return '/research';
+        if (rest === '狀態') return '/research status';
+        if (rest === '停止') return '/research stop';
+        return `/research start ${rest}`;
+    }
+
+    return null;
+}
+
+function _tokenizeArgs(input) {
+    const tokens = [];
+    const re = /"([^"\\]|\\.)*"|'([^'\\]|\\.)*'|\S+/g;
+    let match;
+    while ((match = re.exec(input)) !== null) {
+        tokens.push(match[0]);
+    }
+    return tokens;
+}
+
+function _applyResearchKeyValue(payload, keyRaw, valueRaw) {
+    const normalizedKey = RESEARCH_KEY_ALIASES[String(keyRaw || '').trim().toLowerCase()] || null;
+    if (!normalizedKey) return false;
+    payload[normalizedKey] = _stripQuotes(valueRaw);
+    return true;
+}
+
+function _finalizeResearchPayload(payload, fallbackObjectiveText = '') {
+    const out = { ...payload };
+
+    if (typeof out.editableFiles === 'string') {
+        out.editableFiles = out.editableFiles.split(',').map((s) => s.trim()).filter(Boolean);
+    }
+    if (out.rounds !== undefined) {
+        out.rounds = Number(out.rounds);
+    }
+    if (out.timeoutMs !== undefined) {
+        out.timeoutMs = Number(out.timeoutMs);
+    }
+    if (typeof out.objective === 'string') {
+        out.objective = out.objective.trim();
+    }
+    if (!out.objective && fallbackObjectiveText) {
+        out.objective = fallbackObjectiveText.trim();
+    }
+    return out;
+}
+
+function _parseResearchStartPayload(rawPayload) {
+    const text = String(rawPayload || '').trim();
+    if (!text) {
+        return { ok: false, error: '缺少 payload。' };
+    }
+
+    if (text.startsWith('{')) {
+        try {
+            return { ok: true, payload: JSON.parse(text) };
+        } catch (error) {
+            return { ok: false, error: `無法解析 JSON: ${error.message}` };
+        }
+    }
+
+    const tokens = _tokenizeArgs(text);
+    const payload = {};
+    const objectiveParts = [];
+
+    let i = 0;
+    while (i < tokens.length) {
+        const token = tokens[i];
+
+        if (token.startsWith('--')) {
+            const key = token.slice(2);
+            const next = tokens[i + 1];
+            if (next && !next.startsWith('--')) {
+                const applied = _applyResearchKeyValue(payload, key, next);
+                if (applied) {
+                    i += 2;
+                    continue;
+                }
+            }
+            i += 1;
+            continue;
+        }
+
+        const eqIdx = token.indexOf('=');
+        if (eqIdx > 0) {
+            const key = token.slice(0, eqIdx);
+            const value = token.slice(eqIdx + 1);
+            const applied = _applyResearchKeyValue(payload, key, value);
+            if (!applied) {
+                objectiveParts.push(_stripQuotes(token));
+            }
+            i += 1;
+            continue;
+        }
+
+        objectiveParts.push(_stripQuotes(token));
+        i += 1;
+    }
+
+    return {
+        ok: true,
+        payload: _finalizeResearchPayload(payload, objectiveParts.join(' '))
+    };
+}
+
 // ============================================================
 // ⚡ NodeRouter (反射層)
 // ============================================================
@@ -49,6 +207,120 @@ class NodeRouter {
                 await brain.init(true); // forceReload
                 return await reply(`👌 沒問題，以後稱呼您為 **${newName}**。`);
             }
+        }
+
+        // ✨ [v9.2] /research 指令族
+        const researchCommandText = _normalizeResearchCommand(text);
+        if (researchCommandText) {
+            const researchManager = brain && brain.researchManager ? brain.researchManager : null;
+            if (!researchManager) {
+                return await reply('⚠️ 研究引擎尚未載入，請稍後再試。');
+            }
+
+            const trimmed = researchCommandText.trim();
+            const statusText = () => {
+                const status = researchManager.getStatus();
+                if (!status || status.state === 'idle') {
+                    return '🧪 目前沒有進行中的研究任務。';
+                }
+
+                const runId = status.id ? `\`${status.id}\`` : '(unknown)';
+                const rounds = Number.isFinite(status.completedRounds) && Number.isFinite(status.config && status.config.rounds)
+                    ? `${status.completedRounds}/${status.config.rounds}`
+                    : 'n/a';
+                const bestScore = status.bestScore !== null && status.bestScore !== undefined ? status.bestScore : 'n/a';
+                const bestCommit = status.bestCommit ? `\`${status.bestCommit}\`` : 'n/a';
+
+                return [
+                    `🧪 **Research Status**`,
+                    `• run: ${runId}`,
+                    `• state: \`${status.state}\``,
+                    `• rounds: \`${rounds}\``,
+                    `• best_score: \`${bestScore}\``,
+                    `• best_commit: ${bestCommit}`
+                ].join('\n');
+            };
+
+            if (trimmed === '/research' || trimmed === '/research status') {
+                return await reply(statusText(), { parse_mode: 'Markdown' });
+            }
+
+            if (trimmed === '/research stop') {
+                try {
+                    const result = await researchManager.stopRun();
+                    return await reply(result.message);
+                } catch (e) {
+                    return await reply(`❌ 停止研究任務失敗: ${e.message}`);
+                }
+            }
+
+            if (trimmed.startsWith('/research start')) {
+                const payloadText = trimmed.replace(/^\/research\s+start\s*/i, '').trim();
+                if (!payloadText) {
+                    return await reply(
+                        [
+                            "ℹ️ 用法：",
+                            "`/research start <json>`",
+                            "或",
+                            "`/research start <主題> --eval \"...\" --score \"...\" [--files \"a.js,b.js\"] [--mode min|max] [--rounds 12]`",
+                            "或（最簡單）",
+                            "`/research start <主題>`（系統自動推測檔案與評估規則）",
+                            "",
+                            "範例：",
+                            "`/research start 優化對話隊列`",
+                            "",
+                            "進階範例：",
+                            "`/research start 優化 TaskController 穩定性 --eval \"npm test -- tests/TaskController.test.js\" --score \"Failed: (\\\\d+)\" --mode min --rounds 12`"
+                        ].join('\n'),
+                        { parse_mode: 'Markdown' }
+                    );
+                }
+
+                const parsedPayload = _parseResearchStartPayload(payloadText);
+                if (!parsedPayload.ok) {
+                    return await reply(`❌ 無法解析 /research start payload: ${parsedPayload.error}`);
+                }
+                let payload = parsedPayload.payload;
+
+                try {
+                    if (typeof researchManager.suggestRunDefaults === 'function') {
+                        payload = await researchManager.suggestRunDefaults(payload);
+                    } else {
+                        // 舊版 fallback：至少補 editableFiles
+                        if ((!Array.isArray(payload.editableFiles) || payload.editableFiles.length === 0) &&
+                            typeof researchManager.suggestEditableFiles === 'function') {
+                            payload.editableFiles = await researchManager.suggestEditableFiles(payload.objective || '', 5);
+                        }
+                    }
+                } catch (e) {
+                    return await reply(`❌ 無法產生研究預設參數: ${e.message}`);
+                }
+
+                try {
+                    const started = await researchManager.startRun(payload);
+                    const selectedFiles = Array.isArray(started.editableFiles) && started.editableFiles.length > 0
+                        ? started.editableFiles.map((f) => `  - ${f}`).join('\n')
+                        : '(none)';
+                    return await reply(
+                        [
+                            '✅ 已啟動研究迴圈',
+                            `• run: \`${started.runId}\``,
+                            `• branch: \`${started.branch}\``,
+                            `• rounds: \`${started.rounds}\``,
+                            `• logs: \`${started.runDir}\``,
+                            '• editableFiles:',
+                            selectedFiles
+                        ].join('\n'),
+                        { parse_mode: 'Markdown' }
+                    );
+                } catch (e) {
+                    return await reply(`❌ 啟動研究任務失敗: ${e.message}`);
+                }
+            }
+
+            return await reply('ℹ️ 支援子命令：`/research start`、`/research status`、`/research stop`', {
+                parse_mode: 'Markdown'
+            });
         }
 
         // ✨ [v9.1 Feature] 學習新技能 (Web Gemini Mode)
