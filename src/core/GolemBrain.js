@@ -2,6 +2,7 @@
 // 🧠 Golem Brain (Multi-Backend) - Clean Architecture Facade
 // ============================================================
 const path = require('path');
+const ResearchManager = require('../managers/ResearchManager');
 const ConfigManager = require('../config');
 const DOMDoctor = require('../services/DOMDoctor');
 const OllamaClient = require('../services/OllamaClient');
@@ -69,6 +70,7 @@ class GolemBrain {
         
         // ── 實體生命週期追蹤 ──
         this.browserStartTime = null;
+        this.researchManager = new ResearchManager(this, options.controller || null, options);
     }
 
     // ─── Public API (向後相容) ─────────────────────────────
@@ -366,6 +368,7 @@ class GolemBrain {
         if (result.attachments && result.attachments.length > 0) {
             const { downloadFile } = require('../utils/HttpUtils');
             const path = require('path');
+const ResearchManager = require('../managers/ResearchManager');
             const { v4: uuidv4 } = require('uuid');
 
             const localAttachments = [];
