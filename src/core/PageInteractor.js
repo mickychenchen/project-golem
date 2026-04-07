@@ -596,8 +596,8 @@ class PageInteractor {
         try {
             console.log("🧹 [PageInteractor] 正在物理修剪頁面 DOM 結構以釋放記憶體...");
             await this.page.evaluate(() => {
-                // 涵蓋 Gemini 與主流大模型的前端對話節點特徵
-                const chatNodes = document.querySelectorAll('message-content, model-response, user-message, .message-row, .conversation-turn');
+                // 涵蓋 Gemini 2026 Q1 新版 + 舊版 + 主流大模型的前端對話節點特徵
+                const chatNodes = document.querySelectorAll('pending-request, response-container, .conversation-container, message-content, model-response, user-message, .message-row, .conversation-turn');
                 
                 if (chatNodes.length <= 6) return; // 至少保留最後 6 個節點 (剛好是一兩組合法對話視窗)
                 

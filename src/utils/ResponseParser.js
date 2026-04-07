@@ -28,7 +28,7 @@ class ResponseParser {
 
             if (jsonCandidate && jsonCandidate !== 'null') {
                 try {
-                    const jsonObj = JSON.parse(jsonCandidate);
+                    const jsonObj = JSON.parse(ResponseParser._sanitizeJsonEscapes(jsonCandidate));
                     // 如果 AI 忘記寫陣列 []，自動幫它包起來
                     let steps = Array.isArray(jsonObj) ? jsonObj : (jsonObj.steps || [jsonObj]);
 
@@ -57,7 +57,7 @@ class ResponseParser {
                     const fallbackMatch = jsonCandidate.match(/\[\s*\{[\s\S]*\}\s*\]/) || jsonCandidate.match(/\{[\s\S]*\}/);
                     if (fallbackMatch) {
                         try {
-                            const fixed = JSON.parse(fallbackMatch[0]);
+                            const fixed = JSON.parse(ResponseParser._sanitizeJsonEscapes(fallbackMatch[0]));
                             let steps = Array.isArray(fixed) ? fixed : [fixed];
 
                             steps = steps.map(act => {
@@ -91,7 +91,7 @@ class ResponseParser {
                                 cleanParam = cleanParam.replace(/\n/g, '\\n').replace(/\r/g, '');
 
                                 const reconstructedJson = `[{"action": "${actionTypeMatch[1]}", "parameter": "${cleanParam}"}]`;
-                                const fixed = JSON.parse(reconstructedJson);
+                                const fixed = JSON.parse(ResponseParser._sanitizeJsonEscapes(reconstructedJson));
                                 parsed.actions.push(...fixed);
                                 console.log('🔧 [Parser] 終極正則暴力解析成功！已挽救破碎的 JSON 行動指令。');
                             }
@@ -138,6 +138,21 @@ class ResponseParser {
             if (arrayMatch) return JSON.parse(arrayMatch[0]);
         } catch (e) { console.error("解析 JSON 失敗:", e.message); }
         return [];
+    }
+    /**
+     * [v9.1.20] 終極 HTML/JSON 字串清潔器
+     * AI 回傳的 JSON 裡常有未轉義的換行或控制字元，導致 JSON.parse 崩潰
+     */
+    static _sanitizeJsonEscapes(str) {
+        if (!str || typeof str !== 'string') return str;
+        // ⭐ [v9.2.1] 終極矯正：修復 AI 生成的 JSON 中無效的轉義字元 (如 \d, \m, \e 等)
+        // 只保留合法的 JSON escape sequences: \", \\, \/, \b, \f, \n, \r, \t, \uXXXX
+        return str.replace(/\\(?:(["\\/bfnrt])|u[0-9a-fA-F]{4}|([^"\\/bfnrtu]|$))/g, (match, valid, invalid) => {
+            if (invalid !== undefined) {
+                return '\\\\' + invalid;
+            }
+            return match;
+        });
     }
 }
 
