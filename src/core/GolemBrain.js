@@ -13,6 +13,7 @@ const { ProtocolFormatter } = require('../../packages/protocol');
 const PageInteractor = require('./PageInteractor');
 const ChatLogManager = require('../managers/ChatLogManager');
 const SkillIndexManager = require('../managers/SkillIndexManager');
+const ResearchManager = require('../managers/ResearchManager');
 const NodeRouter = require('./NodeRouter');
 const { URLS } = require('./constants');
 const SendMessageUseCase = require('../application/use-cases/SendMessageUseCase');
@@ -26,6 +27,7 @@ class GolemBrain {
         this.golemId = options.golemId || 'default';
         this.userDataDir = options.userDataDir || path.resolve(ConfigManager.CONFIG.USER_DATA_DIR || './golem_memory');
         this.skillIndex = new SkillIndexManager(this.userDataDir);
+        this.researchManager = new ResearchManager(this, options.controller || null, { golemId: this.golemId, repoRoot: process.cwd() });
 
         // ── 瀏覽器狀態 ──
         this.context = null; // Playwright BrowserContext
