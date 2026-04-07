@@ -75,6 +75,7 @@ const CONFIG = {
     GEMINI_URLS: (process.env.GEMINI_URLS || '').split(',').map(u => cleanEnv(u, true)).filter(u => u),
     MAX_AUTO_TURNS: Number(cleanEnv(process.env.GOLEM_MAX_AUTO_TURNS)) || 5,
     MAX_RESPONSE_WORDS: Number(cleanEnv(process.env.GOLEM_MAX_RESPONSE_WORDS)) || 0,
+    DISABLE_WINDOW_MOVE: process.env.GOLEM_DISABLE_WINDOW_MOVE === 'true',
 };
 
 // 驗證關鍵 Token
@@ -183,6 +184,7 @@ const reloadConfig = () => {
 
     CONFIG.MAX_AUTO_TURNS = Number(cleanEnv(process.env.GOLEM_MAX_AUTO_TURNS)) || 5;
     CONFIG.MAX_RESPONSE_WORDS = Number(cleanEnv(process.env.GOLEM_MAX_RESPONSE_WORDS)) || 0;
+    CONFIG.DISABLE_WINDOW_MOVE = process.env.GOLEM_DISABLE_WINDOW_MOVE === 'true';
 
     // 重新載入 GOLEMS_CONFIG (固定為單機模式)
     GOLEMS_CONFIG.length = 0;

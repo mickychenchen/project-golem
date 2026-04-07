@@ -3,6 +3,7 @@
 // ============================================================
 const { TIMINGS, LIMITS } = require('./constants');
 const { ResponseExtractor } = require('../../packages/protocol');
+const ConfigManager = require('../config');
 
 // 共用的按鈕偵測關鍵字 (供 autoClick 快速點擊使用)
 const WORKSPACE_SAVE_KEYWORDS = ['儲存活動', '儲存', '建立', '建立活動', 'Save event', 'Save', 'Create'];
@@ -15,6 +16,7 @@ class PageInteractor {
     constructor(page, doctor) {
         this.page = page;
         this.doctor = doctor;
+        this._hasAttemptedMaximize = false;
     }
 
     /**
@@ -49,6 +51,12 @@ class PageInteractor {
                 const { exec } = require('child_process');
                 exec(`osascript -e 'tell application "System Events" to set visible of process "Google Chrome for Testing" to false' >/dev/null 2>&1`);
                 exec(`osascript -e 'tell application "System Events" to set visible of process "Google Chrome" to false' >/dev/null 2>&1`);
+            }
+
+            // 🌟 [VPS/VNC 模式優化] 若停用了自動位移，則確保視窗在第一次互動時最大化，避免起始狀態過小
+            if (ConfigManager.CONFIG.DISABLE_WINDOW_MOVE === true && !this._hasAttemptedMaximize) {
+                await this._maximizeWindow();
+                this._hasAttemptedMaximize = true;
             }
 
             // 0. 確保頁面處於空閒狀態 (避免前一則訊息還在發送中)
@@ -327,6 +335,12 @@ class PageInteractor {
         // ✨ [Headless 優化] 若為無頭模式，不需要移動視窗
         if (process.env.PLAYWRIGHT_HEADLESS === 'true') return;
 
+        // 🛡️ [安全性中心] 若使用者在 .env 中停用了自動位移功能 (例如在 VPS VNC 模式下)
+        if (ConfigManager.CONFIG.DISABLE_WINDOW_MOVE === true) {
+            console.log("ℹ️ [PageInteractor] 自動位移功能已停用，保持視窗位置原始狀態。");
+            return;
+        }
+
         try {
             console.log("⚓ [PageInteractor] 正在將 Chrome 視窗自動移動至隱藏位置...");
             
@@ -359,6 +373,29 @@ class PageInteractor {
             console.log("✅ [PageInteractor] 視窗已成功移動。");
         } catch (e) {
             console.warn(`⚠️ [PageInteractor] 視窗移動失敗: ${e.message}`);
+        }
+    }
+
+    /**
+     * 🚀 強制最大化瀏覽器視窗 (適用於 VPS / VNC 環境)
+     */
+    async _maximizeWindow() {
+        try {
+            console.log("📺 [PageInteractor] 偵測到停用位移模式，正在嘗試將瀏覽器視窗最大化...");
+            
+            if (!this._persistedCdpSession) {
+                this._persistedCdpSession = await this.page.context().newCDPSession(this.page);
+            }
+            const session = this._persistedCdpSession;
+            const { windowId } = await session.send('Browser.getWindowForTarget');
+
+            await session.send('Browser.setWindowBounds', {
+                windowId,
+                bounds: { windowState: 'maximized' }
+            });
+            console.log("✅ [PageInteractor] 視窗已成功最大化。");
+        } catch (e) {
+            console.warn(`⚠️ [PageInteractor] 視窗最大化失敗: ${e.message}`);
         }
     }
 
