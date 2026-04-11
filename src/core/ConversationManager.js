@@ -194,12 +194,14 @@ class ConversationManager {
         const task = this.queue.shift();
 
         // 🧹 [Extra Arch 3] Memory Guard 記憶體上限監控
+        const v8 = require("v8");
+        const heapStats = v8.getHeapStatistics();
         const heapObj = process.memoryUsage();
-        const heapRatio = heapObj.heapUsed / heapObj.heapTotal;
+        const heapRatio = heapObj.heapUsed / heapStats.heap_size_limit;
         if (heapRatio > 0.8) {
             const usedMB = Math.round(heapObj.heapUsed / 1024 / 1024);
-            const totalMB = Math.round(heapObj.heapTotal / 1024 / 1024);
-            console.warn(`⚠️ [Memory Guard] 堆疊記憶體使用率達 ${(heapRatio * 100).toFixed(1)}% (${usedMB}MB / ${totalMB}MB)，強制觸發系統回收...`);
+            const limitMB = Math.round(heapStats.heap_size_limit / 1024 / 1024);
+            console.warn(`⚠️ [Memory Guard] 堆疊實體使用率達 ${(heapRatio * 100).toFixed(1)}% (${usedMB}MB / ${limitMB}MB)，強制觸發系統回收...`);
             if (global.gc) global.gc();
         }
 

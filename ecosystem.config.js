@@ -4,9 +4,9 @@ module.exports = {
         script: 'apps/runtime/index.js',
         args: 'dashboard',
         cwd: '/home/ubuntu/project-golem',
-        node_args: '--expose-gc --max-old-space-size=512',
+        node_args: '--expose-gc --max-old-space-size=1024',
         env: {
-            NODE_OPTIONS: '--expose-gc --max-old-space-size=512',
+            NODE_OPTIONS: '--expose-gc --max-old-space-size=1024',
         },
         watch: false,
         autorestart: true,
