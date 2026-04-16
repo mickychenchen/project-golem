@@ -3,6 +3,7 @@ const HelpManager = require('../managers/HelpManager');
 const skills = require('../skills');
 const skillManager = require('../managers/SkillManager');
 const SkillArchitect = require('../managers/SkillArchitect');
+const wikiSkill = require('../skills/core/wiki');
 
 // ✨ [v9.1 Addon] 初始化技能架構師 (Web Gemini Mode)
 // 注意：這裡不傳入 Model，因為我們將在 NodeRouter 中傳入 Web Brain
@@ -204,6 +205,20 @@ class NodeRouter {
         }
 
         if (text.startsWith('/patch') || text.includes('優化代碼')) return false;
+
+        // ── /wiki 指令 ───────────────────────────────────────────
+        if (text.startsWith('/wiki')) {
+            const parts  = text.slice(5).trim().split(/\s+/);
+            const action = parts[0] || 'help';
+            const input  = parts.slice(1).join(' ');
+            try {
+                const result = await wikiSkill.run({ args: { action, input }, brain });
+                return await reply(result);
+            } catch (e) {
+                return await reply(`❌ [Wiki] 執行失敗: ${e.message}`);
+            }
+        }
+
         return false;
     }
 }

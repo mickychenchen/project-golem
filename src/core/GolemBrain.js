@@ -13,6 +13,7 @@ const PageInteractor = require('./PageInteractor');
 const ChatLogManager = require('../managers/ChatLogManager');
 const SkillIndexManager = require('../managers/SkillIndexManager');
 const NodeRouter = require('./NodeRouter');
+const WikiManager = require('../managers/WikiManager');
 const { URLS } = require('./constants');
 
 // ============================================================
@@ -60,6 +61,10 @@ class GolemBrain {
             golemId: this.golemId,
             logDir: options.logDir || ConfigManager.LOG_BASE_DIR
         });
+
+        // ── Wiki 知識庫 ──
+        this.wikiManager = new WikiManager(this.userDataDir);
+        this.wikiManager.init();
 
         // ── Backend Selection ──
         this.backend = ConfigManager.CONFIG.GOLEM_BACKEND || 'gemini';
@@ -564,6 +569,19 @@ class GolemBrain {
             console.log(`🧠 [Memory] 已成功將技能載入長期記憶中！`);
         }
 
+        // 📖 [第零階段 Phase 0] Wiki 知識庫注入 (最高密度先驗知識)
+        try {
+            const wikiContext = this.wikiManager.getInjectionContext();
+            if (wikiContext) {
+                await this.sendMessage(wikiContext, false);
+                console.log(`📖 [Brain] Phase 0：Wiki 知識庫已注入 (${wikiContext.length} 字元)`);
+            } else {
+                console.log(`ℹ️ [Brain] Phase 0：Wiki 尚無頁面，跳過注入。`);
+            }
+        } catch (e) {
+            console.warn(`⚠️ [Brain] Wiki 知識庫注入失敗: ${e.message}`);
+        }
+
         // 🚀 [第一階段] 發送底層系統協議 (不含歷史摘要)
         const compressedPrompt = ProtocolFormatter.compress(systemPrompt);
         await this.sendMessage(compressedPrompt, false); // ⚡ 改為 false：等待完整回應
@@ -748,6 +766,63 @@ class GolemBrain {
             // 重新初始化 (forceReload = true)
             await this.init(true);
             console.log("✅ [Brain] 自癒初始化完成。");
+        }
+    }
+    /**
+     * 📖 _wikiChat — Wiki 專用的輕量 LLM 呼叫
+     *
+     * 與 sendMessage() 的差異：
+     * - 不使用 ProtocolFormatter 包裝 payload（避免 LLM 輸出 [GOLEM_ACTION]）
+     * - 不走 NodeRouter 攔截
+     * - 回傳純字串，不觸發 NeuroShunter 協議解析
+     * - 由 wiki.js 自行清洗回應並存檔
+     *
+     * @param {string} prompt - 純文字提示詞
+     * @returns {Promise<string>} LLM 原始回應文字
+     */
+    async _wikiChat(prompt) {
+        this.backend = ConfigManager.CONFIG.GOLEM_BACKEND || this.backend || 'gemini';
+
+        // Ollama 後端：直接呼叫 ollamaClient，完全不涉及頁面
+        if (this.backend === 'ollama') {
+            if (!this.ollamaClient) this.ollamaClient = new OllamaClient();
+            const text = await this.ollamaClient.chat(prompt, {
+                model: ConfigManager.CONFIG.OLLAMA_BRAIN_MODEL,
+            });
+            return text || '';
+        }
+
+        // Gemini Web 後端：使用 buildEnvelope 包裝 prompt，
+        // 讓 PageInteractor 的 startTag/endTag 與 Gemini 輸出的標籤完全吻合。
+        // 若不包裝，Gemini 會用自己產生的 reqId，導致標籤不符、PageInteractor 掛起。
+        await this._ensureBrowserHealth();
+        if (!this.context || !this.isInitialized) await this.init();
+        try { await this.page.bringToFront(); } catch (e) { }
+        await this.setupCDP();
+
+        const reqId    = ProtocolFormatter.generateReqId();
+        const startTag = ProtocolFormatter.buildStartTag(reqId);
+        const endTag   = ProtocolFormatter.buildEndTag(reqId);
+        // buildEnvelope 讓 Gemini 在回應裡回顯相同 reqId，PageInteractor 才能找到邊界
+        const payload  = ProtocolFormatter.buildEnvelope(prompt, reqId, {});
+
+        const interactor = new PageInteractor(this.page, this.doctor);
+        try {
+            const result = await interactor.interact(
+                payload, this.selectors, false, startTag, endTag, 0, null
+            );
+            return typeof result === 'string' ? result : (result.text || '');
+        } catch (e) {
+            if (e.message && e.message.startsWith('SELECTOR_HEALED:')) {
+                const [, type, newSelector] = e.message.split(':');
+                this.selectors[type] = newSelector;
+                this.doctor.saveSelectors(this.selectors);
+                const result2 = await interactor.interact(
+                    payload, this.selectors, false, startTag, endTag, 1, null
+                );
+                return typeof result2 === 'string' ? result2 : (result2.text || '');
+            }
+            throw e;
         }
     }
 }
