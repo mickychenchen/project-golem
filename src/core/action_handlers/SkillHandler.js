@@ -2,7 +2,38 @@ const skillManager = require('../../managers/SkillManager');
 const MCPManager   = require('../../mcp/MCPManager');
 
 class SkillHandler {
-    static async execute(ctx, act, brain) {
+    static async execute(ctx, act, brain, controller) {
+        // ✨ [v9.1] 整合行動產線：將 Observation 放入對話產線
+        let convoManager = null;
+        if (controller && controller.golemId) {
+            try {
+                const getOrCreate =
+                    (typeof global.getOrCreateGolem === 'function' && global.getOrCreateGolem) ||
+                    require('../../../index').getOrCreateGolem;
+                const instance = getOrCreate(controller.golemId);
+                convoManager = instance.convoManager;
+            } catch (e) {
+                console.warn('[SkillHandler] 無法取得產線系統', e.message);
+            }
+        }
+
+        const sendFeedback = async (message) => {
+            const feedbackPrompt = `[System Observation]\n${message}\n\nPlease reply to user naturally using [GOLEM_REPLY].`;
+            if (convoManager) {
+                const isAuto = process.env.GOLEM_AUTO_APPROVE_ALL === 'true';
+                const isSilent = process.env.GOLEM_SILENT_AUTO_APPROVE === 'true';
+                const feedbackOptions = { 
+                    isPriority: true, 
+                    bypassDebounce: true,
+                    isSystemFeedback: true,
+                    suppressReply: isAuto && isSilent
+                };
+                await convoManager.enqueue(ctx, feedbackPrompt, feedbackOptions);
+            } else if (brain && typeof brain.sendMessage === 'function') {
+                brain.sendMessage(feedbackPrompt).catch(err => console.warn('[SkillHandler] Fallback sendFeedback error:', err));
+            }
+        };
+
         // ─── MCP Tool Call ─────────────────────────────────────────────
         if (act.action === 'mcp_call') {
             const { server, tool, parameters = {} } = act;
@@ -31,8 +62,10 @@ class SkillHandler {
                     displayResult = displayResult.slice(0, MAX_LEN) + '\n...(已截斷)';
                 }
                 await ctx.reply(`✅ [MCP:${server}/${tool}]\n${displayResult}`);
+                await sendFeedback(`[MCP Result - ${server}/${tool}]\n${displayResult}`);
             } catch (e) {
                 await ctx.reply(`❌ [MCP] 執行錯誤: ${e.message}`);
+                await sendFeedback(`[MCP Error - ${server}/${tool}]\n${e.message}`);
             }
             return true;
         }
@@ -59,9 +92,13 @@ class SkillHandler {
                         ? result.slice(0, MAX_RESULT_LENGTH) + '\n...(已截斷)'
                         : result;
                     await ctx.reply(`✅ 技能回報: ${displayResult}`);
+                    await sendFeedback(`[Skill Result - ${dynamicSkill.name}]\n${displayResult}`);
+                } else {
+                    await sendFeedback(`[Skill Result - ${dynamicSkill.name}]\n(無回傳值)`);
                 }
             } catch (e) {
                 await ctx.reply(`❌ 技能執行錯誤: ${e.message}`);
+                await sendFeedback(`[Skill Error - ${dynamicSkill.name}]\n${e.message}`);
             }
             return true; // Indicates the skill was handled
         }
