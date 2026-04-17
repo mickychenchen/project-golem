@@ -3,6 +3,7 @@ const path = require('path');
 const util = require('util');
 const { LOG_RETENTION_MS, MEMORY_TIERS } = require('../core/constants');
 const ResponseParser = require('../utils/ResponseParser');
+const TrajectoryCompressor = require('./TrajectoryCompressor');
 
 let sqlite3Instance = null;
 
@@ -415,6 +416,78 @@ class ChatLogManager {
     }
 
 
+
+    // ============================================================
+    // 🗜️ Trajectory Compression (Hermes-inspired)
+    // ============================================================
+
+    /**
+     * 壓縮指定日期的原始 messages（依輪次動態壓縮中段）
+     * 與 compressLogsForDate 的 LLM 摘要不同：這是即時的輪次瘦身，
+     * 不產生 summaries 記錄，而是更新 messages 內容。
+     *
+     * @param {object} brain  - GolemBrain 實體
+     * @param {object} [opts] - TrajectoryCompressor 選項
+     * @returns {Promise<{ compressed: boolean, savedChars: number }>}
+     */
+    async compressCurrentSession(brain, opts = {}) {
+        if (!this._isInitialized || !this.db) {
+            return { compressed: false, savedChars: 0 };
+        }
+
+        // 讀取最近 72 小時的 messages
+        const messages = await this.allAsync(
+            `SELECT id, sender, content, role FROM messages ORDER BY timestamp ASC LIMIT 2000`
+        );
+
+        if (!messages || messages.length === 0) {
+            return { compressed: false, savedChars: 0 };
+        }
+
+        const turns = TrajectoryCompressor.fromChatLogMessages(messages);
+
+        const compressor = new TrajectoryCompressor(brain, {
+            targetChars: opts.targetChars || 80000,
+            summaryTargetChars: opts.summaryTargetChars || 1500,
+            protectFirstTurns: opts.protectFirstTurns || 3,
+            protectLastTurns: opts.protectLastTurns || 5,
+        });
+
+        const result = await compressor.compress(turns);
+
+        if (!result.compressed) {
+            return { compressed: false, savedChars: 0 };
+        }
+
+        // 找出被壓縮換掉的訊息（原始 id 列表 vs 壓縮後數量）
+        // 策略：清空 messages、寫回壓縮後的 turns（保留結構）
+        try {
+            await this.runAsync('BEGIN TRANSACTION');
+
+            // 刪除舊訊息
+            await this.runAsync(`DELETE FROM messages WHERE id IN (SELECT id FROM messages ORDER BY timestamp ASC LIMIT ?)`, [messages.length]);
+
+            // 寫回壓縮後的輪次
+            const now = Date.now();
+            for (const turn of result.turns) {
+                const dateString = new Date(now).toISOString().slice(0, 10).replace(/-/g, '');
+                const hourString = dateString + String(new Date(now).getHours()).padStart(2, '0');
+                await this.runAsync(
+                    `INSERT INTO messages (timestamp, date_string, hour_string, sender, content, type, role, is_system)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                    [now, dateString, hourString, turn.role, turn.content, 'compressed', turn.role, turn.role === 'system' ? 1 : 0]
+                );
+            }
+
+            await this.runAsync('COMMIT');
+            console.log(`🗜️ [ChatLogManager] compressCurrentSession 完成：節省 ${result.savedChars} 字元`);
+            return { compressed: true, savedChars: result.savedChars };
+        } catch (e) {
+            await this.runAsync('ROLLBACK').catch(() => {});
+            console.error(`❌ [ChatLogManager] compressCurrentSession 失敗:`, e.message);
+            return { compressed: false, savedChars: 0 };
+        }
+    }
 
     async readTierAsync(tier, limit = 50, maxChars = 200000) {
         if (!this._isInitialized || !this.db) return [];

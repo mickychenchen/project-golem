@@ -15,6 +15,7 @@ const SkillIndexManager = require('../managers/SkillIndexManager');
 const NodeRouter = require('./NodeRouter');
 const WikiManager = require('../managers/WikiManager');
 const { URLS } = require('./constants');
+const { withRetry } = require('../utils/RetryUtils');
 
 // ============================================================
 // 🧠 Golem Brain (Gemini Web + Ollama) - Dual-Engine + Titan Protocol
@@ -686,24 +687,20 @@ class GolemBrain {
         }
 
         let lastError = null;
-        let attempt = 0;
         for (const url of urls) {
             try {
-                if (attempt > 0) {
-                    const delay = Math.min(1000 * Math.pow(2, attempt), 10000); // 最大延遲 10 秒
-                    console.log(`⏳ [Brain] 等待 ${delay}ms 後重試連線...`);
-                    await new Promise(r => setTimeout(r, delay));
-                }
-                attempt++;
-                console.log(`📡 [Brain] 正在嘗試導航至: ${url}`);
-                // 等待 domcontentloaded 以確保基本結構已載入
-                await this.page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000 });
-                console.log(`✅ [Brain] 成功導航至: ${url}`);
+                await withRetry(
+                    async () => {
+                        console.log(`📡 [Brain] 正在嘗試導航至: ${url}`);
+                        await this.page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000 });
+                        console.log(`✅ [Brain] 成功導航至: ${url}`);
+                    },
+                    { maxRetries: 2, baseDelayMs: 1500, maxDelayMs: 10000, label: `navigate:${backend}` }
+                );
                 return; // 成功則退出
             } catch (e) {
                 console.warn(`⚠️ [Brain] 導航至 ${url} 失敗: ${e.message}`);
                 lastError = e;
-                // 繼續嘗試下一個 URL
             }
         }
 
@@ -824,6 +821,18 @@ class GolemBrain {
             }
             throw e;
         }
+    }
+    /**
+     * 🗜️ 壓縮目前會話的確認歷史訊息（公開方法）
+     * 供 Dashboard 、自主模式、使用者手動觸發
+     * @param {object} [opts] - TrajectoryCompressor 選項
+     * @returns {Promise<{ compressed: boolean, savedChars: number }>}
+     */
+    async compressSession(opts = {}) {
+        if (!this.chatLogManager || !this.chatLogManager._isInitialized) {
+            return { compressed: false, savedChars: 0 };
+        }
+        return this.chatLogManager.compressCurrentSession(this, opts);
     }
 }
 

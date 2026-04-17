@@ -219,6 +219,49 @@ class NodeRouter {
             }
         }
 
+        // ── /compress 指令 ─────────────────────────────────────────
+        // Hermes-inspired: 手動觸發 TrajectoryCompressor 壓縮目前會話
+        if (text === '/compress' || text.startsWith('/compress ')) {
+            if (!brain || !brain.compressSession) {
+                return await reply('❌ [Compress] 大腦未初始化，無法執行壓縮。');
+            }
+            await reply('🗜️ 正在壓縮當前會話記憶，請稍候...');
+            try {
+                const result = await brain.compressSession();
+                if (result.compressed) {
+                    return await reply(`✅ **會話壓縮完成！**\n📉 節省了 **${result.savedChars.toLocaleString()}** 字元的上下文空間。`);
+                } else {
+                    return await reply('ℹ️ 當前會話尚未超過壓縮門檻，或無可壓縮的中段內容。');
+                }
+            } catch (e) {
+                return await reply(`❌ 壓縮失敗: ${e.message}`);
+            }
+        }
+
+        // ── /search 指令 ────────────────────────────────────────────
+        // Hermes-inspired: 快速搜尋歷史對話記錄
+        if (text.startsWith('/search ') || text.startsWith('/search\n')) {
+            const query = text.replace(/^\/search\s*/i, '').trim();
+            if (!query) {
+                return await reply('🔍 用法：`/search <關鍵字>` 或使用 `/search <關鍵字> --days 60`\n例如：`/search memory bug`');
+            }
+            // 解析可選的 --days 參數
+            const daysMatch = query.match(/--days\s+(\d+)/);
+            const days = daysMatch ? parseInt(daysMatch[1]) : 30;
+            const cleanQuery = query.replace(/--days\s+\d+/i, '').trim();
+
+            try {
+                const searchSkill = require('../skills/core/session-search');
+                const result = await searchSkill.run({
+                    args: { query: cleanQuery, mode: 'keyword', days },
+                    brain
+                });
+                return await reply(result);
+            } catch (e) {
+                return await reply(`❌ 搜尋失敗: ${e.message}`);
+            }
+        }
+
         return false;
     }
 }
