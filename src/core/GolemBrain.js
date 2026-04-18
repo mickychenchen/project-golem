@@ -18,6 +18,8 @@ const { URLS } = require('./constants');
 const { withRetry } = require('../utils/RetryUtils');
 const UserProfileManager = require('../managers/UserProfileManager');
 const { toolsetManager } = require('../managers/ToolsetManager');
+const { hookSystem } = require('./HookSystem'); // ⚡ [OpenHarness-inspired] Global Hook System
+
 
 // ============================================================
 // 🧠 Golem Brain (Gemini Web + Ollama) - Dual-Engine + Titan Protocol
@@ -83,6 +85,10 @@ class GolemBrain {
 
         // ── [Phase 2] 場景化工具集管理 ──
         this.toolsetManager = toolsetManager;
+
+        // ── [OpenHarness-inspired] Hook System ──────────────────
+        // 全域單例，各模組可透過 brain.hookSystem 掛載 pre/post_tool_use handler
+        this.hookSystem = hookSystem;
     }
 
     // ─── Public API (向後相容) ─────────────────────────────

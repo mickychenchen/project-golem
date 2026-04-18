@@ -3,6 +3,7 @@ const Introspection = require('../services/Introspection');
 const ResponseParser = require('../utils/ResponseParser');
 const PatchManager = require('../managers/PatchManager');
 const { NeuroShunter } = require('../../packages/protocol');
+const PermissionChecker = require('../core/PermissionChecker'); // 🛡️ [OpenHarness-inspired]
 const path = require('path');
 const fs = require('fs');
 
@@ -310,6 +311,12 @@ class AutonomyManager {
         return fakeCtx;
     }
     async run(taskName, type) {
+        // 🛡️ [OpenHarness-inspired] 自主模式安全閃：禁止自動執行高風險技能
+        const permCheck = PermissionChecker.isAllowedAutonomy(type);
+        if (!permCheck.allowed) {
+            console.warn(`🛡️ [Permission][${this.golemId}] 自主任務被攔截: type="${type}" — ${permCheck.reason}`);
+            return;
+        }
         console.log(`🤖 自主行動: ${taskName}`);
         const prompt = `[系統指令: ${type}]\n任務：${taskName}\n請執行並使用標準格式回報。`;
         const raw = await this.brain.sendMessage(prompt);

@@ -237,6 +237,34 @@ class ChatLogManager {
         );
     }
 
+    /**
+     * 📊 [OpenHarness-inspired] Skill Execution Trace
+     * 記錄技能執行軌跡（type='skill_trace'），不污染主對話流。
+     * @param {{ skill: string, trigger: string, durationMs: number, result_summary: string }} trace
+     */
+    appendTrace(trace) {
+        if (!this._isInitialized || !this.db) return;
+
+        const now = new Date();
+        const dateString = this._formatDate(now);
+        const hourString = dateString + String(now.getHours()).padStart(2, '0');
+        const content = JSON.stringify({
+            skill: trace.skill || 'unknown',
+            trigger: (trace.trigger || '').slice(0, 200),
+            durationMs: trace.durationMs || 0,
+            result_summary: (trace.result_summary || '').slice(0, 300),
+        });
+
+        this.db.run(
+            `INSERT INTO messages (timestamp, date_string, hour_string, sender, content, type, role, is_system)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            [Date.now(), dateString, hourString, 'SkillTrace', content, 'skill_trace', 'system', 1],
+            (err) => {
+                if (err) console.error('❌ [LogManager] Skill Trace 寫入失敗:', err.message);
+            }
+        );
+    }
+
     // ============================================================
     // 🧹 分層清理
     // ============================================================

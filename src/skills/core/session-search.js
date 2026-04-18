@@ -217,6 +217,13 @@ function _extractKeywords(query) {
 module.exports = {
     name: 'session_search',
     description: '搜尋 Golem 的歷史對話記錄，支援 fts（FTS5 全文）/ keyword / semantic / date 四種模式',
+    paramsSchema: {
+        query:      { type: 'string', description: '搜尋關鍵字（date 模式不需要）' },
+        mode:       { type: 'string', enum: ['fts', 'keyword', 'semantic', 'date'], description: '預設 keyword' },
+        days:       { type: 'number', description: '往前追溯天數，預設 30' },
+        start_date: { type: 'string', description: 'date 模式的開始日期 (YYYYMMDD)' },
+        end_date:   { type: 'string', description: 'date 模式的結束日期 (YYYYMMDD)，對不填則至今' }
+    },
     run,
 };
 

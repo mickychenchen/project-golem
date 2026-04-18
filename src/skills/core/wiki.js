@@ -367,6 +367,11 @@ async function run(ctx) {
 module.exports = {
     name:        'wiki',
     description: '結構化知識 Wiki 維護系統',
+    paramsSchema: {
+        action: { type: 'string', enum: ['save', 'read', 'list', 'search', 'lint', 'log', 'delete'], required: true,
+                  description: 'save=儲存知識, read=讀取, list=列表, search=搜尋, lint=健康檢查, log=日誌, delete=刪除' },
+        input:  { type: 'string', description: '主題名稱/頁面路徑/搜尋關鍵字（list/lint/log 指令不需要）' }
+    },
     run,
     PROMPT: `
 【已載入技能：Wiki 知識庫管理員】

@@ -5,6 +5,7 @@ const skillManager = require('../managers/SkillManager');
 const SkillArchitect = require('../managers/SkillArchitect');
 const wikiSkill = require('../skills/core/wiki');
 const { toolsetManager, SCENE_TOOLSETS } = require('../managers/ToolsetManager');
+const { hookSystem } = require('./HookSystem'); // ⚡ [OpenHarness-inspired]
 
 // ✨ [v9.1 Addon] 初始化技能架構師 (Web Gemini Mode)
 // 注意：這裡不傳入 Model，因為我們將在 NodeRouter 中傳入 Web Brain
@@ -212,10 +213,21 @@ class NodeRouter {
             const parts  = text.slice(5).trim().split(/\s+/);
             const action = parts[0] || 'help';
             const input  = parts.slice(1).join(' ');
+            // ⚡ [OpenHarness-inspired] Skill Execution Trace + Hook
+            const hookCtx = { type: 'skill', name: 'wiki', trigger: text, _startMs: Date.now() };
+            await hookSystem.emit('pre_tool_use', hookCtx);
             try {
                 const result = await wikiSkill.run({ args: { action, input }, brain });
+                await hookSystem.emit('post_tool_use', hookCtx, { output: result });
+                if (brain && brain.chatLogManager) {
+                    brain.chatLogManager.appendTrace({
+                        skill: 'wiki', trigger: text, durationMs: Date.now() - hookCtx._startMs,
+                        result_summary: String(result || '').slice(0, 150)
+                    });
+                }
                 return await reply(result);
             } catch (e) {
+                await hookSystem.emit('post_tool_use', hookCtx, { error: e.message });
                 return await reply(`❌ [Wiki] 執行失敗: ${e.message}`);
             }
         }
@@ -251,14 +263,25 @@ class NodeRouter {
             const days = daysMatch ? parseInt(daysMatch[1]) : 30;
             const cleanQuery = query.replace(/--days\s+\d+/i, '').trim();
 
+            // ⚡ [OpenHarness-inspired] Skill Execution Trace + Hook
+            const hookCtx = { type: 'skill', name: 'session-search', trigger: text, _startMs: Date.now() };
+            await hookSystem.emit('pre_tool_use', hookCtx);
             try {
                 const searchSkill = require('../skills/core/session-search');
                 const result = await searchSkill.run({
                     args: { query: cleanQuery, mode: 'keyword', days },
                     brain
                 });
+                await hookSystem.emit('post_tool_use', hookCtx, { output: result });
+                if (brain && brain.chatLogManager) {
+                    brain.chatLogManager.appendTrace({
+                        skill: 'session-search', trigger: text, durationMs: Date.now() - hookCtx._startMs,
+                        result_summary: String(result || '').slice(0, 150)
+                    });
+                }
                 return await reply(result);
             } catch (e) {
+                await hookSystem.emit('post_tool_use', hookCtx, { error: e.message });
                 return await reply(`❌ 搜尋失敗: ${e.message}`);
             }
         }
