@@ -22,6 +22,7 @@ const MANDATORY_SKILLS = [
     'tool-explorer',
     'adaptive-learning',
     'reflection',
+    'session-search',  // 🔍 Hermes-inspired: 歷史對話語意搜尋
 ];
 
 const OPTIONAL_SKILLS = [

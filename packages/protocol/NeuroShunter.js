@@ -84,7 +84,7 @@ class NeuroShunter {
                         break;
                     default:
                         // 檢查是否為動態擴充技能
-                        const isSkillHandled = await SkillHandler.execute(ctx, act, brain);
+                        const isSkillHandled = await SkillHandler.execute(ctx, act, brain, controller);
                         if (!isSkillHandled) {
                             // 若不是已知框架 Action 和非動態技能，則視為底層 Shell 指令
                             normalActions.push(act);

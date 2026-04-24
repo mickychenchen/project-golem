@@ -3,6 +3,15 @@ const Executor = require('./Executor');
 const { SecurityManager } = require('../../packages/security');
 const ToolScanner = require('../managers/ToolScanner');
 const InteractiveMultiAgent = require('./InteractiveMultiAgent');
+const NodeRouter = require('./NodeRouter');
+
+// Golem 內建斜線指令前綴（以 /wiki、/learn、/skills … 開頭的指令）
+// 凡是符合此清單的指令，直接由 NodeRouter 處理，不送進 shell。
+const GOLEM_SLASH_PREFIXES = [
+    '/wiki', '/learn', '/skills', '/callme', '/help', '/menu',
+    '/export', '/donate', '/support', '/update', '/reset',
+    '/model', '/reload', '/patch',
+];
 
 // ============================================================
 // ⚡ Task Controller (閉環回饋版)
@@ -89,6 +98,23 @@ class TaskController {
                     }
                 }
             }
+            // ── Golem 內建斜線指令攔截 ──────────────────────────────
+            // /wiki、/learn 等指令不屬於 shell，直接由 NodeRouter 內部處理。
+            const isGolemSlash = cmdToRun.startsWith('/') &&
+                GOLEM_SLASH_PREFIXES.some(prefix => cmdToRun.startsWith(prefix));
+
+            if (isGolemSlash) {
+                console.log(`🔀 [TaskController] Golem 內建指令攔截: ${cmdToRun}`);
+                try {
+                    const result = await NodeRouter.handle({ text: cmdToRun, isAdmin: true }, ctx.brain);
+                    const output = result || '（指令已執行，無輸出）';
+                    reportBuffer.push(`[Step ${i + 1} Success] cmd: ${cmdToRun}\nResult:\n${output}`);
+                } catch (e) {
+                    reportBuffer.push(`[Step ${i + 1} Failed] cmd: ${cmdToRun}\nError:\n${e.message}`);
+                }
+                continue; // 跳過後續 shell 執行邏輯
+            }
+
             const risk = this.security.assess(cmdToRun);
             if (cmdToRun.startsWith('golem-check')) {
                 const toolName = cmdToRun.split(' ')[1];

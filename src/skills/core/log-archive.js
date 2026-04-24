@@ -42,5 +42,9 @@ async function run(ctx) {
 module.exports = {
     name: "log_archive",
     description: "手動壓縮與摘要指定日期的日誌",
+    paramsSchema: {
+        date: { type: 'string', description: '要壓縮的日期 (YYYYMMDD)，不填則預設昨日' }
+    },
     run: run
 };
+
