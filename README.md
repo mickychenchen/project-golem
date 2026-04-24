@@ -193,6 +193,9 @@ npm run arch:check
 | `/new` | 重置對話並載入相關記憶 |
 | `/learn <功能>` | 讓 AI 自動學習並生成新技能 |
 | `/skills` | 列出所有已安裝的技能 |
+| `/research start <json｜自然語句>` | 啟動 autoresearch 迴圈（可只輸入主題，系統會自動補齊預設） |
+| `/research status` | 查詢研究任務狀態、最佳分數與最佳 commit |
+| `/research stop` | 在當前回合結束後優雅停止研究任務 |
 
 ---
 

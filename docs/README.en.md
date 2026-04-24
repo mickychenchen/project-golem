@@ -180,6 +180,9 @@ npm run arch:check
 | `/new` | Reset conversation and load relevant memory |
 | `/learn <feature>` | Have the AI automatically learn and generate a new skill |
 | `/skills` | List all installed skills |
+| `/research start <json|natural-args>` | Start an autoresearch loop (topic-only input is supported with auto defaults) |
+| `/research status` | Show current research status, best score, and best commit |
+| `/research stop` | Gracefully stop the active research run after the current round |
 
 ---
 

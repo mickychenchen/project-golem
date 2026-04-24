@@ -66,8 +66,18 @@ module.exports = {
         fullPrompt += "\n📚 **技能詳細手冊:**\n";
         for (const [name, module] of Object.entries(currentSkills)) {
             const prompt = typeof module === 'string' ? module : (module.PROMPT || "");
-            if (prompt) {
-                fullPrompt += `\n--- Skill: ${name} ---\n${prompt}\n`;
+            if (!prompt) continue;
+
+            fullPrompt += `\n--- Skill: ${name} ---\n${prompt}`;
+
+            // 📋 [OpenHarness-inspired] paramsSchema 自動附加參數說明
+            if (module.paramsSchema && typeof module.paramsSchema === 'object') {
+                const schemaLines = Object.entries(module.paramsSchema).map(([param, def]) => {
+                    const req = def.required ? '(必填)' : '(選填)';
+                    const enumStr = def.enum ? ` 可選值: [${def.enum.join('|')}]` : '';
+                    return `  - ${param} ${req}: ${def.description || ''}${enumStr}`;
+                });
+                fullPrompt += `\n📌 **參數格式**:\n${schemaLines.join('\n')}\n`;
             }
         }
 
